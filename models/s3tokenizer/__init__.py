@@ -6,3 +6,8 @@ from models.s3tokenizer.s3tokenizer import (
     SPEECH_VOCAB_SIZE,
     S3Tokenizer,
 )
+
+
+def drop_invalid_tokens(x):
+    assert len(x.shape) <= 2 and x.shape[0] == 1, "only batch size of one allowed for now"
+    return x[x < SPEECH_VOCAB_SIZE]
