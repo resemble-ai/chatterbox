@@ -12,7 +12,7 @@ from transforms.spectrogram import melspectrogram
 from transforms.syn_transforms import pack
 
 
-class VoiceEncHParams:
+class VoiceEncConfig:
     num_mels = 40
     sample_rate = 16000
     speaker_embed_size = 256
@@ -35,7 +35,7 @@ def get_num_wins(
     n_frames: int,
     step: int,
     min_coverage: float,
-    hp: VoiceEncHParams,
+    hp: VoiceEncConfig,
 ):
     assert n_frames > 0
     win_size = hp.ve_partial_frames
@@ -49,7 +49,7 @@ def get_num_wins(
 def get_frame_step(
     overlap: float,
     rate: float,
-    hp: VoiceEncHParams,
+    hp: VoiceEncConfig,
 ):
     # Compute how many frames separate two partial utterances
     assert 0 <= overlap < 1
@@ -63,7 +63,7 @@ def get_frame_step(
 
 def stride_as_partials(
     mel: np.ndarray,
-    hp: VoiceEncHParams,
+    hp: VoiceEncConfig,
     overlap=0.5,
     rate: float=None,
     min_coverage=0.8,
@@ -97,7 +97,7 @@ def stride_as_partials(
 
 
 class VoiceEncoder(nn.Module):
-    def __init__(self, hp: VoiceEncHParams):
+    def __init__(self, hp=VoiceEncConfig()):
         super().__init__()
 
         self.hp = hp
@@ -224,7 +224,12 @@ class VoiceEncoder(nn.Module):
         return self.utt_to_spk_embed(utt_embeds) if as_spk else utt_embeds
 
     def embeds_from_wavs(
-        self, wavs: List[np.ndarray], sample_rate, as_spk=False, batch_size=32, trim_top_db: Optional[float]=None,
+        self,
+        wavs: List[np.ndarray],
+        sample_rate,
+        as_spk=False,
+        batch_size=32,
+        trim_top_db: Optional[float]=20,
         **kwargs
     ):
         """
@@ -240,6 +245,9 @@ class VoiceEncoder(nn.Module):
 
         if trim_top_db:
             wavs = [librosa.effects.trim(wav, top_db=trim_top_db)[0] for wav in wavs]
+
+        if "rate" not in kwargs:
+            kwargs["rate"] = 1.3  # Resemble's default value.
 
         mels = [melspectrogram(w, self.hp).T for w in wavs]
         return self.embeds_from_mels(mels, as_spk=as_spk, batch_size=batch_size, **kwargs)

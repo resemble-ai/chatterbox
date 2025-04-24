@@ -17,7 +17,7 @@ import torch
 from omegaconf import DictConfig
 
 from models.s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
-from models.s3gen.const import COSY_SR
+from models.s3gen.const import S3GEN_SR
 from models.s3gen.flow import CausalMaskedDiffWithXvec
 from models.s3gen.xvector import CAMPPlus
 from models.s3gen.utils.mel import mel_spectrogram
@@ -131,7 +131,7 @@ class S3Token2Mel(torch.nn.Module):
         speech_token_lens = torch.LongTensor([speech_tokens.size(1)]).to(self.device)
 
         if ref_sr not in self.resamplers:
-            self.resamplers[ref_sr] = ta.transforms.Resample(ref_sr, COSY_SR)
+            self.resamplers[ref_sr] = ta.transforms.Resample(ref_sr, S3GEN_SR)
         resampler = self.resamplers[ref_sr].to(ref_wav.device)
         ref_wav_24 = resampler(ref_wav)
         ref_mels_24 = self.mel_extractor(ref_wav_24)
@@ -171,14 +171,14 @@ class S3Gen(S3Token2Mel):
 
         f0_predictor = ConvRNNF0Predictor()
         self.mel2wav = HiFTGenerator(
-            sampling_rate=COSY_SR,
+            sampling_rate=S3GEN_SR,
             upsample_rates=[8, 5, 3],
             upsample_kernel_sizes=[16, 11, 7],
             source_resblock_kernel_sizes=[7, 7, 11],
             source_resblock_dilation_sizes=[[1, 3, 5], [1, 3, 5], [1, 3, 5]],
             f0_predictor=f0_predictor,
         )
-        self.n_trim = COSY_SR // 50  # 20ms = half of a frame
+        self.n_trim = S3GEN_SR // 50  # 20ms = half of a frame
 
     def forward(self, speech_tokens, ref_wav, ref_sr):
         output_mels = super().forward(speech_tokens, ref_wav, ref_sr)
@@ -217,4 +217,4 @@ if __name__ == '__main__':
     _ref_wav, _ref_sr = ta.load(ref_wav_fpath)
 
     wav_outputs = model.forward(_speech_tokens, _ref_wav, _ref_sr)
-    ta.save(out_wav_fpath, wav_outputs.detach().cpu(), COSY_SR)
+    ta.save(out_wav_fpath, wav_outputs.detach().cpu(), S3GEN_SR)
