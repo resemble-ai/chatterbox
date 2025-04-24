@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 from transformers import LlamaModel, LlamaConfig
 
-from models.common.learned_pos_emb import LearnedPositionEmbeddings
+from models.t3.modules.learned_pos_emb import LearnedPositionEmbeddings
 
 from .modules.cond_enc import T3CondEnc, T3Cond
 from .modules.t3_config import T3Config

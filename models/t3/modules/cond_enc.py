@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 from torch import nn, Tensor
 
-from models.common.perceiver import Perceiver
+from models.t3.modules.perceiver import Perceiver
 from .t3_config import T3Config
 
 
