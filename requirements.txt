@@ -1,0 +1,5 @@
+numpy
+librosa
+s3tokenizer
+transformers
+torchaudio
