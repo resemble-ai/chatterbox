@@ -18,6 +18,12 @@ from .llama_configs import LLAMA_CONFIGS
 logger = logging.getLogger(__name__)
 
 
+class AttrDict(dict):
+    def __init__(self, *args, **kwargs):
+        super(AttrDict, self).__init__(*args, **kwargs)
+        self.__dict__ = self
+
+
 def _ensure_BOT_EOT(text_tokens: Tensor, hp):
     B = text_tokens.size(0)
     assert (text_tokens == hp.start_text_token).int().sum() >= B, "missing start_text_token"
