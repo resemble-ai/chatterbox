@@ -71,6 +71,11 @@ class VoiceBpeTokenizer:
         """TODO: we no longer `clean_text`"""
         return raw_text
 
+    def text_to_tokens(self, text: str):
+        text_tokens = self.encode(text)
+        text_tokens = torch.IntTensor(text_tokens).unsqueeze(0)
+        return text_tokens
+
     def encode( self, txt: str, verbose=False):
         """
         clean_text > (append `lang_id`) > replace SPACE > encode text using Tokenizer
