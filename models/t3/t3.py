@@ -4,7 +4,7 @@ from typing import Union, Optional, List
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
-from transformers import LlamaForCausalLM, LlamaConfig
+from transformers import LlamaModel, LlamaConfig
 
 from models.common.learned_pos_emb import LearnedPositionEmbeddings
 from utils.attr_dict import AttrDict
@@ -38,7 +38,7 @@ class T3(nn.Module):
         super().__init__()
         self.hp = hp
         self.cfg = LlamaConfig(**LLAMA_CONFIGS[hp.llama_config_name])
-        self.tfmr = LlamaForCausalLM(self.cfg)
+        self.tfmr = LlamaModel(self.cfg)
         self.dim = self.cfg.hidden_size
         self.deepspeed_patch_applied = False
 
@@ -269,98 +269,3 @@ class T3(nn.Module):
             do_sample=do_sample,
             # cache_implementation=None if not self.compiled else "static",
         )
-
-    # def load_pretrained_weights(self, llama: Union[str, Path, LlamaForCausalLM]=HF_PATH_LLAMA_3_2_1B):
-    #     """
-    #     Load all matching weights from `llama` into this class' weights.
-    #     Eg, begin training from a pure language model base with a few layers changed.
-    #     Args:
-    #         llama: HF model name, HF model path, or LlamaForCausalLM instance.
-    #     """
-    #     if not isinstance(llama, LlamaForCausalLM):
-    #         llama = LlamaForCausalLM.from_pretrained(llama)
-    #     llama_sd = llama.state_dict()
-    #     self_sd = self.state_dict()
-    #     # prune out mismatched weights and load
-    #     for lk in list(llama_sd):
-    #         lv = llama_sd[lk]
-    #         sk = f"tfmr.{lk}"
-    #         sv = self_sd[sk]
-    #         if lv.shape != sv.shape:
-    #             print(f"Not loading pretrained weight: {lk} (shape {list(lv.shape)} != {list(sv.shape)})")
-    #             del llama_sd[lk]
-    #     self.load_state_dict(llama_sd, strict=False)
-
-
-# if __name__ == '__main__':
-#     from time import perf_counter
-#     device, dtype = "cuda", T3_DEEPSPEED_DTYPE
-#     hp = HParams("t3,dataset")
-#     hp.override(dict(
-#         encoder_type="voice_encoder",
-#     ))
-
-#     print("[ init T3 ]")
-#     t3 = T3(hp).to(device=device, dtype=dtype)
-#     # t3.load_pretrained_weights()
-#     nparams = sum(p.numel() for p in t3.parameters())
-#     print("> OK")
-#     print(f"> {nparams:,} params")
-
-#     print("[ init inputs ]")
-#     B, S, T = 3, 17, 31
-#     t3_cond = T3Cond(
-#         speaker_emb=torch.randn(B, hp.speaker_embed_size).to(device=device, dtype=dtype),
-#     )
-
-#     text_token_lens = torch.randint(2, S, (B,)).to(device)
-#     text_tokens = []
-#     for l in text_token_lens:
-#         t = torch.randint(1, 100, (l,)).to(device)
-#         t[0] = hp.start_text_token
-#         t[l-1] = hp.stop_text_token
-#         text_tokens += [t]
-#     text_tokens = torch.stack([F.pad(t, (0, S - l)) for t, l in zip(text_tokens, text_token_lens)])
-
-#     speech_token_lens = torch.randint(2, T, (B,)).to(device)
-#     unpacked_speech_tokens = []
-#     for l in speech_token_lens:
-#         t = torch.randint(1, 1000, (l,)).to(device)
-#         t[0] = hp.start_speech_token
-#         t[l-1] = hp.stop_speech_token
-#         unpacked_speech_tokens += [t]
-#     speech_tokens = torch.stack([F.pad(t, (0, T - l)) for t, l in zip(unpacked_speech_tokens, speech_token_lens)])
-
-#     print("> OK")
-
-#     print("[ forward ]")
-#     t3(
-#         t3_cond=t3_cond,
-#         text_tokens=text_tokens,
-#         text_token_lens=text_token_lens,
-#         speech_tokens=speech_tokens,
-#         speech_token_lens=speech_token_lens,
-#     )
-#     print("> OK")
-
-#     print("[ infer ]")
-#     t0 = perf_counter()
-#     t3.inference(
-#         t3_cond=t3_cond,
-#         text_tokens=text_tokens,
-#     )
-#     print("> OK")
-#     print(f"> took {int(1000*(perf_counter() - t0))} ms")
-
-#     ## TODO FIXME: deepspeed inference is now broken
-#     from .inference.t3_deepspeed import apply_deepspeed_patch
-#     print("[ deepspeed ]")
-#     apply_deepspeed_patch(t3)
-#     print("> patch applied")
-#     t0 = perf_counter()
-#     t3.inference(
-#         t3_cond=t3_cond,
-#         text_tokens=text_tokens,
-#     )
-#     print("> OK")
-#     print(f"> infer took {int(1000*(perf_counter() - t0))} ms")
