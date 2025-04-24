@@ -8,7 +8,7 @@ import torchaudio as ta
 from models.t3 import T3
 from models.s3tokenizer import S3_SR, drop_invalid_tokens
 from models.s3gen import S3GEN_SR, S3Gen
-from models.tokenizers import VoiceBpeTokenizer
+from models.tokenizers import EnTokenizer
 from models.voice_encoder import VoiceEncoder
 from models.t3.modules.cond_enc import T3Cond
 
@@ -70,9 +70,8 @@ texts = [
 ]
 
 for wavi, text in enumerate(texts):
-    tokenizer = VoiceBpeTokenizer("checkpoints/tokenizer.json")
+    tokenizer = EnTokenizer("checkpoints/tokenizer.json")
     text_tokens = tokenizer.text_to_tokens(text).to(device)
-    breakpoint()
 
     t_start, t_stop = t3.hp.start_text_token, t3.hp.stop_text_token
     text_tokens = F.pad(text_tokens, (1, 0), value=t_start)
