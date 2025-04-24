@@ -1,12 +1,10 @@
-from .tokenizer import VoiceBpeTokenizer
+from bisect import bisect_left
 
 import numpy as np
 import torch
-from torch import nn
 import torch.nn.functional as F
 
-from bisect import bisect_left
-
+from .tokenizer import VoiceBpeTokenizer
 
 class ExcessiveResourceRequest(Exception):
     arg_names = ("explanation", "error_type")
@@ -20,14 +18,7 @@ def text_to_tokens(tokenizer: VoiceBpeTokenizer, text: str, phonemize=False, lan
     """
     :return: text tokens as an int32 tensor of shape (1, n_tokens)
     """
-    # # With mixed grapheme/phoneme tokenizer, we clean/phonemize the text
-    # if tokenizer.use_phonemes:
-    #     if phonemize:
-    #         text, _ = text_to_phonemes(text, lang_id=lang_id, with_stress=False)
-    # # TODO: multilingual + `phonemize=True` not implemented yet
-    # elif tokenizer.is_multilingual():
-    #     text = tokenizer.clean_text(text, lang_id=lang_id)
-    text_tokens = tokenizer.encode(text, lang_id=lang_id, prepend_lang_id=prepend_lang_id)
+    text_tokens = tokenizer.encode(text)
     text_tokens = torch.IntTensor(text_tokens).unsqueeze(0)
 
     # TODO: this EOT pad is needed for API stream endpoint, are there other codepaths that duplicate this EOT?
