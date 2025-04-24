@@ -48,6 +48,8 @@ def main():
     else:
         wav_fpaths.append(input)
 
+    assert wav_fpaths, f"Didn't find any audio in '{input}'"
+
     ref_24, _ = librosa.load(args.target_speaker, sr=S3GEN_SR, duration=10)
     ref_24 = torch.tensor(ref_24).float()
     shutil.copy(args.target_speaker, ref_folder / Path(args.target_speaker).name)
