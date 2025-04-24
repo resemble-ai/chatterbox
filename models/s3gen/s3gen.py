@@ -16,8 +16,7 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-from models.s3gen.s3tokenizer.const import S3_SR, SPEECH_VOCAB_SIZE
-from models.s3gen.s3tokenizer.s3tokenizer import S3Tokenizer
+from models.s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
 from models.s3gen.const import COSY_SR
 from models.s3gen.flow import CausalMaskedDiffWithXvec
 from models.s3gen.xvector import CAMPPlus
