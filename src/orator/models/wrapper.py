@@ -15,9 +15,42 @@ from .t3.modules.cond_enc import T3Cond
 
 @dataclass
 class Conditionals:
-    """Conditionals for T3 and S3Gen"""
+    """
+    Conditionals for T3 and S3Gen
+    - T3 conditionals:
+        - speaker_emb
+        - clap_emb
+        - cond_prompt_speech_tokens
+        - cond_prompt_speech_emb
+        - emotion_adv
+    - S3Gen conditionals:
+        - prompt_token
+        - prompt_token_len
+        - prompt_feat
+        - prompt_feat_len
+        - embedding
+    """
     t3: T3Cond
     gen: dict
+
+    def to(self, device):
+        self.t3 = self.t3.to(device=device)
+        for k, v in self.gen.items():
+            if torch.is_tensor(v):
+                self.gen[k] = v.to(device=device)
+        return self
+
+    def save(self, fpath: Path):
+        arg_dict = dict(
+            t3=self.t3.__dict__,
+            gen=self.gen
+        )
+        torch.save(arg_dict, fpath)
+
+    @classmethod
+    def load(cls, fpath, map_location="cpu"):
+        kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
+        return cls(T3Cond(**kwargs['t3']), kwargs['gen'])
 
 
 class Orator:
@@ -30,16 +63,15 @@ class Orator:
         s3gen: S3Gen,
         ve: VoiceEncoder,
         tokenizer: EnTokenizer,
-        device: str
+        device: str,
+        conds: Conditionals = None,
     ):
         self.t3 = t3
         self.s3gen = s3gen
         self.ve = ve
         self.tokenizer = tokenizer
         self.device = device
-
-        # TODO: maybe load a default voice?
-        self.conds = None
+        self.conds = conds
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'Orator':
@@ -66,7 +98,12 @@ class Orator:
         tokenizer = EnTokenizer(
             str(ckpt_dir / "tokenizer.json")
         )
-        return cls(t3, s3gen, ve, tokenizer, device)
+
+        conds = None
+        if (builtin_voice := ckpt_dir / "conds.pt").exists():
+            conds = Conditionals.load(builtin_voice)
+
+        return cls(t3, s3gen, ve, tokenizer, device, conds=conds.to(device))
 
     @classmethod
     def from_pretrained(cls, model_name, device):
