@@ -95,7 +95,6 @@ class OratorTTS:
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds.to(device))
 
-
     def prepare_conditionals(self, wav_fpath, emotion_adv=0.5):
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
