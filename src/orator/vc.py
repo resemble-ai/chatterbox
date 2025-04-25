@@ -1,9 +1,7 @@
-from dataclasses import dataclass
 from pathlib import Path
 
 import librosa
 import torch
-import torch.nn.functional as F
 
 from .models.s3tokenizer import S3_SR
 from .models.s3gen import S3GEN_SR, S3Gen
