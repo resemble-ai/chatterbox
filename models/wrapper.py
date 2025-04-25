@@ -13,12 +13,11 @@ from models.voice_encoder import VoiceEncoder
 from models.t3.modules.cond_enc import T3Cond
 
 
-# TODO: but emotion_adv should by fluid.
-@dataclass(frozen=True)
+@dataclass
 class Conditionals:
     """Conditionals for T3 and S3Gen"""
-    lm: T3Cond
-    voc: dict
+    t3: T3Cond
+    gen: dict
 
 
 class Orator:
@@ -40,7 +39,7 @@ class Orator:
         self.device = device
 
         # TODO: maybe load a default voice?
-        self.t3_cond = None
+        self.conds = None
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'Orator':
@@ -111,6 +110,14 @@ class Orator:
         else:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
+        # Update emotion_adv if needed
+        if emotion_adv != self.conds.t3.emotion_adv[0, 0, 0]:
+            _cond: T3Cond = self.conds.t3
+            self.conds.t3 = T3Cond(
+                speaker_emb=_cond.speaker_emb,
+                cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
+                emotion_adv=emotion_adv * torch.ones(1, 1, 1),
+            ).to(device=self.device)
 
         text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
 
@@ -121,7 +128,7 @@ class Orator:
 
         with torch.inference_mode():
             speech_tokens = self.t3.inference(
-                t3_cond=self.conds.lm,
+                t3_cond=self.conds.t3,
                 text_tokens=text_tokens,
                 max_new_tokens=1000,  # TODO: use the value in config
             )
@@ -132,7 +139,7 @@ class Orator:
 
             wav, _ = self.s3gen.inference(
                 speech_tokens=speech_tokens,
-                ref_dict=self.conds.voc,
+                ref_dict=self.conds.gen,
             )
 
         return wav.detach().cpu()
