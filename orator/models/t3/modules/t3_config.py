@@ -1,4 +1,4 @@
-from models.t3.llama_configs import LLAMA_CONFIGS
+from ..llama_configs import LLAMA_CONFIGS
 
 
 class T3Config:

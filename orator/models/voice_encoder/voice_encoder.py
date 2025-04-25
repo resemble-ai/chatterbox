@@ -11,8 +11,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 
-from transforms.spectrogram import melspectrogram
-from transforms.syn_transforms import pack
+from orator.transforms.spectrogram import melspectrogram
+from orator.transforms.syn_transforms import pack
 
 
 class VoiceEncConfig:

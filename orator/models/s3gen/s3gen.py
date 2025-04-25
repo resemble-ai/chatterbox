@@ -21,16 +21,16 @@ from functools import lru_cache
 from typing import Optional
 from omegaconf import DictConfig
 
-from models.s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
-from models.s3gen.const import S3GEN_SR
-from models.s3gen.flow import CausalMaskedDiffWithXvec
-from models.s3gen.xvector import CAMPPlus
-from models.s3gen.utils.mel import mel_spectrogram
-from models.s3gen.f0_predictor import ConvRNNF0Predictor
-from models.s3gen.hifigan import HiFTGenerator
-from models.s3gen.transformer.upsample_encoder import UpsampleConformerEncoder
-from models.s3gen.flow_matching import CausalConditionalCFM
-from models.s3gen.decoder import ConditionalDecoder
+from ..s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
+from .const import S3GEN_SR
+from .flow import CausalMaskedDiffWithXvec
+from .xvector import CAMPPlus
+from .utils.mel import mel_spectrogram
+from .f0_predictor import ConvRNNF0Predictor
+from .hifigan import HiFTGenerator
+from .transformer.upsample_encoder import UpsampleConformerEncoder
+from .flow_matching import CausalConditionalCFM
+from .decoder import ConditionalDecoder
 
 
 def drop_invalid_tokens(x):

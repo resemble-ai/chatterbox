@@ -14,8 +14,8 @@
 # limitations under the License.
 import torch
 
-from models.s3gen.transformer.activation import Swish
-from models.s3gen.transformer.subsampling import (
+from ..transformer.activation import Swish
+from ..transformer.subsampling import (
     LinearNoSubsampling,
     EmbedinigNoSubsampling,
     Conv1dSubsampling2,
@@ -23,15 +23,16 @@ from models.s3gen.transformer.subsampling import (
     Conv2dSubsampling6,
     Conv2dSubsampling8,
 )
-from models.s3gen.transformer.embedding import (PositionalEncoding,
-                                             RelPositionalEncoding,
-                                             WhisperPositionalEncoding,
-                                             LearnablePositionalEncoding,
-                                             NoPositionalEncoding)
-from models.s3gen.transformer.attention import (MultiHeadedAttention,
-                                             RelPositionMultiHeadedAttention)
-from models.s3gen.transformer.embedding import EspnetRelPositionalEncoding
-from models.s3gen.transformer.subsampling import LegacyLinearNoSubsampling
+from ..transformer.embedding import (
+    PositionalEncoding,
+    RelPositionalEncoding,
+    WhisperPositionalEncoding,
+    LearnablePositionalEncoding,
+    NoPositionalEncoding)
+from ..transformer.attention import (MultiHeadedAttention,
+    RelPositionMultiHeadedAttention)
+from ..transformer.embedding import EspnetRelPositionalEncoding
+from ..transformer.subsampling import LegacyLinearNoSubsampling
 
 
 COSYVOICE_ACTIVATION_CLASSES = {

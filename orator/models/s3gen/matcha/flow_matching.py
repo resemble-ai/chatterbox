@@ -3,7 +3,7 @@ from abc import ABC
 import torch
 import torch.nn.functional as F
 
-from models.s3gen.matcha.decoder import Decoder
+from .decoder import Decoder
 
 
 class BASECFM(torch.nn.Module, ABC):

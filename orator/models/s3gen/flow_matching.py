@@ -14,8 +14,9 @@
 import threading
 import torch
 import torch.nn.functional as F
-from models.s3gen.matcha.flow_matching import BASECFM
+from .matcha.flow_matching import BASECFM
 from omegaconf import OmegaConf
+
 
 CFM_PARAMS = OmegaConf.create({
     "sigma_min": 1e-06,

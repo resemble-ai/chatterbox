@@ -8,7 +8,7 @@ from conformer import ConformerBlock
 from diffusers.models.activations import get_activation
 from einops import pack, rearrange, repeat
 
-from models.s3gen.matcha.transformer import BasicTransformerBlock
+from .transformer import BasicTransformerBlock
 
 
 class SinusoidalPosEmb(torch.nn.Module):

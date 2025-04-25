@@ -3,7 +3,7 @@ import math
 import torch
 from torch import nn
 import torch.nn.functional as F
-from einops import rearrange, repeat
+from einops import rearrange
 
 
 class RelativePositionBias(nn.Module):

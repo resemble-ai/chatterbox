@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from omegaconf import DictConfig
-from models.s3gen.utils.mask import make_pad_mask
+from .utils.mask import make_pad_mask
 
 
 class MaskedDiffWithXvec(torch.nn.Module):
