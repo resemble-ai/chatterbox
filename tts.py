@@ -1,7 +1,7 @@
 import torchaudio as ta
-from orator.models.wrapper import Orator
+from orator.tts import OratorTTS
 
-model = Orator.from_local("checkpoints", "cuda")
+model = OratorTTS.from_local("checkpoints", "cuda")
 
 text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill."
 wav = model.generate(text)

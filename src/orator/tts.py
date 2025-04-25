@@ -5,12 +5,12 @@ import librosa
 import torch
 import torch.nn.functional as F
 
-from .t3 import T3
-from .s3tokenizer import S3_SR, drop_invalid_tokens
-from .s3gen import S3GEN_SR, S3Gen
-from .tokenizers import EnTokenizer
-from .voice_encoder import VoiceEncoder
-from .t3.modules.cond_enc import T3Cond
+from .models.t3 import T3
+from .models.s3tokenizer import S3_SR, drop_invalid_tokens
+from .models.s3gen import S3GEN_SR, S3Gen
+from .models.tokenizers import EnTokenizer
+from .models.voice_encoder import VoiceEncoder
+from .models.t3.modules.cond_enc import T3Cond
 
 
 @dataclass
@@ -53,7 +53,7 @@ class Conditionals:
         return cls(T3Cond(**kwargs['t3']), kwargs['gen'])
 
 
-class Orator:
+class OratorTTS:
     ENC_COND_LEN = 6 * S3_SR
     DEC_COND_LEN = 10 * S3GEN_SR
 
@@ -74,7 +74,7 @@ class Orator:
         self.conds = conds
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'Orator':
+    def from_local(cls, ckpt_dir, device) -> 'OratorTTS':
         ckpt_dir = Path(ckpt_dir)
 
         ve = VoiceEncoder()

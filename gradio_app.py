@@ -1,8 +1,8 @@
-from orator.models.wrapper import Orator
+from orator.tts import OratorTTS
 import gradio as gr
 
 
-model = Orator.from_local("checkpoints", "cuda")
+model = OratorTTS.from_local("checkpoints", "cuda")
 def generate(text, audio_prompt_path, emotion_adv):
     wav = model.generate(text, audio_prompt_path=audio_prompt_path, emotion_adv=emotion_adv)
     return 24000, wav.squeeze(0).numpy()
