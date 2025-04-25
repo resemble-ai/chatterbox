@@ -2,9 +2,13 @@ from pathlib import Path
 
 import librosa
 import torch
+from huggingface_hub import hf_hub_download
 
 from .models.s3tokenizer import S3_SR
 from .models.s3gen import S3GEN_SR, S3Gen
+
+
+REPO_ID = "ResembleAI/Orator"
 
 
 class OratorVC:
@@ -15,7 +19,7 @@ class OratorVC:
         self,
         s3gen: S3Gen,
         device: str,
-        ref_dict=None,
+        ref_dict: dict=None,
     ):
         self.sr = S3GEN_SR
         self.s3gen = s3gen
@@ -23,7 +27,6 @@ class OratorVC:
         if ref_dict is None:
             self.ref_dict = None
         else:
-            ref_dict: dict
             self.ref_dict = {
                 k: v.to(device) if torch.is_tensor(v) else v
                 for k, v in ref_dict.items()
@@ -46,9 +49,11 @@ class OratorVC:
         return cls(s3gen, device, ref_dict=ref_dict)
 
     @classmethod
-    def from_pretrained(cls, model_name, device):
-        """TODO HF?"""
-        pass
+    def from_pretrained(cls, device) -> 'OratorVC':
+        for fpath in ["s3gen.pt", "conds.pt"]:
+            local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
+
+        return cls.from_local(Path(local_path).parent, device)
 
     def set_target_voice(self, wav_fpath):
         ## Load reference wav

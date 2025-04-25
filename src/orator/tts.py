@@ -4,6 +4,7 @@ from pathlib import Path
 import librosa
 import torch
 import torch.nn.functional as F
+from huggingface_hub import hf_hub_download
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -11,7 +12,7 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
-from huggingface_hub import hf_hub_download
+
 
 REPO_ID = "ResembleAI/Orator"
 
@@ -78,23 +79,43 @@ class OratorTTS:
         self.conds = conds
 
     @classmethod
-    def from_pretrained(cls, device) -> 'OratorTTS':
+    def from_local(cls, ckpt_dir, device) -> 'OratorTTS':
+        ckpt_dir = Path(ckpt_dir)
+
         ve = VoiceEncoder()
-        ve.load_state_dict(torch.load(hf_hub_download(repo_id=REPO_ID, filename="ve.pt")))
+        ve.load_state_dict(
+            torch.load(ckpt_dir / "ve.pt")
+        )
         ve.to(device).eval()
 
         t3 = T3()
-        t3.load_state_dict(torch.load(hf_hub_download(repo_id=REPO_ID, filename="t3.pt")))
+        t3.load_state_dict(
+            torch.load(ckpt_dir / "t3.pt")
+        )
         t3.to(device).eval()
 
         s3gen = S3Gen()
-        s3gen.load_state_dict(torch.load(hf_hub_download(repo_id=REPO_ID, filename="s3gen.pt")))
+        s3gen.load_state_dict(
+            torch.load(ckpt_dir / "s3gen.pt")
+        )
         s3gen.to(device).eval()
 
-        tokenizer = EnTokenizer(hf_hub_download(repo_id=REPO_ID, filename="tokenizer.json"))
-        conds = Conditionals.load(hf_hub_download(repo_id=REPO_ID, filename="conds.pt"))
+        tokenizer = EnTokenizer(
+            str(ckpt_dir / "tokenizer.json")
+        )
 
-        return cls(t3, s3gen, ve, tokenizer, device, conds=conds.to(device))
+        conds = None
+        if (builtin_voice := ckpt_dir / "conds.pt").exists():
+            conds = Conditionals.load(builtin_voice).to(device)
+
+        return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
+
+    @classmethod
+    def from_pretrained(cls, device) -> 'OratorTTS':
+        for fpath in ["ve.pt", "t3.pt", "s3gen.pt", "tokenizer.json", "conds.pt"]:
+            local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
+
+        return cls.from_local(Path(local_path).parent, device)
 
     def prepare_conditionals(self, wav_fpath, emotion_adv=0.5):
         ## Load reference wav
