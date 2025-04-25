@@ -11,6 +11,9 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from huggingface_hub import hf_hub_download
+
+REPO_ID = "ResembleAI/Orator"
 
 
 @dataclass
@@ -74,41 +77,24 @@ class OratorTTS:
         self.conds = conds
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'OratorTTS':
-        ckpt_dir = Path(ckpt_dir)
-
+    def from_pretrained(cls, device) -> 'OratorTTS':
         ve = VoiceEncoder()
-        ve.load_state_dict(
-            torch.load("checkpoints/ve.pt")
-        )
+        ve.load_state_dict(torch.load(hf_hub_download(repo_id=REPO_ID, filename="ve.pt")))
         ve.to(device).eval()
 
         t3 = T3()
-        t3.load_state_dict(
-            torch.load(ckpt_dir / "t3.pt")
-        )
+        t3.load_state_dict(torch.load(hf_hub_download(repo_id=REPO_ID, filename="t3.pt")))
         t3.to(device).eval()
 
         s3gen = S3Gen()
-        s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt")
-        )
+        s3gen.load_state_dict(torch.load(hf_hub_download(repo_id=REPO_ID, filename="s3gen.pt")))
         s3gen.to(device).eval()
 
-        tokenizer = EnTokenizer(
-            str(ckpt_dir / "tokenizer.json")
-        )
-
-        conds = None
-        if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice)
+        tokenizer = EnTokenizer(hf_hub_download(repo_id=REPO_ID, filename="tokenizer.json"))
+        conds = Conditionals.load(hf_hub_download(repo_id=REPO_ID, filename="conds.pt"))
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds.to(device))
 
-    @classmethod
-    def from_pretrained(cls, model_name, device):
-        """HF?"""
-        pass
 
     def prepare_conditionals(self, wav_fpath, emotion_adv=0.5):
         ## Load reference wav
