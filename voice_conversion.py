@@ -7,8 +7,8 @@ import argparse
 import os
 import librosa
 import soundfile as sf
-from models.s3tokenizer import S3_SR
-from models.s3gen import S3GEN_SR, S3Gen
+from orator.models.s3tokenizer import S3_SR
+from orator.models.s3gen import S3GEN_SR, S3Gen
 
 AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "opus"]
 
