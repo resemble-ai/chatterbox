@@ -69,6 +69,7 @@ class OratorTTS:
         device: str,
         conds: Conditionals = None,
     ):
+        self.sr = S3GEN_SR  # sample rate of synthesized audio
         self.t3 = t3
         self.s3gen = s3gen
         self.ve = ve

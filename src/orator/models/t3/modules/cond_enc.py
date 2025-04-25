@@ -12,7 +12,6 @@ from .t3_config import T3Config
 class T3Cond:
     """
     Dataclass container for most / all conditioning info.
-    (Similar to legacy ConditioningData)
     TODO: serialization methods aren't used, keeping them around for convenience
     """
 
