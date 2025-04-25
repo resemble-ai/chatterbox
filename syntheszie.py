@@ -73,12 +73,11 @@ def synthesize(
     if plen := t3.hp.speech_cond_prompt_len:
         s3_tokzr = s3gen.tokenizer
         t3_cond_prompt_tokens, _ = s3_tokzr.forward([s3_ref_wav], max_len=plen)
-        t3_cond_prompt_tokens = t3_cond_prompt_tokens[0, :t3.hp.speech_cond_prompt_len]
         t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(device)
 
 
     # # Voice-encoder speaker embedding
-    ve_embed = torch.from_numpy(ve.embeds_from_wavs([s3_ref_wav], sample_rate=S3GEN_SR))
+    ve_embed = torch.from_numpy(ve.embeds_from_wavs([s3_ref_wav], sample_rate=S3_SR))
     ve_embed = ve_embed.mean(axis=0, keepdim=True).to(device)
 
     t3_cond = T3Cond(
