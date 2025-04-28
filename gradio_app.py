@@ -17,8 +17,8 @@ demo = gr.Interface(
     generate,
     [
         gr.Textbox(value="What does the fox say?", label="Text to synthesize"),
-        gr.Audio(sources="upload", type="filepath", label="Input Audio File", value=None),
-        gr.Slider(-1, 2, step=.05, label="exaggeration", value=.5),
+        gr.Audio(sources="upload", type="filepath", label="Reference Audio File", value=None),
+        gr.Slider(-5, 5, step=.05, label="exaggeration", value=.5),
         gr.Slider(0.8, 1.2, step=.01, label="pace", value=1),
         gr.Slider(0.05, 5, step=.05, label="temperature", value=.8),
     ],
