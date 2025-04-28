@@ -17,6 +17,17 @@ from .models.t3.modules.cond_enc import T3Cond
 REPO_ID = "ResembleAI/Orator"
 
 
+def change_pace(speech_tokens: torch.Tensor, pace: float):
+    """
+    :param speech_tokens: Tensor of shape (L,)
+    :param pace: float, pace (default: 1)
+    """
+    L = len(speech_tokens)
+    speech_tokens = F.interpolate(speech_tokens.view(1, 1, -1).float(), size=int(L / pace), mode="nearest")
+    speech_tokens = speech_tokens.view(-1).long()
+    return speech_tokens
+
+
 @dataclass
 class Conditionals:
     """
@@ -117,7 +128,7 @@ class OratorTTS:
 
         return cls.from_local(Path(local_path).parent, device)
 
-    def prepare_conditionals(self, wav_fpath, emotion_adv=0.5):
+    def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
@@ -133,13 +144,13 @@ class OratorTTS:
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
 
         # # Voice-encoder speaker embedding
-        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([s3_ref_wav], sample_rate=S3GEN_SR))
+        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([s3_ref_wav], sample_rate=S3_SR))
         ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
 
         t3_cond = T3Cond(
             speaker_emb=ve_embed,
             cond_prompt_speech_tokens=t3_cond_prompt_tokens,
-            emotion_adv=emotion_adv * torch.ones(1, 1, 1),
+            emotion_adv=exaggeration * torch.ones(1, 1, 1),
         ).to(device=self.device)
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
 
@@ -147,20 +158,22 @@ class OratorTTS:
         self,
         text,
         audio_prompt_path=None,
-        emotion_adv=0.5
+        exaggeration=0.5,
+        pace=1,
+        temperature=0.8,
     ):
         if audio_prompt_path:
-            self.prepare_conditionals(audio_prompt_path, emotion_adv=emotion_adv)
+            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
-        # Update emotion_adv if needed
-        if emotion_adv != self.conds.t3.emotion_adv[0, 0, 0]:
+        # Update exaggeration if needed
+        if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
             _cond: T3Cond = self.conds.t3
             self.conds.t3 = T3Cond(
                 speaker_emb=_cond.speaker_emb,
                 cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
-                emotion_adv=emotion_adv * torch.ones(1, 1, 1),
+                emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
 
         text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
@@ -175,11 +188,14 @@ class OratorTTS:
                 t3_cond=self.conds.t3,
                 text_tokens=text_tokens,
                 max_new_tokens=1000,  # TODO: use the value in config
+                temperature=temperature,
             )
 
             # TODO: output becomes 1D
             speech_tokens = drop_invalid_tokens(speech_tokens)
             speech_tokens = speech_tokens.to(self.device)
+
+            speech_tokens = change_pace(speech_tokens, pace=pace)
 
             wav, _ = self.s3gen.inference(
                 speech_tokens=speech_tokens,

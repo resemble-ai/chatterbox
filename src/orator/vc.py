@@ -73,12 +73,8 @@ class OratorVC:
             assert self.ref_dict is not None, "Please `prepare_conditionals` first or specify `target_voice_path`"
 
         with torch.inference_mode():
-            if isinstance(audio, str):
-                import torchaudio as ta
-                audio_16, _ = librosa.load(audio, sr=S3_SR)
-                audio_16 = torch.from_numpy(audio_16).float().to(self.device)[None, ]
-            else:
-                raise NotImplementedError()
+            audio_16, _ = librosa.load(audio, sr=S3_SR)
+            audio_16 = torch.from_numpy(audio_16).float().to(self.device)[None, ]
 
             s3_tokens, _ = self.s3gen.tokenizer(audio_16)
             wav, _ = self.s3gen.inference(
