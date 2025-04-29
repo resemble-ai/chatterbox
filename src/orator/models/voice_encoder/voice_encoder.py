@@ -1,6 +1,5 @@
 # Adapted from https://github.com/CorentinJ/Real-Time-Voice-Cloning
 # MIT License
-
 from typing import List, Union, Optional
 
 import numpy as np
@@ -11,27 +10,46 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 
-from orator.transforms.spectrogram import melspectrogram
-from orator.transforms.syn_transforms import pack
+from .config import VoiceEncConfig
+from .melspec import melspectrogram
 
 
-class VoiceEncConfig:
-    num_mels = 40
-    sample_rate = 16000
-    speaker_embed_size = 256
-    ve_hidden_size = 256
-    flatten_lstm_params = False
-    n_fft = 400
-    hop_size = 160
-    win_size = 400
-    fmax = 8000
-    fmin = 0
-    preemphasis = 0.
-    mel_power = 2.0
-    mel_type = "amp"
-    normalized_mels = False
-    ve_partial_frames = 160
-    ve_final_relu = True
+def pack(arrays, seq_len: int=None, pad_value=0):
+    """
+    Given a list of length B of array-like objects of shapes (Ti, ...), packs them in a single tensor of
+    shape (B, T, ...) by padding each individual array on the right.
+
+    :param arrays: a list of array-like objects of matching shapes except for the first axis.
+    :param seq_len: the value of T. It must be the maximum of the lengths Ti of the arrays at
+    minimum. Will default to that value if None.
+    :param pad_value: the value to pad the arrays with.
+    :return: a (B, T, ...) tensor
+    """
+    if seq_len is None:
+        seq_len = max(len(array) for array in arrays)
+    else:
+        assert seq_len >= max(len(array) for array in arrays)
+
+    # Convert lists to np.array
+    if isinstance(arrays[0], list):
+        arrays = [np.array(array) for array in arrays]
+
+    # Convert to tensor and handle device
+    device = None
+    if isinstance(arrays[0], torch.Tensor):
+        tensors = arrays
+        device = tensors[0].device
+    else:
+        tensors = [torch.as_tensor(array) for array in arrays]
+
+    # Fill the packed tensor with the array data
+    packed_shape = (len(tensors), seq_len, *tensors[0].shape[1:])
+    packed_tensor = torch.full(packed_shape, pad_value, dtype=tensors[0].dtype, device=device)
+
+    for i, tensor in enumerate(tensors):
+        packed_tensor[i, :tensor.size(0)] = tensor
+
+    return packed_tensor
 
 
 def get_num_wins(
@@ -252,5 +270,8 @@ class VoiceEncoder(nn.Module):
         if "rate" not in kwargs:
             kwargs["rate"] = 1.3  # Resemble's default value.
 
-        mels = [melspectrogram(w, self.hp).T for w in wavs]
+        mel_func = melspectrogram()
+        mels = [mel_func(torch.from_numpy(w)
+        [None])[0].T for w in wavs]
+
         return self.embeds_from_mels(mels, as_spk=as_spk, batch_size=batch_size, **kwargs)
