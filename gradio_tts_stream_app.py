@@ -1,0 +1,30 @@
+from orator.tts import OratorTTS
+import gradio as gr
+
+
+model = OratorTTS.from_pretrained("checkpoints", "cuda")
+def generate_stream(text, audio_prompt_path, exaggeration, pace, temperature):
+    wav = model.stream(
+        text,
+        audio_prompt_path=audio_prompt_path,
+        exaggeration=exaggeration,
+        pace=pace,
+        temperature=temperature,
+    )
+    return model.sr, wav.squeeze(0).numpy()
+
+
+demo = gr.Interface(
+    generate_stream,
+    [
+        gr.Textbox(value="What does the fox say?", label="Text to synthesize"),
+        gr.Audio(sources="upload", type="filepath", label="Reference Audio File", value=None),
+        gr.Slider(-5, 5, step=.05, label="exaggeration", value=.5),
+        gr.Slider(0.8, 1.2, step=.01, label="pace", value=1),
+        gr.Slider(0.05, 5, step=.05, label="temperature", value=.8),
+    ],
+    "audio",
+)
+
+if __name__ == "__main__":
+    demo.launch()

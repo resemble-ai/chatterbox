@@ -2,7 +2,7 @@ from orator.vc import OratorVC
 import gradio as gr
 
 
-model = OratorVC.from_local("checkpoints", "cuda")
+model = OratorVC.from_pretrained("cuda")
 def generate(audio, target_voice_path):
     wav = model.generate(
         audio, target_voice_path=target_voice_path,
