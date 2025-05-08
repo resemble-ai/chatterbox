@@ -168,6 +168,7 @@ class AttentionBlock2(nn.Module):
 
 
 class Perceiver(nn.Module):
+    """Inspired by https://arxiv.org/abs/2103.03206"""
     def __init__(self, pre_attention_query_token=32, pre_attention_query_size=1024, embedding_dim=1024, num_attn_heads=4):
         """
         Initialize the perceiver module.
