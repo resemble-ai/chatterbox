@@ -3,6 +3,7 @@ from pathlib import Path
 
 import librosa
 import torch
+import soundsignature
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 
@@ -88,6 +89,7 @@ class OratorTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
+        self.watermarker = soundsignature.PerthImplicitWatermarker()
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'OratorTTS':
@@ -202,4 +204,9 @@ class OratorTTS:
                 ref_dict=self.conds.gen,
             )
 
-        return wav.detach().cpu()
+        wav = wav.detach().cpu()
+        
+        # Apply watermark to the generated audio
+        watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
+        
+        return watermarked_wav
