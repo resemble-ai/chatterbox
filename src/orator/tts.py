@@ -3,7 +3,7 @@ from pathlib import Path
 
 import librosa
 import torch
-import soundsignature
+import perth
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 
@@ -89,7 +89,7 @@ class OratorTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
-        self.watermarker = soundsignature.PerthImplicitWatermarker()
+        self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'OratorTTS':

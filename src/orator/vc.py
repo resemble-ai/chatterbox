@@ -2,7 +2,7 @@ from pathlib import Path
 
 import librosa
 import torch
-import soundsignature
+import perth
 from huggingface_hub import hf_hub_download
 
 from .models.s3tokenizer import S3_SR
@@ -24,7 +24,7 @@ class OratorVC:
         self.sr = S3GEN_SR
         self.s3gen = s3gen
         self.device = device
-        self.watermarker = soundsignature.PerthImplicitWatermarker()
+        self.watermarker = perth.PerthImplicitWatermarker()
         if ref_dict is None:
             self.ref_dict = None
         else:

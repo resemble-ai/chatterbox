@@ -2,7 +2,7 @@ from tqdm import tqdm
 import sys
 import torch
 import shutil
-import soundsignature
+import perth
 from pathlib import Path
 import argparse
 import os
@@ -56,7 +56,7 @@ def main():
     ref_24 = torch.tensor(ref_24).float()
     shutil.copy(args.target_speaker, ref_folder / Path(args.target_speaker).name)
     if not args.no_watermark:
-        watermarker = soundsignature.PerthImplicitWatermarker()
+        watermarker = perth.PerthImplicitWatermarker()
     for wav_fpath in tqdm(wav_fpaths):
         shutil.copy(wav_fpath, output_orig_folder / wav_fpath.name)
 
