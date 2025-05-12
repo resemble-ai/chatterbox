@@ -14,7 +14,6 @@ from .modules.cond_enc import T3CondEnc, T3Cond
 from .modules.t3_config import T3Config
 from .llama_configs import LLAMA_CONFIGS
 from .inference.t3_hf_backend import T3HuggingfaceBackend
-from ..reference_queue import ReferenceQueue
 from .inference.alignment_stream_analyzer import AlignmentStreamAnalyzer
 
 
@@ -225,9 +224,6 @@ class T3(nn.Module):
         """
         Args:
             text_tokens: a 1D (unbatched) or 2D (batched) tensor.
-            tokens_queue: if a ReferenceQueue is provided, tokens will be streamed to it during generation.
-            latents_queue: if a ReferenceQueue is provided, latents will be streamed to it during generation.
-            logits_queue: if a ReferenceQueue is provided, logits will be streamed to it during generation.
         """
         # Validate / sanitize inputs
         assert prepend_prompt_speech_tokens is None, "not implemented"
@@ -255,7 +251,7 @@ class T3(nn.Module):
         if not self.compiled:
             alignment_stream_analyzer = AlignmentStreamAnalyzer(
                 self.tfmr,
-                ReferenceQueue(),
+                None,
                 text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
                 alignment_layer_idx=9, # TODO: hparam or something?
                 eos_idx=self.hp.stop_speech_token,

@@ -33,6 +33,8 @@ class AlignmentStreamAnalyzer:
         activation maps. This module exploits this to perform online integrity checks which streaming.
         A hook is injected into the specified attention layer, and heuristics are used to determine alignment
         position, repetition, etc.
+
+        NOTE: currently requires no queues.
         """
         # self.queue = queue
         self.text_tokens_slice = (i, j) = text_tokens_slice
@@ -101,18 +103,8 @@ class AlignmentStreamAnalyzer:
         # TODO: monotonic masking; could have issue b/c spaces are often skipped.
         A_chunk[:, self.curr_frame_pos + 1:] = 0
 
-        # # cheap softmax-like operation
-        # A_chunk -= A_chunk.min(dim=1, keepdim=True).values - 1e-5  # greater than zero
-        # A_chunk /= A_chunk.sum(dim=1, keepdim=True)                # prevent overflow
-        # A_chunk **= 4                                              # "softmax"
-        # A_chunk /= A_chunk.sum(dim=1, keepdim=True)                # re-normalize
-
-        # ## binarize
-        # # chunk_posns = A_chunk.argmax(dim=1, keepdim=True)
-        # # A_chunk_bin = torch.zeros_like(A_chunk).scatter_(dim=1, index=chunk_posns, src=torch.ones_like(A_chunk))
 
         self.alignment = torch.cat((self.alignment, A_chunk), dim=0)
-        # self.alignment_bin = torch.cat((self.alignment_bin, A_chunk_bin), dim=0)
 
         A = self.alignment
         T, S = A.shape
@@ -157,11 +149,6 @@ class AlignmentStreamAnalyzer:
         # Suppress EoS to prevent early termination
         if cur_text_posn < S - 3: # FIXME: arbitrary
             logits[..., self.eos_idx] = -2**15
-
-        # self.queue.put(AlignmentAnalysisResult(
-        #     false_start=false_start, long_tail=long_tail, repetition=repetition,
-        #     discontinuity=discontinuity, complete=self.complete, position=self.text_position,
-        # ))
 
         self.curr_frame_pos += 1
         return logits

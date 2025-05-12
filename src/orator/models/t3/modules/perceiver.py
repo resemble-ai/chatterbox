@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Resemble AI
+# Author: Manmay Nakhashi
+# MIT License
 import math
 
 import torch
