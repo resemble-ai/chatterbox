@@ -5,7 +5,6 @@ from typing import List, Union, Optional
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
 import librosa
-from librosa import resample
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
@@ -260,7 +259,7 @@ class VoiceEncoder(nn.Module):
         """
         if sample_rate != self.hp.sample_rate:
             wavs = [
-                resample(wav, orig_sr=sample_rate, target_sr=self.hp.sample_rate, res_type="kaiser_fast")
+                librosa.resample(wav, orig_sr=sample_rate, target_sr=self.hp.sample_rate, res_type="kaiser_fast")
                 for wav in wavs
             ]
 
