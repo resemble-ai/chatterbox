@@ -23,14 +23,16 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         speech_head,
         latents_queue=None,
         logits_queue=None,
+        alignment_stream_analyzer: 'AlignmentStreamAnalyzer'=None,
     ):
         super().__init__(config)
         self.model = llama
         self.speech_enc = speech_enc
         self.speech_head = speech_head
-        self.latents_queue = latents_queue
-        self.logits_queue = logits_queue
+        # self.latents_queue = latents_queue
+        # self.logits_queue = logits_queue
         self._added_cond = False
+        self.alignment_stream_analyzer = alignment_stream_analyzer
 
     @torch.inference_mode()
     def prepare_inputs_for_generation(
@@ -101,12 +103,16 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
             return_dict=True,
         )
         hidden_states = tfmr_out.hidden_states[-1]  # (B, seq, dim)
-        if self.latents_queue is not None:
-            self.latents_queue.put(hidden_states)
+        # if self.latents_queue is not None:
+        #     self.latents_queue.put(hidden_states)
 
         logits = self.speech_head(hidden_states)
-        if self.logits_queue is not None:
-            self.logits_queue.put(logits)
+        # if self.logits_queue is not None:
+        #     self.logits_queue.put(logits)
+
+        assert inputs_embeds.size(0) == 1
+        # NOTE: hallucination handler may modify logits to force emit an EOS token
+        logits = self.alignment_stream_analyzer.step(logits)
 
         return CausalLMOutputWithCrossAttentions(
             logits=logits,
