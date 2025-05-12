@@ -1,3 +1,5 @@
+# Copyright (c) 2025 Resemble AI
+# MIT License
 import logging
 from typing import Union, Optional, List
 
@@ -10,8 +12,9 @@ from .modules.learned_pos_emb import LearnedPositionEmbeddings
 
 from .modules.cond_enc import T3CondEnc, T3Cond
 from .modules.t3_config import T3Config
-from .inference.t3_hf_backend import T3HuggingfaceBackend
 from .llama_configs import LLAMA_CONFIGS
+from .inference.t3_hf_backend import T3HuggingfaceBackend
+from .inference.alignment_stream_analyzer import AlignmentStreamAnalyzer
 
 
 logger = logging.getLogger(__name__)
@@ -221,9 +224,6 @@ class T3(nn.Module):
         """
         Args:
             text_tokens: a 1D (unbatched) or 2D (batched) tensor.
-            tokens_queue: if a ReferenceQueue is provided, tokens will be streamed to it during generation.
-            latents_queue: if a ReferenceQueue is provided, latents will be streamed to it during generation.
-            logits_queue: if a ReferenceQueue is provided, logits will be streamed to it during generation.
         """
         # Validate / sanitize inputs
         assert prepend_prompt_speech_tokens is None, "not implemented"
@@ -235,7 +235,7 @@ class T3(nn.Module):
             initial_speech_tokens = self.hp.start_speech_token * torch.ones_like(text_tokens[:, :1])
 
         # Prepare custom input embeds
-        embeds, _ = self.prepare_input_embeds(
+        embeds, len_cond = self.prepare_input_embeds(
             t3_cond=t3_cond,
             text_tokens=text_tokens,
             speech_tokens=initial_speech_tokens,
@@ -249,11 +249,19 @@ class T3(nn.Module):
         # TODO? synchronize the expensive compile function
         # with self.compile_lock:
         if not self.compiled:
+            alignment_stream_analyzer = AlignmentStreamAnalyzer(
+                self.tfmr,
+                None,
+                text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
+                alignment_layer_idx=9, # TODO: hparam or something?
+                eos_idx=self.hp.stop_speech_token,
+            )
             patched_model = T3HuggingfaceBackend(
                 config=self.cfg,
                 llama=self.tfmr,
                 speech_enc=self.speech_emb,
                 speech_head=self.speech_head,
+                alignment_stream_analyzer=alignment_stream_analyzer,
             )
             self.patched_model = patched_model
             self.compiled = True
