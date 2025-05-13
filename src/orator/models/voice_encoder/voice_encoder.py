@@ -269,8 +269,6 @@ class VoiceEncoder(nn.Module):
         if "rate" not in kwargs:
             kwargs["rate"] = 1.3  # Resemble's default value.
 
-        mel_func = melspectrogram()
-        mels = [mel_func(torch.from_numpy(w)
-        [None])[0].T for w in wavs]
+        mels = [melspectrogram(w, self.hp).T for w in wavs]
 
         return self.embeds_from_mels(mels, as_spk=as_spk, batch_size=batch_size, **kwargs)
