@@ -14,7 +14,7 @@ from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 
 
-REPO_ID = "ResembleAI/Chatterbox"
+REPO_ID = "ResembleAI/chatterbox"
 
 
 def change_pace(speech_tokens: torch.Tensor, pace: float):
