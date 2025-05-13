@@ -5,6 +5,17 @@ Whether you're working on memes, videos, games, or AI agents, Chatterbox brings 
 
 If you like the model but need to scale or tune it for higher accuracy, check out our competitively priced TTS service (<a href="LINK">link</a>). Starting at $X per hour, it delivers reliable performance with ultra-low latency of Y ms—ideal for production use in agents, applications, or interactive media.
 
+# Key Details
+- SoTA zeroshot TTS
+- 0.5B Llama backbone
+- Unique exaggeration/intensity control
+- Ultra-stable with alignment-informed inference
+- Very low WER < 1%
+- Trained on 0.5M hours of cleaned data
+- Watermarked outputs
+- Easy voice conversion script
+- Outperforms ElevenLabs - #TODO REPORT LINK
+
 # Installation
 ```
 conda create -yn chatterbox python=3.11
