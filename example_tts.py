@@ -1,7 +1,7 @@
 import torchaudio as ta
-from orator.tts import OratorTTS
+from chatterbox.tts import ChatterboxTTS
 
-model = OratorTTS.from_pretrained(device="cuda")
+model = ChatterboxTTS.from_pretrained(device="cuda")
 
 text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill."
 wav = model.generate(text)

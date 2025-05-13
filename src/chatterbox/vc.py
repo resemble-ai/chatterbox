@@ -8,10 +8,10 @@ from .models.s3tokenizer import S3_SR
 from .models.s3gen import S3GEN_SR, S3Gen
 
 
-REPO_ID = "ResembleAI/Orator"
+REPO_ID = "ResembleAI/chatterbox"
 
 
-class OratorVC:
+class ChatterboxVC:
     ENC_COND_LEN = 6 * S3_SR
     DEC_COND_LEN = 10 * S3GEN_SR
 
@@ -33,7 +33,7 @@ class OratorVC:
             }
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'OratorVC':
+    def from_local(cls, ckpt_dir, device) -> 'ChatterboxVC':
         ckpt_dir = Path(ckpt_dir)
         ref_dict = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
@@ -49,7 +49,7 @@ class OratorVC:
         return cls(s3gen, device, ref_dict=ref_dict)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'OratorVC':
+    def from_pretrained(cls, device) -> 'ChatterboxVC':
         for fpath in ["s3gen.pt", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 

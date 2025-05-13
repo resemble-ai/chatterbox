@@ -7,18 +7,18 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
 
 # Installation
 ```
-conda create -yn orator python=3.11
-conda activate orator
-git clone https://github.com/resemble-ai/orator.git
-pip install .  # will be `pip install orator`
+conda create -yn chatterbox python=3.11
+conda activate chatterbox
+git clone https://github.com/resemble-ai/chatterbox.git
+pip install .  # will be `pip install chatterbox`
 ```
 
 # Usage
 ```python
 import torchaudio as ta
-from orator.models.wrapper import Orator
+from chatterbox.models.wrapper import Chatterbox
 
-model = Orator.from_pretrained(device="cuda")
+model = Chatterbox.from_pretrained(device="cuda")
 
 text = "What does the fox say?"
 wav = model.generate(text)  # using the default voice

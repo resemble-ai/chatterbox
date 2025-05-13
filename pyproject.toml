@@ -1,5 +1,5 @@
 [project]
-name = "orator"
+name = "chatterbox"
 version = "0.1"
 readme = "README.md"
 dependencies = [
