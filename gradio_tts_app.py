@@ -1,8 +1,8 @@
-from orator.tts import OratorTTS
+from chatterbox.tts import ChatterboxTTS
 import gradio as gr
 
 
-model = OratorTTS.from_local("checkpoints", "cuda")
+model = ChatterboxTTS.from_local("checkpoints", "cuda")
 def generate(text, audio_prompt_path, exaggeration, pace, temperature):
     wav = model.generate(
         text, audio_prompt_path=audio_prompt_path,

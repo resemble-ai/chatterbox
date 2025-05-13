@@ -14,7 +14,7 @@ from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 
 
-REPO_ID = "ResembleAI/Orator"
+REPO_ID = "ResembleAI/Chatterbox"
 
 
 def change_pace(speech_tokens: torch.Tensor, pace: float):
@@ -68,7 +68,7 @@ class Conditionals:
         return cls(T3Cond(**kwargs['t3']), kwargs['gen'])
 
 
-class OratorTTS:
+class ChatterboxTTS:
     ENC_COND_LEN = 6 * S3_SR
     DEC_COND_LEN = 10 * S3GEN_SR
 
@@ -90,7 +90,7 @@ class OratorTTS:
         self.conds = conds
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'OratorTTS':
+    def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
 
         ve = VoiceEncoder()
@@ -122,7 +122,7 @@ class OratorTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'OratorTTS':
+    def from_pretrained(cls, device) -> 'ChatterboxTTS':
         for fpath in ["ve.pt", "t3.pt", "s3gen.pt", "tokenizer.json", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 
