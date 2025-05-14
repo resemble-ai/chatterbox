@@ -7,7 +7,7 @@ def generate(audio, target_voice_path):
     wav = model.generate(
         audio, target_voice_path=target_voice_path,
     )
-    return 24000, wav.squeeze(0).numpy()
+    return model.sr, wav.squeeze(0).numpy()
 
 
 demo = gr.Interface(

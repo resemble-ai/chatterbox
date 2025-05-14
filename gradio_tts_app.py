@@ -2,7 +2,7 @@ from chatterbox.tts import ChatterboxTTS
 import gradio as gr
 
 
-model = ChatterboxTTS.from_local("checkpoints", "cuda")
+model = ChatterboxTTS.from_pretrained("cuda")
 def generate(text, audio_prompt_path, exaggeration, pace, temperature):
     wav = model.generate(
         text, audio_prompt_path=audio_prompt_path,
@@ -10,7 +10,7 @@ def generate(text, audio_prompt_path, exaggeration, pace, temperature):
         pace=pace,
         temperature=temperature,
     )
-    return 24000, wav.squeeze(0).numpy()
+    return model.sr, wav.squeeze(0).numpy()
 
 
 demo = gr.Interface(
