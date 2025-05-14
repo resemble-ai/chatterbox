@@ -27,7 +27,14 @@ class AlignmentAnalysisResult:
 
 
 class AlignmentStreamAnalyzer:
-    def __init__(self, tfmr, queue, text_tokens_slice, alignment_layer_idx=9, eos_idx=0):
+    def __init__(
+        self,
+        tfmr,
+        queue, # TODO
+        text_tokens_slice,
+        grapheme_align_head=(6, 9), # TODO: hparam or something?
+        eos_idx=0,  # TODO
+    ):
         """
         Some transformer TTS models implicitly solve text-speech alignment in one or more of their self-attention
         activation maps. This module exploits this to perform online integrity checks which streaming.
@@ -54,9 +61,9 @@ class AlignmentStreamAnalyzer:
         # using it for all layers slows things down too much. We can apply it to just one layer
         # by intercepting the kwargs and adding a forward hook (credit: jrm)
         self.last_aligned_attn = None
-        self._add_attention_spy(tfmr, alignment_layer_idx)
+        self._add_attention_spy(tfmr, *grapheme_align_head)
 
-    def _add_attention_spy(self, tfmr, alignment_layer_idx):
+    def _add_attention_spy(self, tfmr, layer_idx, head_idx=None):
         """
         Adds a forward hook to a specific attention layer to collect outputs.
         Using `output_attentions=True` is incompatible with optimized attention kernels, so
@@ -64,18 +71,55 @@ class AlignmentStreamAnalyzer:
         (credit: jrm)
         """
 
-        def attention_forward_hook(module, input, output):
+        def attention_forward_hook(module, args, output):
             """
             See `LlamaAttention.forward`; the output is a 3-tuple: `attn_output, attn_weights, past_key_value`.
             NOTE:
             - When `output_attentions=True`, `LlamaSdpaAttention.forward` calls `LlamaAttention.forward`.
             - `attn_output` has shape [B, H, T0, T0] for the 0th entry, and [B, H, 1, T0+i] for the rest i-th.
             """
+            bid = 0
             step_attention = output[1].cpu() # (B, 16, N, N)
-            self.last_aligned_attn = step_attention[0].mean(0) # (N, N)
+            attn = step_attention[bid]
+            key = f"L{layer_idx}"
+            if head_idx is not None:
+                key += f"-H{head_idx}"
+                attn = attn[head_idx] # (N, N)
+            else:
+                attn = attn.mean(0)
 
-        target_layer = tfmr.layers[alignment_layer_idx].self_attn
-        hook_handle = target_layer.register_forward_hook(attention_forward_hook)
+            self.last_aligned_attn = attn.clone() # (N or 1, N)
+
+        def attention_forward_pre_hook(module, args, kwargs):
+            bid = 0
+            i, j = self.text_tokens_slice
+            k = j + 1  # SoS
+            var = kwargs['past_key_value'][2][0]
+            B, H, L, D = var.shape
+            n = L if self.curr_frame_pos == 0 else 1
+
+            attn_mask = torch.zeros(B, H, n, L).to(var.device)
+
+            if self.curr_frame_pos == 0:
+                text_mask = attn_mask[bid, head_idx, k:, i:j]  # (T=1, S)
+            else:
+                text_mask = attn_mask[bid, head_idx, :, i:j]  # (1, S)
+
+                text_mask[:, self.curr_frame_pos + 1:] = -float('inf')
+
+                # TODO: History masking (is -1 too strict)
+                history_idx = max(0, self.text_position - 1)
+                text_mask[:, :history_idx] = -float('inf')
+
+                # TODO Future masking (allows skipping one token)
+                text_mask[:, self.text_position + 3:] = -float('inf')
+
+                kwargs['attention_mask'] = attn_mask
+            return args, kwargs
+
+        target_layer: torch.nn.Module = tfmr.layers[layer_idx].self_attn
+        _handle = target_layer.register_forward_pre_hook(attention_forward_pre_hook, with_kwargs=True)
+        _handle = target_layer.register_forward_hook(attention_forward_hook)
 
         # Backup original forward
         original_forward = target_layer.forward
@@ -93,9 +137,10 @@ class AlignmentStreamAnalyzer:
         # extract approximate alignment matrix chunk (1 frame at a time after the first chunk)
         aligned_attn = self.last_aligned_attn # (N, N)
         i, j = self.text_tokens_slice
+        k = j + 1  # SoS
         if self.curr_frame_pos == 0:
             # first chunk has conditioning info, text tokens, and BOS token
-            A_chunk = aligned_attn[j:, i:j].clone().cpu() # (T, S)
+            A_chunk = aligned_attn[k:, i:j].clone().cpu() # (T, S)
         else:
             # subsequent chunks have 1 frame due to KV-caching
             A_chunk = aligned_attn[:, i:j].clone().cpu() # (1, S)
@@ -111,9 +156,16 @@ class AlignmentStreamAnalyzer:
 
         # update position
         cur_text_posn = A_chunk[-1].argmax()
-        discontinuity = not(-4 < cur_text_posn - self.text_position < 7) # NOTE: very lenient!
-        if not discontinuity:
+
+        # TODO (improve this?)
+        if cur_text_posn < self.text_position:
+            # print("WARNING: retrogression!")
+            pass
+        else:
             self.text_position = cur_text_posn
+        # discontinuity = not(-4 < cur_text_posn - self.text_position < 7) # NOTE: very lenient!
+        # if not discontinuity:
+        #     self.text_position = cur_text_posn
 
         # Hallucinations at the start of speech show up as activations at the bottom of the attention maps!
         # To mitigate this, we just wait until there are no activations far off-diagonal in the last 2 tokens,
@@ -147,7 +199,7 @@ class AlignmentStreamAnalyzer:
             logits[..., self.eos_idx] = 2**15
 
         # Suppress EoS to prevent early termination
-        if cur_text_posn < S - 3: # FIXME: arbitrary
+        if self.text_position < S - 3: # FIXME: arbitrary
             logits[..., self.eos_idx] = -2**15
 
         self.curr_frame_pos += 1
