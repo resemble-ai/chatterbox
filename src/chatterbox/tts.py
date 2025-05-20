@@ -3,6 +3,7 @@ from pathlib import Path
 
 import librosa
 import torch
+import perth
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 
@@ -88,7 +89,7 @@ class ChatterboxTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
-
+        self.watermarker = perth.PerthImplicitWatermarker()
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
@@ -201,5 +202,7 @@ class ChatterboxTTS:
                 speech_tokens=speech_tokens,
                 ref_dict=self.conds.gen,
             )
+            wav = wav.detach().cpu()
 
-        return wav.detach().cpu()
+            watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
+        return watermarked_wav

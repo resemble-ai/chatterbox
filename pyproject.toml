@@ -11,6 +11,7 @@ dependencies = [
     "torchaudio==2.6.0",
     "transformers==4.46.3",
     "diffusers==0.29.0",
+    "resemble-perth==1.0.1",
 
     "omegaconf==2.3.0",
     "conformer==0.3.2",

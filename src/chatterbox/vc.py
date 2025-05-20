@@ -2,6 +2,7 @@ from pathlib import Path
 
 import librosa
 import torch
+import perth
 from huggingface_hub import hf_hub_download
 
 from .models.s3tokenizer import S3_SR
@@ -24,6 +25,7 @@ class ChatterboxVC:
         self.sr = S3GEN_SR
         self.s3gen = s3gen
         self.device = device
+        self.watermarker = perth.PerthImplicitWatermarker()
         if ref_dict is None:
             self.ref_dict = None
         else:
@@ -81,4 +83,6 @@ class ChatterboxVC:
                 speech_tokens=s3_tokens,
                 ref_dict=self.ref_dict,
             )
-        return wav.detach().cpu()
+            wav = wav.detach().cpu()
+            watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
+        return watermarked_wav
