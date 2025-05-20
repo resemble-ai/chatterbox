@@ -28,6 +28,48 @@ def change_pace(speech_tokens: torch.Tensor, pace: float):
     return speech_tokens
 
 
+def punc_norm(text: str) -> str:
+    """
+        Quick cleanup func for punctuation from LLMs or
+        containing chars not seen often in the dataset
+    """
+    if len(text) == 0:
+        return "You need to add some text for me to talk."
+
+    # Capitalise first letter
+    if text[0].islower():
+        text = text[0].upper() + text[1:]
+
+    # Remove multiple space chars
+    text = " ".join(text.split())
+
+    # Replace uncommon/llm punc
+    punc_to_replace = [
+        ("...", ", "),
+        ("…", ", "),
+        (":", ","),
+        (" - ", ", "),
+        (";", ", "),
+        ("—", "-"),
+        ("–", "-"),
+        (" ,", ","),
+        ("“", "\""),
+        ("”", "\""),
+        ("‘", "'"),
+        ("’", "'"),
+    ]
+    for old_char_sequence, new_char in punc_to_replace:
+        text = text.replace(old_char_sequence, new_char)
+
+    # Add full stop if no ending punc
+    text = text.rstrip(" ")
+    sentence_enders = {".", "!", "?", "-", ","}
+    if not any(text.endswith(p) for p in sentence_enders):
+        text += "."
+
+    return text
+
+
 @dataclass
 class Conditionals:
     """
@@ -176,6 +218,8 @@ class ChatterboxTTS:
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
 
+        # Norm and tokenize text
+        text = punc_norm(text)
         text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
 
         sot = self.t3.hp.start_text_token
