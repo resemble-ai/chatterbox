@@ -1,6 +1,11 @@
 <img width="1200" alt="chatterbox-logo-black" src="https://github.com/user-attachments/assets/172bd283-5d88-4302-aed9-4b0eda94f20f" />
 
 # Chatterbox TTS
+
+[![Alt Text](https://img.shields.io/badge/listen-demo_samples-blue)](https://resemble-ai.github.io/chatterbox_demopage/)
+[![Alt Text](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/ResembleAI/Chatterbox_TTS_Demo)
+[![Alt Text](https://static-public.podonos.com/badges/insight-on-pdns-md-dark.svg)](URL_the_badge_should_link_to)
+
 We're excited to introduce Chatterbox, our first production-grade open source TTS model. Licensed under MIT, Chatterbox has been benchmarked against leading closed-source systems like ElevenLabs, and is consistently preferred in side-by-side evaluations.
 
 Whether you're working on memes, videos, games, or AI agents, Chatterbox brings your content to life. It's also the first open source TTS model to support **emotion exaggeration control**, a powerful feature that makes your voices stand out. Try it now on our Hugging Face Gradio app.
