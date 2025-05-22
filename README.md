@@ -4,7 +4,7 @@
 
 [![Alt Text](https://img.shields.io/badge/listen-demo_samples-blue)](https://resemble-ai.github.io/chatterbox_demopage/)
 [![Alt Text](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/ResembleAI/Chatterbox_TTS_Demo)
-[![Alt Text](https://static-public.podonos.com/badges/insight-on-pdns-md-dark.svg)](URL_the_badge_should_link_to)
+[![Alt Text](https://static-public.podonos.com/badges/insight-on-pdns-sm-dark.svg)](URL_the_badge_should_link_to)
 
 We're excited to introduce Chatterbox, our first production-grade open source TTS model. Licensed under MIT, Chatterbox has been benchmarked against leading closed-source systems like ElevenLabs, and is consistently preferred in side-by-side evaluations.
 
