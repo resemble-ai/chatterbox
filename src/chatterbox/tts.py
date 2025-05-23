@@ -5,7 +5,9 @@ import librosa
 import torch
 import perth
 import torch.nn.functional as F
+import numpy as np
 from huggingface_hub import hf_hub_download
+from pyannote.audio import Pipeline
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -132,6 +134,8 @@ class ChatterboxTTS:
         self.device = device
         self.conds = conds
         self.watermarker = perth.PerthImplicitWatermarker()
+        self.vad = None  # Will be initialized when needed
+
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
@@ -171,23 +175,77 @@ class ChatterboxTTS:
 
         return cls.from_local(Path(local_path).parent, device)
 
+    def _trim_silences(self, audio, sample_rate):
+        """
+        Trim silences from audio using pyannote VAD
+        Returns trimmed audio containing only speech segments
+        """
+        if self.vad is None:
+            try:
+                self.vad = Pipeline.from_pretrained("pyannote/voice-activity-detection")
+            except Exception as e:
+                print(f"Warning: Could not load VAD model: {e}")
+                return audio  # Return original audio if VAD couldn't be loaded
+
+        # Save temporary file for pyannote
+        import tempfile
+        import soundfile as sf
+
+        temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        sf.write(temp_file.name, audio, sample_rate)
+
+        try:
+            # Get speech segments
+            output = self.vad(temp_file.name)
+            speech_segments = output.get_timeline().support()
+
+            # No speech detected, return original
+            if len(speech_segments) == 0:
+                return audio
+
+            # Concatenate speech segments
+            trimmed_audio = []
+            for segment in speech_segments:
+                start_sample = int(segment.start * sample_rate)
+                end_sample = int(segment.end * sample_rate)
+                if start_sample < len(audio) and end_sample <= len(audio):
+                    trimmed_audio.append(audio[start_sample:end_sample])
+
+            if not trimmed_audio:
+                return audio  # No valid segments, return original
+
+            return np.concatenate(trimmed_audio)
+
+        except Exception as e:
+            print(f"Error in voice activity detection: {e}")
+            return audio  # Return original on error
+        finally:
+            import os
+            os.unlink(temp_file.name)  # Clean up temp file
+
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
+        # Resample for S3 processing
         s3_ref_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
 
-        s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
-        s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
+        # # Apply VAD to remove silences
+        s3_ref_wav_trimmed = self._trim_silences(s3_ref_wav, S3_SR)
+        s3gen_ref_wav_trimmed = self._trim_silences(s3gen_ref_wav, S3GEN_SR)
 
-        # Speech cond prompt tokens
+        # Ensure we have enough audio data after trimming
+        s3gen_ref_wav_trimmed = s3gen_ref_wav_trimmed[:self.DEC_COND_LEN]
+        s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav_trimmed, S3GEN_SR, device=self.device)
+
+        # Speech cond prompt tokens - use trimmed audio
         if plen := self.t3.hp.speech_cond_prompt_len:
             s3_tokzr = self.s3gen.tokenizer
-            t3_cond_prompt_tokens, _ = s3_tokzr.forward([s3_ref_wav[:self.ENC_COND_LEN]], max_len=plen)
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward([s3_ref_wav_trimmed[:self.ENC_COND_LEN]], max_len=plen)
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
 
-        # # Voice-encoder speaker embedding
-        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([s3_ref_wav], sample_rate=S3_SR))
+        # Voice-encoder speaker embedding - use trimmed audio
+        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([s3gen_ref_wav_trimmed], sample_rate=S3_SR))
         ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
 
         t3_cond = T3Cond(
@@ -246,7 +304,7 @@ class ChatterboxTTS:
                 speech_tokens=speech_tokens,
                 ref_dict=self.conds.gen,
             )
-            wav = wav.detach().cpu()
+            wav = wav.squeeze(0).detach().cpu().numpy()
 
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-        return watermarked_wav
+        return torch.from_numpy(watermarked_wav).unsqueeze(0)
