@@ -17,7 +17,6 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
 - 0.5B Llama backbone
 - Unique exaggeration/intensity control
 - Ultra-stable with alignment-informed inference
-- Very low WER < 1%
 - Trained on 0.5M hours of cleaned data
 - Watermarked outputs
 - Easy voice conversion script
@@ -27,27 +26,32 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
 ```
 conda create -yn chatterbox python=3.11
 conda activate chatterbox
-git clone https://github.com/resemble-ai/chatterbox.git
-pip install .  # will be `pip install chatterbox`
+
+pip install https://github.com/resemble-ai/chatterbox.git
 ```
 
 # Usage
 ```python
 import torchaudio as ta
-from chatterbox.models.wrapper import Chatterbox
+from chatterbox.tts import ChatterboxTTS
 
-model = Chatterbox.from_pretrained(device="cuda")
+model = ChatterboxTTS.from_pretrained(device="cuda")
 
-text = "What does the fox say?"
-wav = model.generate(text)  # using the default voice
-ta.save("test.wav", wav, model.sr)
+text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill."
+wav = model.generate(text)
+ta.save("test-1.wav", wav, model.sr)
+
+# If you want to synthesize with a different voice, specify the audio prompt
+AUDIO_PROMPT_PATH="YOUR_FILE.wav"
+wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
+ta.save("test-2.wav", wav, model.sr)
 ```
 See `example_tts.py` for more examples.
 
 # Acknowledgements
-- Cosyvoice
-- HiFT-GAN
-- Llama
+- [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)
+- [HiFT-GAN](https://github.com/yl4579/HiFTNet)
+- [Llama 3](https://github.com/meta-llama/llama3)
 
 # Disclaimer
 Don't use this model to do bad things. Prompts are sourced from freely available data on the internet.
