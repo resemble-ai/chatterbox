@@ -91,6 +91,7 @@ class Conditionals:
     """
     t3: T3Cond
     gen: dict
+    pace: float = 1.0
 
     def to(self, device):
         self.t3 = self.t3.to(device=device)
@@ -183,15 +184,15 @@ class ChatterboxTTS:
 
         # Speech cond prompt tokens
         if plen := self.t3.hp.speech_cond_prompt_len:
-            # # Slightly speed up the ref clip for user preference
-            # s3_ref_wav = AttrDict(
-            #     wav=adjust_pace(
-            #         s3_ref_wav.wav,
-            #         s3_ref_wav.sr,
-            #         target_speed=pace,
-            #     ),
-            #     sr=s3_ref_wav.sr,
-            # )
+            # Slightly speed up the ref clip for user preference
+            s3_ref_wav = AttrDict(
+                wav=adjust_pace(
+                    s3_ref_wav.wav,
+                    s3_ref_wav.sr,
+                    target_speed=pace,
+                ),
+                sr=s3_ref_wav.sr,
+            )
 
             s3_tokzr = self.s3gen.tokenizer
             t3_cond_prompt_tokens, _ = s3_tokzr.forward([s3_ref_wav[:self.ENC_COND_LEN]], max_len=plen)
@@ -211,14 +212,18 @@ class ChatterboxTTS:
     def generate(
         self,
         text,
-        audio_prompt_path=None,
+        # audio_prompt_path=None,
         exaggeration=0.5,
         temperature=0.8,
+        # pace=1,
     ):
-        if audio_prompt_path:
-            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
-        else:
-            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+        # if (audio_prompt_path is not None) or (pace != self.conds.pace):
+        #     self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, pace=pace)
+        # # elif pace != self.conds.pace:
+        # #     assert audio_prompt_path is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+        # #     self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, pace=pace)
+        # else:
+        #     assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
         # Update exaggeration if needed
         if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
