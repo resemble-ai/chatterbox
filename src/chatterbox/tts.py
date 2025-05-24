@@ -7,26 +7,27 @@ import perth
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 
-from .models.t3 import T3
+from .models.t3 import T3, AttrDict
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
 from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from .utils import adjust_pace
 
 
 REPO_ID = "ResembleAI/chatterbox"
 
 
-def change_pace(speech_tokens: torch.Tensor, pace: float):
-    """
-    :param speech_tokens: Tensor of shape (L,)
-    :param pace: float, pace (default: 1)
-    """
-    L = len(speech_tokens)
-    speech_tokens = F.interpolate(speech_tokens.view(1, 1, -1).float(), size=int(L / pace), mode="nearest")
-    speech_tokens = speech_tokens.view(-1).long()
-    return speech_tokens
+# def change_pace(speech_tokens: torch.Tensor, pace: float):
+#     """
+#     :param speech_tokens: Tensor of shape (L,)
+#     :param pace: float, pace (default: 1)
+#     """
+#     L = len(speech_tokens)
+#     speech_tokens = F.interpolate(speech_tokens.view(1, 1, -1).float(), size=int(L / pace), mode="nearest")
+#     speech_tokens = speech_tokens.view(-1).long()
+#     return speech_tokens
 
 
 def punc_norm(text: str) -> str:
@@ -171,7 +172,7 @@ class ChatterboxTTS:
 
         return cls.from_local(Path(local_path).parent, device)
 
-    def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
+    def prepare_conditionals(self, wav_fpath, exaggeration=0.5, pace=1):
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
@@ -182,6 +183,16 @@ class ChatterboxTTS:
 
         # Speech cond prompt tokens
         if plen := self.t3.hp.speech_cond_prompt_len:
+            # # Slightly speed up the ref clip for user preference
+            # s3_ref_wav = AttrDict(
+            #     wav=adjust_pace(
+            #         s3_ref_wav.wav,
+            #         s3_ref_wav.sr,
+            #         target_speed=pace,
+            #     ),
+            #     sr=s3_ref_wav.sr,
+            # )
+
             s3_tokzr = self.s3gen.tokenizer
             t3_cond_prompt_tokens, _ = s3_tokzr.forward([s3_ref_wav[:self.ENC_COND_LEN]], max_len=plen)
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
@@ -202,7 +213,6 @@ class ChatterboxTTS:
         text,
         audio_prompt_path=None,
         exaggeration=0.5,
-        pace=1,
         temperature=0.8,
     ):
         if audio_prompt_path:
@@ -239,8 +249,6 @@ class ChatterboxTTS:
             # TODO: output becomes 1D
             speech_tokens = drop_invalid_tokens(speech_tokens)
             speech_tokens = speech_tokens.to(self.device)
-
-            speech_tokens = change_pace(speech_tokens, pace=pace)
 
             wav, _ = self.s3gen.inference(
                 speech_tokens=speech_tokens,

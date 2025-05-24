@@ -42,7 +42,7 @@ with gr.Blocks() as demo:
             with gr.Accordion("More options", open=False):
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")
                 temp = gr.Slider(0.05, 5, step=.05, label="temperature", value=.8)
-                pace = gr.Slider(0.8, 1.2, step=.01, label="pace", value=1)
+                pace = gr.Slider(0.5, 1.5, step=.05, label="pace", value=1.25)
 
             run_btn = gr.Button("Generate", variant="primary")
 

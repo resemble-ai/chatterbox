@@ -1,1 +1,1 @@
-from .t3 import T3
+from .t3 import T3, AttrDict
