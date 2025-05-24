@@ -6,6 +6,7 @@ from chatterbox.tts import ChatterboxTTS
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+FP_REGISTER = None
 
 
 def set_seed(seed: int):
@@ -22,9 +23,15 @@ def generate(text, audio_prompt_path, exaggeration, pace, temperature, seed_num)
     if seed_num != 0:
         set_seed(int(seed_num))
 
+    # Only `.prepare_conditionals` when the audio prompt changes.
+    global FP_REGISTER
+    if audio_prompt_path is not None and FP_REGISTER != audio_prompt_path:
+        model.prepare_conditionals(audio_prompt_path)
+        FP_REGISTER = audio_prompt_path
+
     wav = model.generate(
         text,
-        audio_prompt_path=audio_prompt_path,
+        # audio_prompt_path=audio_prompt_path,
         exaggeration=exaggeration,
         pace=pace,
         temperature=temperature,
