@@ -106,7 +106,8 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         assert inputs_embeds.size(0) == 1
 
         # NOTE: hallucination handler may modify logits to force emit an EOS token
-        logits = self.alignment_stream_analyzer.step(logits)
+        if self.alignment_stream_analyzer is not None:
+            logits = self.alignment_stream_analyzer.step(logits)
 
         return CausalLMOutputWithCrossAttentions(
             logits=logits,

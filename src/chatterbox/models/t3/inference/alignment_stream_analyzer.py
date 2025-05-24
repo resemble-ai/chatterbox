@@ -148,7 +148,7 @@ class AlignmentStreamAnalyzer:
 
         # Suppress EoS to prevent early termination
         if cur_text_posn < S - 3: # FIXME: arbitrary
-            logits[..., self.eos_idx] = -2**15
+            logits[..., self.eos_idx] = -float("inf")
 
         self.curr_frame_pos += 1
         return logits
