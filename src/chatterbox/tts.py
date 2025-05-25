@@ -185,20 +185,16 @@ class ChatterboxTTS:
         # Speech cond prompt tokens
         if plen := self.t3.hp.speech_cond_prompt_len:
             # Slightly speed up the ref clip for user preference
-            s3_ref_wav = AttrDict(
-                wav=adjust_pace(
-                    s3_ref_wav.wav,
-                    s3_ref_wav.sr,
-                    target_speed=pace,
-                ),
-                sr=s3_ref_wav.sr,
+            s3_ref_wav = adjust_pace(
+                s3_ref_wav,
+                S3_SR,
+                target_speed=pace,
             )
-
             s3_tokzr = self.s3gen.tokenizer
             t3_cond_prompt_tokens, _ = s3_tokzr.forward([s3_ref_wav[:self.ENC_COND_LEN]], max_len=plen)
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
 
-        # # Voice-encoder speaker embedding
+        # Voice-encoder speaker embedding
         ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([s3_ref_wav], sample_rate=S3_SR))
         ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
 
