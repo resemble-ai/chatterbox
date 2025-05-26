@@ -42,9 +42,9 @@ def generate(text, audio_prompt_path, exaggeration, pace, temperature, seed_num)
 with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column():
-            text = gr.Textbox(value="What does the fox say?", label="Text to synthesize")
+            text = gr.Textbox(value="My name is Maximus Decimus Meridius, commander of the Armies of the North.", label="Text to synthesize")
             ref_wav = gr.Audio(sources="upload", type="filepath", label="Reference Audio File", value=None)
-            exaggeration = gr.Slider(-5, 5, step=.05, label="exaggeration", value=.5)
+            exaggeration = gr.Slider(-5, 5, step=.05, label="exaggeration", value=.7)
 
             with gr.Accordion("More options", open=False):
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")

@@ -9,5 +9,6 @@ from .s3tokenizer import (
 
 
 def drop_invalid_tokens(x):
-    assert len(x.shape) <= 2 and x.shape[0] == 1, "only batch size of one allowed for now"
+    """Drop SoS and EoS"""
+    assert len(x.shape) == 1 or (len(x.shape) == 2 and x.shape[0] == 1), "only batch size of one allowed for now"
     return x[x < SPEECH_VOCAB_SIZE]

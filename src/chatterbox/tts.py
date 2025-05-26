@@ -3,10 +3,11 @@ from pathlib import Path
 
 import librosa
 import torch
-import perth
 import torch.nn.functional as F
+import perth
 from huggingface_hub import hf_hub_download
 from silero_vad import load_silero_vad, get_speech_timestamps
+from monotonic_align import maximum_path
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -211,6 +212,22 @@ class ChatterboxTTS:
         ).to(device=self.device)
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
 
+    def truncate_eos(self, speech_tokens):
+        A = self.t3.patched_model.alignment_stream_analyzer.alignment
+        A_chunk = A.T + 0
+
+        S, T = A_chunk.shape
+        y = torch.arange(S, device=A_chunk.device).unsqueeze(1)
+        x = torch.arange(T, device=A_chunk.device).unsqueeze(0)
+        A_chunk [x<y] = float('-inf')  # lower-left mask
+        A_chunk[x - y > T - S] = float('-inf')  # upper-right mask
+
+        path = maximum_path(A_chunk.unsqueeze(0).contiguous(), topology="2-step")
+        path = path.squeeze(0).cpu()
+        durs = path.sum(1)
+        n_pre_eos_toks = durs[:-1].sum().long().item()  # exclude EoS
+        return speech_tokens[..., :n_pre_eos_toks]
+
     def generate(
         self,
         text,
@@ -243,7 +260,9 @@ class ChatterboxTTS:
                 temperature=temperature,
             )
 
-            # TODO: output becomes 1D
+            speech_tokens = self.truncate_eos(speech_tokens)
+
+            # # NOTE: output becomes 1D
             speech_tokens = drop_invalid_tokens(speech_tokens)
             speech_tokens = speech_tokens.to(self.device)
 
