@@ -24,7 +24,7 @@ def generate(text, audio_prompt_path, exaggeration, pace, temperature, seed_num)
     if seed_num != 0:
         set_seed(int(seed_num))
 
-    # Only `.prepare_conditionals` when the audio prompt changes.
+    # Only `.prepare_conditionals` when audio prompt or pace changes.
     global FP_REGISTER, PACE
     if (audio_prompt_path is not None and FP_REGISTER != audio_prompt_path) or (PACE != pace):
         model.prepare_conditionals(audio_prompt_path, pace=pace)
@@ -33,9 +33,7 @@ def generate(text, audio_prompt_path, exaggeration, pace, temperature, seed_num)
 
     wav = model.generate(
         text,
-        # audio_prompt_path=audio_prompt_path,
         exaggeration=exaggeration,
-        # pace=pace,
         temperature=temperature,
     )
     return model.sr, wav.squeeze(0).numpy()
@@ -51,7 +49,7 @@ with gr.Blocks() as demo:
             with gr.Accordion("More options", open=False):
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")
                 temp = gr.Slider(0.05, 5, step=.05, label="temperature", value=.8)
-                pace = gr.Slider(0.5, 1.5, step=.05, label="pace", value=1.25)
+                pace = gr.Slider(0.6, 2.0, step=.05, label="pace", value=1.25)
 
             run_btn = gr.Button("Generate", variant="primary")
 

@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from silero_vad import load_silero_vad, get_speech_timestamps
 
-from .models.t3 import T3, AttrDict
+from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
 from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
@@ -18,17 +18,6 @@ from .utils import adjust_pace, trim_silence
 
 
 REPO_ID = "ResembleAI/chatterbox"
-
-
-# def change_pace(speech_tokens: torch.Tensor, pace: float):
-#     """
-#     :param speech_tokens: Tensor of shape (L,)
-#     :param pace: float, pace (default: 1)
-#     """
-#     L = len(speech_tokens)
-#     speech_tokens = F.interpolate(speech_tokens.view(1, 1, -1).float(), size=int(L / pace), mode="nearest")
-#     speech_tokens = speech_tokens.view(-1).long()
-#     return speech_tokens
 
 
 def punc_norm(text: str) -> str:
@@ -92,7 +81,6 @@ class Conditionals:
     """
     t3: T3Cond
     gen: dict
-    pace: float = 1.0
 
     def to(self, device):
         self.t3 = self.t3.to(device=device)
@@ -176,7 +164,7 @@ class ChatterboxTTS:
 
         return cls.from_local(Path(local_path).parent, device)
 
-    def prepare_conditionals(self, wav_fpath, exaggeration=0.5, pace=1, mode="sv"):
+    def prepare_conditionals(self, wav_fpath, exaggeration=0.5, pace=1):
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
@@ -194,24 +182,12 @@ class ChatterboxTTS:
         s3gen_ref_wav = trim_silence(s3gen_ref_wav, speech_timestamps, S3GEN_SR)
         ref_16k_wav = trim_silence(ref_16k_wav, speech_timestamps, S3_SR)
 
-        # import torchaudio as ta
-        # ta.save(
-        #     "test_16k_vad.wav",
-        #     torch.from_numpy(ref_16k_wav).unsqueeze(0),
-        #     S3_SR,
-        # )
-        # ta.save(
-        #     "test_24k_vad.wav",
-        #     torch.from_numpy(s3gen_ref_wav).unsqueeze(0),
-        #     S3GEN_SR,
-        # )
-
 
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
 
         # Slightly speed up the ref clip for user preference
-        mastered_wav = adjust_pace(
+        ref_16k_wav = adjust_pace(
             ref_16k_wav,
             S3_SR,
             target_speed=pace,
@@ -219,20 +195,12 @@ class ChatterboxTTS:
 
         # Speech cond prompt tokens
         if plen := self.t3.hp.speech_cond_prompt_len:
-            s3_ref_wav = ref_16k_wav
-            if "s" in mode:
-                s3_ref_wav = mastered_wav
-
             s3_tokzr = self.s3gen.tokenizer
-            t3_cond_prompt_tokens, _ = s3_tokzr.forward([s3_ref_wav[:self.ENC_COND_LEN]], max_len=plen)
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav[:self.ENC_COND_LEN]], max_len=plen)
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
 
-        ve_ref_wav = ref_16k_wav
-        if "v" in mode:
-            ve_ref_wav = mastered_wav
-
         # Voice-encoder speaker embedding
-        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ve_ref_wav], sample_rate=S3_SR))
+        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR))
         ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
 
         t3_cond = T3Cond(
@@ -245,12 +213,9 @@ class ChatterboxTTS:
     def generate(
         self,
         text,
-        # audio_prompt_path=None,
         exaggeration=0.5,
         temperature=0.8,
-        # pace=1,
     ):
-
         # Update exaggeration if needed
         if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
             _cond: T3Cond = self.conds.t3
