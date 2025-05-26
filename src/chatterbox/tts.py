@@ -14,7 +14,7 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
-from .utils import adjust_pace, trim_silence
+from .utils import speedup, trim_silence
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -187,11 +187,12 @@ class ChatterboxTTS:
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
 
         # Slightly speed up the ref clip for user preference
-        ref_16k_wav = adjust_pace(
-            ref_16k_wav,
-            S3_SR,
-            target_speed=pace,
-        )
+        if pace > 1:
+            ref_16k_wav = speedup(
+                ref_16k_wav,
+                S3_SR,
+                target_speed=pace,
+            )
 
         # Speech cond prompt tokens
         if plen := self.t3.hp.speech_cond_prompt_len:

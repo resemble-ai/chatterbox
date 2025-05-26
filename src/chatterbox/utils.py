@@ -33,7 +33,10 @@ def audseg2np(audio_segment):
 
 
 def change_audio_pace(audio_seg, speed=1.0):
-    """Change pace using Pydub speedup (alters pitch as well)."""
+    """Change pace using Pydub speedup (alters pitch as well).
+    NOTE: there's a bug in `pydub`: speed can't be 0.5 (ZeroDivisionError) or 1 (the clip becomes super tiny).
+    """
+
     return audio_seg.speedup(speed)
 
 
@@ -42,7 +45,9 @@ def resample_audio(audio_seg, new_sr):
     return audio_seg.set_frame_rate(new_sr)
 
 
-def adjust_pace(wav_np, orig_sr, target_sr=None, target_speed=1):
+def speedup(wav_np, orig_sr, target_sr=None, target_speed=1.2):
+    assert 1 < target_speed, "Target speed must be greater than 0."
+
     audio = np2audseg(wav_np, orig_sr)
 
     paced_audio = change_audio_pace(audio, speed=target_speed)
