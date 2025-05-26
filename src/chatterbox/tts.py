@@ -6,6 +6,7 @@ import torch
 import perth
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
+from silero_vad import load_silero_vad, get_speech_timestamps
 
 from .models.t3 import T3, AttrDict
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -13,7 +14,7 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
-from .utils import adjust_pace
+from .utils import adjust_pace, trim_silence
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -134,6 +135,8 @@ class ChatterboxTTS:
         self.device = device
         self.conds = conds
         self.watermarker = perth.PerthImplicitWatermarker()
+        self.vad_model = load_silero_vad()
+
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
@@ -173,29 +176,63 @@ class ChatterboxTTS:
 
         return cls.from_local(Path(local_path).parent, device)
 
-    def prepare_conditionals(self, wav_fpath, exaggeration=0.5, pace=1):
+    def prepare_conditionals(self, wav_fpath, exaggeration=0.5, pace=1, mode="sv"):
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
-        s3_ref_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+        ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+
+        vad_wav = ref_16k_wav
+        if S3_SR != 16000:
+            vad_wav = librosa.resample(ref_16k_wav, orig_sr=S3_SR, target_sr=16000)
+
+        speech_timestamps = get_speech_timestamps(
+            vad_wav,
+            self.vad_model,
+            return_seconds=True,
+        )
+        s3gen_ref_wav = trim_silence(s3gen_ref_wav, speech_timestamps, S3GEN_SR)
+        ref_16k_wav = trim_silence(ref_16k_wav, speech_timestamps, S3_SR)
+
+        # import torchaudio as ta
+        # ta.save(
+        #     "test_16k_vad.wav",
+        #     torch.from_numpy(ref_16k_wav).unsqueeze(0),
+        #     S3_SR,
+        # )
+        # ta.save(
+        #     "test_24k_vad.wav",
+        #     torch.from_numpy(s3gen_ref_wav).unsqueeze(0),
+        #     S3GEN_SR,
+        # )
+
 
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
 
+        # Slightly speed up the ref clip for user preference
+        mastered_wav = adjust_pace(
+            ref_16k_wav,
+            S3_SR,
+            target_speed=pace,
+        )
+
         # Speech cond prompt tokens
         if plen := self.t3.hp.speech_cond_prompt_len:
-            # Slightly speed up the ref clip for user preference
-            s3_ref_wav = adjust_pace(
-                s3_ref_wav,
-                S3_SR,
-                target_speed=pace,
-            )
+            s3_ref_wav = ref_16k_wav
+            if "s" in mode:
+                s3_ref_wav = mastered_wav
+
             s3_tokzr = self.s3gen.tokenizer
             t3_cond_prompt_tokens, _ = s3_tokzr.forward([s3_ref_wav[:self.ENC_COND_LEN]], max_len=plen)
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
 
+        ve_ref_wav = ref_16k_wav
+        if "v" in mode:
+            ve_ref_wav = mastered_wav
+
         # Voice-encoder speaker embedding
-        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([s3_ref_wav], sample_rate=S3_SR))
+        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ve_ref_wav], sample_rate=S3_SR))
         ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
 
         t3_cond = T3Cond(
@@ -213,13 +250,6 @@ class ChatterboxTTS:
         temperature=0.8,
         # pace=1,
     ):
-        # if (audio_prompt_path is not None) or (pace != self.conds.pace):
-        #     self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, pace=pace)
-        # # elif pace != self.conds.pace:
-        # #     assert audio_prompt_path is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
-        # #     self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, pace=pace)
-        # else:
-        #     assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
         # Update exaggeration if needed
         if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:

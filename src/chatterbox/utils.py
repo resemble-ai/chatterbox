@@ -54,3 +54,17 @@ def adjust_pace(wav_np, orig_sr, target_sr=None, target_speed=1):
 
     final_audio_np = audseg2np(resampled_audio)
     return final_audio_np
+
+
+def trim_silence(wav, speech_timestamps, sr):
+    if len(speech_timestamps) == 0:
+        return wav  # WARNING: no speech detected, returning original wav
+    segs = []
+    for segment in speech_timestamps:
+        start_s, end_s = segment['start'], segment['end']
+        start = int(start_s * sr)
+        end = int(end_s * sr)
+        seg = wav[start: end]
+        segs.append(seg)
+        # wav = wav[start * sr:end * sr]
+    return np.concatenate(segs)
