@@ -149,7 +149,7 @@ class ChatterboxTTS:
 
         t3 = T3()
         t3.load_state_dict(
-            torch.load(ckpt_dir / "t3.pt")
+            torch.load(ckpt_dir / "t3_cfg.pt")
         )
         t3.to(device).eval()
 
