@@ -18,7 +18,6 @@ from .utils import trim_silence
 
 
 REPO_ID = "ResembleAI/chatterbox"
-RAND_TXT = "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book. It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum."
 
 
 def change_pace(speech_tokens: torch.Tensor, pace: float):
@@ -148,9 +147,10 @@ class ChatterboxTTS:
         ve.to(device).eval()
 
         t3 = T3()
-        t3.load_state_dict(
-            torch.load(ckpt_dir / "t3_cfg.pt")
-        )
+        t3_state = torch.load(ckpt_dir / "t3_cfg.pt")
+        if "model" in t3_state.keys():
+            t3_state = t3_state["model"][0]
+        t3.load_state_dict(t3_state)
         t3.to(device).eval()
 
         s3gen = S3Gen()
@@ -171,7 +171,7 @@ class ChatterboxTTS:
 
     @classmethod
     def from_pretrained(cls, device) -> 'ChatterboxTTS':
-        for fpath in ["ve.pt", "t3.pt", "s3gen.pt", "tokenizer.json", "conds.pt"]:
+        for fpath in ["ve.pt", "t3_cfg.pt", "s3gen.pt", "tokenizer.json", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 
         return cls.from_local(Path(local_path).parent, device)
@@ -191,8 +191,9 @@ class ChatterboxTTS:
             self.vad_model,
             return_seconds=True,
         )
-        s3gen_ref_wav = trim_silence(s3gen_ref_wav, speech_timestamps, S3GEN_SR)
-        ref_16k_wav = trim_silence(ref_16k_wav, speech_timestamps, S3_SR)
+
+        # s3gen_ref_wav = trim_silence(s3gen_ref_wav, speech_timestamps, S3GEN_SR)
+        # ref_16k_wav = trim_silence(ref_16k_wav, speech_timestamps, S3_SR)
 
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
@@ -239,14 +240,8 @@ class ChatterboxTTS:
 
         # Norm and tokenize text
         text = punc_norm(text)
-        cond_text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
-
-        uncond_text_tokens = self.tokenizer.text_to_tokens(RAND_TXT).to(self.device)
-        # Pad uncond tokens to match cond tokens length
-        n_pad = cond_text_tokens.shape[1] - uncond_text_tokens.shape[1]
-        uncond_text_tokens = F.pad(uncond_text_tokens, (0, n_pad), value=0)   # NOTE: should be EoT
-
-        text_tokens = torch.cat([cond_text_tokens, uncond_text_tokens], dim=0)
+        text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
+        text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
 
         sot = self.t3.hp.start_text_token
         eot = self.t3.hp.stop_text_token
