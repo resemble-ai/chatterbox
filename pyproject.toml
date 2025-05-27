@@ -14,6 +14,7 @@ dependencies = [
     "resemble-perth==1.0.1",
     "pydub==0.25.1",
     "silero-vad==5.1.2",
+    "git+https://github.com/resemble-ai/monotonic_align",
 
     "omegaconf==2.3.0",
     "conformer==0.3.2",
