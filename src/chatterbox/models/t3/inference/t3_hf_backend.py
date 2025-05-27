@@ -103,7 +103,7 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         hidden_states = tfmr_out.hidden_states[-1]  # (B, seq, dim)
 
         logits = self.speech_head(hidden_states)
-        assert inputs_embeds.size(0) == 1
+        # assert inputs_embeds.size(0) == 1 # (disabled for CFG)
 
         # NOTE: hallucination handler may modify logits to force emit an EOS token
         logits = self.alignment_stream_analyzer.step(logits)

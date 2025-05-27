@@ -6,6 +6,7 @@ import torch
 import perth
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
+from silero_vad import load_silero_vad, get_speech_timestamps
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -13,9 +14,11 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from .utils import trim_silence
 
 
 REPO_ID = "ResembleAI/chatterbox"
+RAND_TXT = "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book. It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum."
 
 
 def change_pace(speech_tokens: torch.Tensor, pace: float):
@@ -132,6 +135,8 @@ class ChatterboxTTS:
         self.device = device
         self.conds = conds
         self.watermarker = perth.PerthImplicitWatermarker()
+        self.vad_model = load_silero_vad()
+
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
@@ -175,7 +180,19 @@ class ChatterboxTTS:
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
-        s3_ref_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+        ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+
+        vad_wav = ref_16k_wav
+        if S3_SR != 16000:
+            vad_wav = librosa.resample(ref_16k_wav, orig_sr=S3_SR, target_sr=16000)
+
+        speech_timestamps = get_speech_timestamps(
+            vad_wav,
+            self.vad_model,
+            return_seconds=True,
+        )
+        s3gen_ref_wav = trim_silence(s3gen_ref_wav, speech_timestamps, S3GEN_SR)
+        ref_16k_wav = trim_silence(ref_16k_wav, speech_timestamps, S3_SR)
 
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
@@ -183,11 +200,11 @@ class ChatterboxTTS:
         # Speech cond prompt tokens
         if plen := self.t3.hp.speech_cond_prompt_len:
             s3_tokzr = self.s3gen.tokenizer
-            t3_cond_prompt_tokens, _ = s3_tokzr.forward([s3_ref_wav[:self.ENC_COND_LEN]], max_len=plen)
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav[:self.ENC_COND_LEN]], max_len=plen)
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
 
-        # # Voice-encoder speaker embedding
-        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([s3_ref_wav], sample_rate=S3_SR))
+        # Voice-encoder speaker embedding
+        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR))
         ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
 
         t3_cond = T3Cond(
@@ -221,7 +238,14 @@ class ChatterboxTTS:
 
         # Norm and tokenize text
         text = punc_norm(text)
-        text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
+        cond_text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
+
+        uncond_text_tokens = self.tokenizer.text_to_tokens(RAND_TXT).to(self.device)
+        # Pad uncond tokens to match cond tokens length
+        n_pad = cond_text_tokens.shape[1] - uncond_text_tokens.shape[1]
+        uncond_text_tokens = F.pad(uncond_text_tokens, (0, n_pad), value=0)   # NOTE: should be EoT
+
+        text_tokens = torch.cat([cond_text_tokens, uncond_text_tokens], dim=0)
 
         sot = self.t3.hp.start_text_token
         eot = self.t3.hp.stop_text_token
@@ -235,6 +259,8 @@ class ChatterboxTTS:
                 max_new_tokens=1000,  # TODO: use the value in config
                 temperature=temperature,
             )
+            # Extract only the conditional batch.
+            speech_tokens = speech_tokens[0]
 
             # TODO: output becomes 1D
             speech_tokens = drop_invalid_tokens(speech_tokens)

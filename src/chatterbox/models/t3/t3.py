@@ -3,10 +3,12 @@
 import logging
 from typing import Union, Optional, List
 
+from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 from transformers import LlamaModel, LlamaConfig
+from transformers.generation.logits_process import TopPLogitsWarper, RepetitionPenaltyLogitsProcessor
 
 from .modules.learned_pos_emb import LearnedPositionEmbeddings
 
@@ -266,19 +268,106 @@ class T3(nn.Module):
             self.patched_model = patched_model
             self.compiled = True
 
-        # Run normal generate method, which calls our custom extended methods
-        return self.patched_model.generate(
-            inputs=initial_speech_tokens,
-            decoder_cond=embeds,
-            bos_token_id=self.hp.start_speech_token,
-            eos_token_id=(self.hp.stop_speech_token if stop_on_eos else -1),
-            pad_token_id=self.hp.stop_speech_token,
-            max_new_tokens=max_new_tokens or self.hp.max_speech_tokens,
-            num_return_sequences=num_return_sequences,
-            temperature=temperature,
-            top_p=top_p,
-            length_penalty=length_penalty,
-            repetition_penalty=repetition_penalty,
-            do_sample=do_sample,
-            # cache_implementation=None if not self.compiled else "static",
+        # # Run normal generate method, which calls our custom extended methods
+        # return self.patched_model.generate(
+        #     inputs=initial_speech_tokens,
+        #     decoder_cond=embeds,
+        #     bos_token_id=self.hp.start_speech_token,
+        #     eos_token_id=(self.hp.stop_speech_token if stop_on_eos else -1),
+        #     pad_token_id=self.hp.stop_speech_token,
+        #     max_new_tokens=max_new_tokens or self.hp.max_speech_tokens,
+        #     num_return_sequences=num_return_sequences,
+        #     temperature=temperature,
+        #     top_p=top_p,
+        #     length_penalty=length_penalty,
+        #     repetition_penalty=repetition_penalty,
+        #     do_sample=do_sample,
+        #     # cache_implementation=None if not self.compiled else "static",
+        # )
+
+        device = embeds.device
+
+        cfg = 1.0  # FIXME
+
+        # eos_token_id = model.hp.stop_speech_token
+
+        bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=device)
+        bos_embed = self.speech_emb(bos_token)  # shape: (B, 1, embed_dim)
+        bos_embed = bos_embed + self.speech_pos_emb.get_fixed_embedding(0)
+
+        # batch_size=2 for CFG
+        bos_embed = torch.cat([bos_embed, bos_embed])
+
+        # Combine condition and BOS token for the initial input
+        inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
+
+        # Track generated token ids; start with the BOS token.
+        generated_ids = bos_token.clone()
+        predicted = []  # To store the predicted tokens
+
+        # Instantiate the logits processors.
+        top_p_warper = TopPLogitsWarper(top_p=top_p)
+        repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=repetition_penalty)
+
+        # ---- Initial Forward Pass (no kv_cache yet) ----
+        output = self.patched_model(
+            inputs_embeds=inputs_embeds,
+            past_key_values=None,
+            use_cache=True,
+            output_attentions=True,
+            output_hidden_states=True,
+            return_dict=True,
         )
+        # Initialize kv_cache with the full context.
+        past = output.past_key_values
+
+
+        # ---- Generation Loop using kv_cache ----
+        for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
+            logits = output.logits[:, -1, :]
+
+            # CFG
+            cfg = 1.0  # FIXME
+            c_l, u_l = torch.split(logits, 1, dim=0)
+            logits = c_l + cfg * (c_l - u_l)
+
+            # Apply temperature scaling.
+            if temperature != 1.0:
+                logits = logits / temperature
+
+            # Apply repetition penalty and top‑p filtering.
+            logits = repetition_penalty_processor(generated_ids, logits)
+            logits = top_p_warper(None, logits)
+
+            # Convert logits to probabilities and sample the next token.
+            probs = torch.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)  # shape: (B, 1)
+
+            predicted.append(next_token)
+            generated_ids = torch.cat([generated_ids, next_token], dim=1)
+
+            # Check for EOS token.
+            if next_token.view(-1) == self.hp.stop_speech_token:
+                break
+
+            # Get embedding for the new token.
+            next_token_embed = self.speech_emb(next_token)
+            next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
+
+            #  For CFG
+            next_token_embed = torch.cat([next_token_embed, next_token_embed])
+
+            # Forward pass with only the new token and the cached past.
+            output = self.patched_model(
+                inputs_embeds=next_token_embed,
+                past_key_values=past,
+                output_attentions=True,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            # Update the kv_cache.
+            past = output.past_key_values
+
+        # Concatenate all predicted tokens along the sequence dimension.
+        predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
+        return predicted_tokens
