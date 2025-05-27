@@ -93,6 +93,8 @@ class T3(nn.Module):
         # prepare input embeddings (skip backbone tranformer embeddings)
         cond_emb = self.prepare_conditioning(t3_cond)  # (B, len_cond, dim)
         text_emb = self.text_emb(text_tokens)  # (B, len_text, dim)
+        text_emb[1].zero_()  # CFG uncond
+
         speech_emb = self.speech_emb(speech_tokens)  # (B, len_speech, dim)
         if self.hp.input_pos_emb == "learned":
             text_emb = text_emb + self.text_pos_emb(text_tokens)
@@ -323,8 +325,10 @@ class T3(nn.Module):
             logits = output.logits[:, -1, :]
 
             # CFG
-            c_l, u_l = torch.split(logits, 1, dim=0)
-            logits = c_l + cfg_weight * (c_l - u_l)
+            logits_cond = logits[0:1]
+            logits_uncond = logits[1:2]
+            logits = logits_cond + cfg_weight * (logits_cond - logits_uncond)
+            logits = logits.squeeze(1)
 
             # Apply temperature scaling.
             if temperature != 1.0:
