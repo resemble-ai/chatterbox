@@ -18,7 +18,7 @@ def set_seed(seed: int):
 
 model = ChatterboxTTS.from_pretrained(DEVICE)
 
-def generate(text, audio_prompt_path, exaggeration, pace, temperature, seed_num):
+def generate(text, audio_prompt_path, exaggeration, pace, temperature, seed_num, cfgw):
     if seed_num != 0:
         set_seed(int(seed_num))
 
@@ -28,6 +28,7 @@ def generate(text, audio_prompt_path, exaggeration, pace, temperature, seed_num)
         exaggeration=exaggeration,
         pace=pace,
         temperature=temperature,
+        cfg_weight=cfgw,
     )
     return model.sr, wav.squeeze(0).numpy()
 
@@ -43,6 +44,7 @@ with gr.Blocks() as demo:
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")
                 temp = gr.Slider(0.05, 5, step=.05, label="temperature", value=.8)
                 pace = gr.Slider(0.8, 1.2, step=.01, label="pace", value=1)
+                cfgw = gr.Slider(0, 3, step=.1, label="CFG", value=1)
 
             run_btn = gr.Button("Generate", variant="primary")
 
@@ -58,6 +60,7 @@ with gr.Blocks() as demo:
             pace,
             temp,
             seed_num,
+            cfgw,
         ],
         outputs=audio_output,
     )
