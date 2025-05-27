@@ -221,7 +221,10 @@ class ChatterboxTTS:
 
         # Norm and tokenize text
         text = punc_norm(text)
-        text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
+        cond_text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
+
+        uncond_text_tokens = torch.ones_like(cond_text_tokens, dtype=cond_text_tokens.dtype)
+        text_tokens = torch.cat([cond_text_tokens, uncond_text_tokens], dim=0)
 
         sot = self.t3.hp.start_text_token
         eot = self.t3.hp.stop_text_token
@@ -235,6 +238,9 @@ class ChatterboxTTS:
                 max_new_tokens=1000,  # TODO: use the value in config
                 temperature=temperature,
             )
+
+            # Extract only the conditional batch.
+            speech_tokens = speech_tokens[:1]
 
             # TODO: output becomes 1D
             speech_tokens = drop_invalid_tokens(speech_tokens)

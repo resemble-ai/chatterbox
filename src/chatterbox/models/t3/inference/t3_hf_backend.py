@@ -103,10 +103,15 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         hidden_states = tfmr_out.hidden_states[-1]  # (B, seq, dim)
 
         logits = self.speech_head(hidden_states)
-        assert inputs_embeds.size(0) == 1
+        # assert inputs_embeds.size(0) == 1
 
-        # NOTE: hallucination handler may modify logits to force emit an EOS token
-        logits = self.alignment_stream_analyzer.step(logits)
+        cfg = 1.0  # FIXME
+        c_l, u_l = torch.split(logits, 1, dim=0)
+        logits = c_l + cfg * (c_l - u_l)
+        logits = torch.cat([logits, logits], dim=0)
+
+        # # NOTE: hallucination handler may modify logits to force emit an EOS token (TODO: disabled for now)
+        # logits = self.alignment_stream_analyzer.step(logits)
 
         return CausalLMOutputWithCrossAttentions(
             logits=logits,
