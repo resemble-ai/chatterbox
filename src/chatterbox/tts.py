@@ -171,23 +171,86 @@ class ChatterboxTTS:
 
         return cls.from_local(Path(local_path).parent, device)
 
-    def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
+    def prepare_conditionals(self, wav_fpath, exaggeration=0.5, pace=1):
         ## Load reference wav
-        s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
+        # Allow single path or list of paths
+        if not isinstance(wav_fpath, list):
+            wav_fpath = [wav_fpath]
+        
+        # Process all wav files and collect segments
+        all_ref_16k_segments = []
+        s3gen_ref_wav = None
+        
+        for fpath in wav_fpath:
+            s3gen_wav, _sr = librosa.load(fpath, sr=S3GEN_SR)
+            ref_16k_wav = librosa.resample(s3gen_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
 
-        s3_ref_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+            vad_wav = ref_16k_wav
+            if S3_SR != 16000:
+                vad_wav = librosa.resample(ref_16k_wav, orig_sr=S3_SR, target_sr=16000)
 
-        s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
+            speech_timestamps = get_speech_timestamps(
+                vad_wav,
+                self.vad_model,
+                return_seconds=True,
+            )
+            
+            trimmed_s3gen_wav = trim_silence(s3gen_wav, speech_timestamps, S3GEN_SR)
+            trimmed_ref_16k_wav = trim_silence(ref_16k_wav, speech_timestamps, S3_SR)
+            
+            # Split longer audio into 5-second chunks
+            chunk_length = 5 * S3_SR  # 5 seconds in samples
+            min_chunk_length = 2 * S3_SR  # 2 seconds in samples
+            
+            # If audio is longer than 5 seconds, split it into chunks
+            if len(trimmed_ref_16k_wav) > chunk_length:
+                num_chunks = len(trimmed_ref_16k_wav) // chunk_length
+                for i in range(num_chunks):
+                    start_idx = i * chunk_length
+                    end_idx = start_idx + chunk_length
+                    chunk = trimmed_ref_16k_wav[start_idx:end_idx]
+                    all_ref_16k_segments.append(chunk)
+                
+                # Process the last chunk if it's >= 2 seconds
+                remaining_samples = len(trimmed_ref_16k_wav) % chunk_length
+                if remaining_samples >= min_chunk_length:
+                    last_chunk = trimmed_ref_16k_wav[-remaining_samples:]
+                    all_ref_16k_segments.append(last_chunk)
+            else:
+                all_ref_16k_segments.append(trimmed_ref_16k_wav)
+            
+            # Use the first processed wav for s3gen_ref_wav if not already set
+            if s3gen_ref_wav is None:
+                s3gen_ref_wav = trimmed_s3gen_wav[:self.DEC_COND_LEN]
+
+        # Use first segment for s3gen embedding if we have no segments
+        if not all_ref_16k_segments:
+            raise ValueError("No valid audio segments found after processing")
+            
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
+
+        # Slightly speed up the ref clips for user preference
+        if pace > 1.0:
+            all_ref_16k_segments = [
+                speedup(segment, S3_SR, target_speed=pace) for segment in all_ref_16k_segments
+            ]
+        # take the largest 2 segments for conditioning
+        
+        if len(all_ref_16k_segments) > 2:
+            all_ref_16k_segments.sort(key=len, reverse=True)
+            # Keep only the two longest segments
+            all_ref_16k_segments = all_ref_16k_segments[:2]
+        # Use first segment for conditioning
+        ref_16k_wav_for_cond = all_ref_16k_segments[0][:self.ENC_COND_LEN]
 
         # Speech cond prompt tokens
         if plen := self.t3.hp.speech_cond_prompt_len:
             s3_tokzr = self.s3gen.tokenizer
-            t3_cond_prompt_tokens, _ = s3_tokzr.forward([s3_ref_wav[:self.ENC_COND_LEN]], max_len=plen)
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav_for_cond], max_len=plen)
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
 
-        # # Voice-encoder speaker embedding
-        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([s3_ref_wav], sample_rate=S3_SR))
+        # Voice-encoder speaker embedding - using all segments
+        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs(all_ref_16k_segments, sample_rate=S3_SR))
         ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
 
         t3_cond = T3Cond(
