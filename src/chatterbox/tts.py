@@ -219,6 +219,7 @@ class ChatterboxTTS:
         text,
         audio_prompt_path=None,
         exaggeration=0.5,
+        cfg_weight=0,
         pace=1,
         temperature=0.8,
     ):
@@ -258,6 +259,7 @@ class ChatterboxTTS:
                 text_tokens=text_tokens,
                 max_new_tokens=1000,  # TODO: use the value in config
                 temperature=temperature,
+                cfg_weight=cfg_weight,
             )
             # Extract only the conditional batch.
             speech_tokens = speech_tokens[0]

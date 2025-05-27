@@ -222,6 +222,7 @@ class T3(nn.Module):
         top_p=0.8,
         length_penalty=1.0,
         repetition_penalty=2.0,
+        cfg_weight=0,
     ):
         """
         Args:
@@ -287,10 +288,6 @@ class T3(nn.Module):
 
         device = embeds.device
 
-        cfg = 1.0  # FIXME
-
-        # eos_token_id = model.hp.stop_speech_token
-
         bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=device)
         bos_embed = self.speech_emb(bos_token)  # shape: (B, 1, embed_dim)
         bos_embed = bos_embed + self.speech_pos_emb.get_fixed_embedding(0)
@@ -321,15 +318,13 @@ class T3(nn.Module):
         # Initialize kv_cache with the full context.
         past = output.past_key_values
 
-
         # ---- Generation Loop using kv_cache ----
         for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
             logits = output.logits[:, -1, :]
 
             # CFG
-            cfg = 1.0  # FIXME
             c_l, u_l = torch.split(logits, 1, dim=0)
-            logits = c_l + cfg * (c_l - u_l)
+            logits = c_l + cfg_weight * (c_l - u_l)
 
             # Apply temperature scaling.
             if temperature != 1.0:
