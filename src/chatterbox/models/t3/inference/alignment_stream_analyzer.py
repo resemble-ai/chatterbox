@@ -173,19 +173,20 @@ class AlignmentStreamAnalyzer:
         # NOTE: due to the false-start behaviour, we need to make sure we skip activations for the first few tokens.
         last_text_token_duration = A[15:, -3:].sum()
 
-        # Activations for the final token that last too long are likely hallucinations.
-        long_tail = self.complete and (A[self.completed_at:, -3:].sum(dim=0).max() >= 10) # 400ms
+        # # Activations for the final token that last too long are likely hallucinations.
+        # long_tail = self.complete and (A[self.completed_at:, -3:].sum(dim=0).max() >= 10) # 400ms
 
-        # If there are activations in previous tokens after generation has completed, assume this is a repetition error.
-        repetition = self.complete and (A[self.completed_at:, :-5].max(dim=1).values.sum() > 5)
+        # FIXME: this is bugged due to arbitrary length constraints.
+        # # If there are activations in previous tokens after generation has completed, assume this is a repetition error.
+        # repetition = self.complete and (A[self.completed_at:, :-5].max(dim=1).values.sum() > 5)
 
-        # If a bad ending is detected, force emit EOS by modifying logits
-        # NOTE: this means logits may be inconsistent with latents!
-        if long_tail or repetition:
-            logger.warn(f"forcing EOS token, {long_tail=}, {repetition=}")
-            # (±2**15 is safe for all dtypes >= 16bit)
-            logits = -(2**15) * torch.ones_like(logits)
-            logits[..., self.eos_idx] = 2**15
+        # # If a bad ending is detected, force emit EOS by modifying logits
+        # # NOTE: this means logits may be inconsistent with latents!
+        # if long_tail or repetition:
+        #     logger.warn(f"forcing EOS token, {long_tail=}, {repetition=}")
+        #     # (±2**15 is safe for all dtypes >= 16bit)
+        #     logits = -(2**15) * torch.ones_like(logits)
+        #     logits[..., self.eos_idx] = 2**15
 
         # Suppress EoS to prevent early termination
         if cur_text_posn < S - 3: # FIXME: arbitrary
