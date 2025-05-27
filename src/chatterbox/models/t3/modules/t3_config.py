@@ -9,7 +9,7 @@ class T3Config:
 
     start_speech_token = 6561
     stop_speech_token = 6562
-    speech_tokens_dict_size = 6563
+    speech_tokens_dict_size = 8194
     max_speech_tokens = 4096
 
     llama_config_name = "Llama_520M"
