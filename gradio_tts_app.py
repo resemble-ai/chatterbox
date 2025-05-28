@@ -16,10 +16,6 @@ def set_seed(seed: int):
     np.random.seed(seed)
 
 
-def load_model():
-    return ChatterboxTTS.from_pretrained(DEVICE)
-
-
 def generate(model, text, audio_prompt_path, exaggeration, pace, temperature, seed_num, cfgw):
     if model is None:
         model = ChatterboxTTS.from_pretrained(DEVICE)
@@ -74,4 +70,7 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
-    demo.queue().launch()
+    demo.queue(
+        max_size=50,
+        default_concurrency_limit=1,
+    ).launch(share=True)
