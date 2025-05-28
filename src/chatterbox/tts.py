@@ -6,7 +6,6 @@ import torch
 import perth
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
-from silero_vad import load_silero_vad, get_speech_timestamps
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -14,7 +13,6 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
-from .utils import trim_silence
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -134,7 +132,6 @@ class ChatterboxTTS:
         self.device = device
         self.conds = conds
         self.watermarker = perth.PerthImplicitWatermarker()
-        self.vad_model = load_silero_vad()
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
@@ -181,19 +178,6 @@ class ChatterboxTTS:
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
         ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
-
-        vad_wav = ref_16k_wav
-        if S3_SR != 16000:
-            vad_wav = librosa.resample(ref_16k_wav, orig_sr=S3_SR, target_sr=16000)
-
-        speech_timestamps = get_speech_timestamps(
-            vad_wav,
-            self.vad_model,
-            return_seconds=True,
-        )
-
-        # s3gen_ref_wav = trim_silence(s3gen_ref_wav, speech_timestamps, S3GEN_SR)
-        # ref_16k_wav = trim_silence(ref_16k_wav, speech_timestamps, S3_SR)
 
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
