@@ -9,7 +9,7 @@ authors = [
     {name = "resemble-ai", email = "engineering@resemble.ai"}
 ]
 dependencies = [
-    "numpy==1.26.0",
+    "numpy~=1.26.0",
     "resampy==0.4.3",
     "librosa==0.10.0",
     "s3tokenizer",
