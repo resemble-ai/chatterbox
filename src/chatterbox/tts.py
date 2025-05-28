@@ -189,39 +189,30 @@ class ChatterboxTTS:
             if S3_SR != 16000:
                 vad_wav = librosa.resample(ref_16k_wav, orig_sr=S3_SR, target_sr=16000)
 
-            speech_timestamps = get_speech_timestamps(
-                vad_wav,
-                self.vad_model,
-                return_seconds=True,
-            )
-            
-            trimmed_s3gen_wav = trim_silence(s3gen_wav, speech_timestamps, S3GEN_SR)
-            trimmed_ref_16k_wav = trim_silence(ref_16k_wav, speech_timestamps, S3_SR)
-            
             # Split longer audio into 5-second chunks
             chunk_length = 5 * S3_SR  # 5 seconds in samples
             min_chunk_length = 2 * S3_SR  # 2 seconds in samples
             
             # If audio is longer than 5 seconds, split it into chunks
-            if len(trimmed_ref_16k_wav) > chunk_length:
-                num_chunks = len(trimmed_ref_16k_wav) // chunk_length
+            if len(ref_16k_wav) > chunk_length:
+                num_chunks = len(ref_16k_wav) // chunk_length
                 for i in range(num_chunks):
                     start_idx = i * chunk_length
                     end_idx = start_idx + chunk_length
-                    chunk = trimmed_ref_16k_wav[start_idx:end_idx]
+                    chunk = ref_16k_wav[start_idx:end_idx]
                     all_ref_16k_segments.append(chunk)
                 
                 # Process the last chunk if it's >= 2 seconds
-                remaining_samples = len(trimmed_ref_16k_wav) % chunk_length
+                remaining_samples = len(ref_16k_wav) % chunk_length
                 if remaining_samples >= min_chunk_length:
-                    last_chunk = trimmed_ref_16k_wav[-remaining_samples:]
+                    last_chunk = ref_16k_wav[-remaining_samples:]
                     all_ref_16k_segments.append(last_chunk)
             else:
-                all_ref_16k_segments.append(trimmed_ref_16k_wav)
+                all_ref_16k_segments.append(ref_16k_wav)
             
             # Use the first processed wav for s3gen_ref_wav if not already set
             if s3gen_ref_wav is None:
-                s3gen_ref_wav = trimmed_s3gen_wav[:self.DEC_COND_LEN]
+                s3gen_ref_wav = s3gen_wav[:self.DEC_COND_LEN]
 
         # Use first segment for s3gen embedding if we have no segments
         if not all_ref_16k_segments:
@@ -229,11 +220,6 @@ class ChatterboxTTS:
             
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
 
-        # Slightly speed up the ref clips for user preference
-        if pace > 1.0:
-            all_ref_16k_segments = [
-                speedup(segment, S3_SR, target_speed=pace) for segment in all_ref_16k_segments
-            ]
         # take the largest 2 segments for conditioning
         
         if len(all_ref_16k_segments) > 2:
