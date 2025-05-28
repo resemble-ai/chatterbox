@@ -17,8 +17,8 @@ def generate(audio, target_voice_path):
 demo = gr.Interface(
     generate,
     [
-        gr.Audio(sources="upload", type="filepath", label="Input audio file"),
-        gr.Audio(sources="upload", type="filepath", label="Target voice audio file (if none, the default voice is used)", value=None),
+        gr.Audio(sources=["upload", "microphone"], type="filepath", label="Input audio file"),
+        gr.Audio(sources=["upload", "microphone"], type="filepath", label="Target voice audio file (if none, the default voice is used)", value=None),
     ],
     "audio",
 )
