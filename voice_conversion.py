@@ -21,6 +21,7 @@ def main():
     parser.add_argument("target_speaker", type=str, help="Path to the sample for the target speaker.")
     parser.add_argument("-o", "--output_folder", type=str, default="vc_outputs")
     parser.add_argument("-g", "--gpu_id", type=int, default=None)
+    parser.add_argument("-m", "--mps", action="store_true", help="Use MPS (Metal) on macOS")
     parser.add_argument("--no-watermark", action="store_true", help="Skip watermarking")
     args = parser.parse_args()
 
@@ -34,12 +35,26 @@ def main():
     output_vc_folder.mkdir(exist_ok=True)
     ref_folder.mkdir(exist_ok=True)
 
-    device = torch.device("cpu" if args.gpu_id is None else f"cuda:{args.gpu_id}")
+    # Device selection with MPS support
+    if args.mps:
+        if torch.backends.mps.is_available():
+            device = torch.device("mps")
+            print("Using MPS (Metal) device")
+        else:
+            print("MPS not available, falling back to CPU")
+            device = torch.device("cpu")
+    elif args.gpu_id is not None:
+        device = torch.device(f"cuda:{args.gpu_id}")
+    else:
+        device = torch.device("cpu")
+
+    # Determine map_location for loading
+    map_location = torch.device('cpu') if device.type in ['cpu', 'mps'] else None
 
     ## s3gen
     s3g_fp = "checkpoints/s3gen.pt"
     s3gen = S3Gen()
-    s3gen.load_state_dict(torch.load(s3g_fp))
+    s3gen.load_state_dict(torch.load(s3g_fp, map_location=map_location))
     s3gen.to(device)
     s3gen.eval()
 
