@@ -171,7 +171,7 @@ class ChatterboxTTS:
 
         return cls.from_local(Path(local_path).parent, device)
 
-    def prepare_conditionals(self, wav_fpath, exaggeration=0.5, pace=1):
+    def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
         # Allow single path or list of paths
         if not isinstance(wav_fpath, list):
