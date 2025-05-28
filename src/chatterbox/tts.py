@@ -18,17 +18,6 @@ from .models.t3.modules.cond_enc import T3Cond
 REPO_ID = "ResembleAI/chatterbox"
 
 
-def change_pace(speech_tokens: torch.Tensor, pace: float):
-    """
-    :param speech_tokens: Tensor of shape (L,)
-    :param pace: float, pace (default: 1)
-    """
-    L = len(speech_tokens)
-    speech_tokens = F.interpolate(speech_tokens.view(1, 1, -1).float(), size=int(L / pace), mode="nearest")
-    speech_tokens = speech_tokens.view(-1).long()
-    return speech_tokens
-
-
 def punc_norm(text: str) -> str:
     """
         Quick cleanup func for punctuation from LLMs or
@@ -205,7 +194,6 @@ class ChatterboxTTS:
         audio_prompt_path=None,
         exaggeration=0.5,
         cfg_weight=0.5,
-        pace=1,
         temperature=0.8,
     ):
         if audio_prompt_path:
@@ -246,8 +234,6 @@ class ChatterboxTTS:
             # TODO: output becomes 1D
             speech_tokens = drop_invalid_tokens(speech_tokens)
             speech_tokens = speech_tokens.to(self.device)
-
-            speech_tokens = change_pace(speech_tokens, pace=pace)
 
             wav, _ = self.s3gen.inference(
                 speech_tokens=speech_tokens,
