@@ -36,7 +36,7 @@ with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column():
             text = gr.Textbox(value="What does the fox say?", label="Text to synthesize")
-            ref_wav = gr.Audio(sources="upload", type="filepath", label="Reference Audio File", value=None)
+            ref_wav = gr.Audio(sources=["upload", "microphone"], type="filepath", label="Reference Audio File", value=None)
             exaggeration = gr.Slider(-5, 5, step=.05, label="exaggeration", value=.5)
 
             with gr.Accordion("More options", open=False):
