@@ -204,7 +204,7 @@ class ChatterboxTTS:
         text,
         audio_prompt_path=None,
         exaggeration=0.5,
-        cfg_weight=0,
+        cfg_weight=0.5,
         pace=1,
         temperature=0.8,
     ):
