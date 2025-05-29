@@ -61,8 +61,10 @@ See `example_tts.py` for more examples.
 
 # Acknowledgements
 - [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)
+- [Real-Time-Voice-Cloning](https://github.com/CorentinJ/Real-Time-Voice-Cloning)
 - [HiFT-GAN](https://github.com/yl4579/HiFTNet)
 - [Llama 3](https://github.com/meta-llama/llama3)
+- [S3Tokenizer](https://github.com/xingchensong/S3Tokenizer)
 
 # Built-in PerTh Watermarking for Responsible AI
 
