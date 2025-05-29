@@ -9,5 +9,5 @@ numpy
 soundfile
 httpx
 python-multipart
-git+https://github.com/anotherjesse/chatterbox.git#egg=chatterbox-tts
+git+https://github.com/resemble-ai/chatterbox.git#egg=chatterbox-tts
 perth
