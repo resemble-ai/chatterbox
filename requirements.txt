@@ -1,0 +1,13 @@
+fastapi
+litserve
+uvicorn
+pydantic
+torch
+torchaudio
+librosa
+numpy
+soundfile
+httpx
+python-multipart
+git+https://github.com/anotherjesse/chatterbox.git#egg=chatterbox-tts
+perth
