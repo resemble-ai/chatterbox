@@ -141,7 +141,7 @@ class AlignmentStreamAnalyzer:
         # If a bad ending is detected, force emit EOS by modifying logits
         # NOTE: this means logits may be inconsistent with latents!
         if long_tail or repetition:
-            logger.warn(f"forcing EOS token, {long_tail=}, {repetition=}")
+            logger.warning(f"forcing EOS token, {long_tail=}, {repetition=}")
             # (±2**15 is safe for all dtypes >= 16bit)
             logits = -(2**15) * torch.ones_like(logits)
             logits[..., self.eos_idx] = 2**15
