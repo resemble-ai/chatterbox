@@ -261,7 +261,8 @@ class S3Token2Wav(S3Token2Mel):
 
         if not self.training:
             # NOTE: ad-hoc method to reduce "spillover" from the reference clip.
-            output_wavs[:, :len(self.trim_fade)] *= self.trim_fade
+            fade_region = output_wavs[:, :len(self.trim_fade)] * self.trim_fade
+            output_wavs = torch.cat([fade_region, output_wavs[:, len(self.trim_fade):]], dim=1)
 
         return output_wavs
 
