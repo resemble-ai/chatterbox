@@ -169,8 +169,16 @@ class ChatterboxTTS:
 
     @classmethod
     def from_pretrained(cls, device) -> 'ChatterboxTTS':
+<<<<<<< HEAD
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
+=======
+        # Check device availability and fallback if needed
+        if device == "cuda" and not torch.cuda.is_available():
+            print("CUDA is not available. Falling back to CPU.")
+            device = "cpu"
+        elif device == "mps" and not torch.backends.mps.is_available():
+>>>>>>> 9b5b235 (feat: add MPS (Metal) support for M-series Macs)
             if not torch.backends.mps.is_built():
                 print("MPS not available because the current PyTorch install was not built with MPS enabled.")
             else:
