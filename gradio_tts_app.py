@@ -5,13 +5,18 @@ import gradio as gr
 from chatterbox.tts import ChatterboxTTS
 
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# Detect device (Mac with M1/M2/M3/M4)
+DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def set_seed(seed: int):
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    if torch.backends.mps.is_available():
+        # MPS doesn't have manual seed functions, but we can still set the CPU seed
+        pass
     random.seed(seed)
     np.random.seed(seed)
 

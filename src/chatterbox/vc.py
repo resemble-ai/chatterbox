@@ -39,19 +39,22 @@ class ChatterboxVC:
         ckpt_dir = Path(ckpt_dir)
         
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
-        if device in ["cpu", "mps"]:
-            map_location = torch.device('cpu')
+        if device in ["cpu", "mps"] or not torch.cuda.is_available():
+            map_location = "cpu"  # Use string for safetensors
+            torch_map_location = torch.device('cpu')
         else:
             map_location = None
-            
+            torch_map_location = None
+
         ref_dict = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            states = torch.load(builtin_voice, map_location=map_location)
+            states = torch.load(builtin_voice, map_location=torch_map_location)
             ref_dict = states['gen']
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", map_location=map_location)
+            load_file(ckpt_dir / "s3gen.safetensors", device=map_location),
+            strict=False
         )
         s3gen.to(device).eval()
 
