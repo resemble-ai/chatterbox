@@ -42,4 +42,12 @@ pip-delete-this-directory.txt
 
 syn_out/
 checkpoints/
+outputs/
+.idea/
+.venv/
 .gradio
+**/*.wav
+**/*.mp3
+**/*.epub
+**/bin
+**/obj

@@ -11,7 +11,7 @@ import soundfile as sf
 from chatterbox.models.s3tokenizer import S3_SR
 from chatterbox.models.s3gen import S3GEN_SR, S3Gen
 
-AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "opus"]
+AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "opus", "aif"]
 
 
 @torch.inference_mode()
