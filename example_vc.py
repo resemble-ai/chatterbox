@@ -13,9 +13,12 @@ else:
 
 print(f"Using device: {device}")
 
+AUDIO_PATH = "YOUR_FILE.wav"
+TARGET_VOICE_PATH = "YOUR_FILE.wav"
+
 model = ChatterboxVC.from_pretrained(device)
 wav = model.generate(
-    audio="test/male_conan.mp3",
-    target_voice_path="test/male_petergriffin.wav",
+    audio=AUDIO_PATH,
+    target_voice_path=TARGET_VOICE_PATH,
 )
 ta.save("testvc.wav", wav, model.sr)

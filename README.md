@@ -54,7 +54,7 @@ wav = model.generate(text)
 ta.save("test-1.wav", wav, model.sr)
 
 # If you want to synthesize with a different voice, specify the audio prompt
-AUDIO_PROMPT_PATH="YOUR_FILE.wav"
+AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
 ta.save("test-2.wav", wav, model.sr)
 ```
@@ -80,8 +80,10 @@ You can look for the watermark using the following script.
 import perth
 import librosa
 
+AUDIO_PATH = "YOUR_FILE.wav"
+
 # Load the watermarked audio
-watermarked_audio, sr = librosa.load("test/male_rickmorty.mp3", sr=None)
+watermarked_audio, sr = librosa.load(AUDIO_PATH, sr=None)
 
 # Initialize watermarker (same as used for embedding)
 watermarker = perth.PerthImplicitWatermarker()
