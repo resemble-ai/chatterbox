@@ -44,10 +44,10 @@ def punc_norm(text: str) -> str:
         ("—", "-"),
         ("–", "-"),
         (" ,", ","),
-        ("“", "\""),
-        ("”", "\""),
-        ("‘", "'"),
-        ("’", "'"),
+        ("\"", "\""),
+        ("\"", "\""),
+        ("'", "'"),
+        ("'", "'"),
     ]
     for old_char_sequence, new_char in punc_to_replace:
         text = text.replace(old_char_sequence, new_char)
@@ -130,19 +130,21 @@ class ChatterboxTTS:
         ckpt_dir = Path(ckpt_dir)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
-        if device in ["cpu", "mps"]:
-            map_location = torch.device('cpu')
+        if device in ["cpu", "mps"] or not torch.cuda.is_available():
+            map_location = "cpu"  # Use string for safetensors
+            torch_map_location = torch.device('cpu')
         else:
             map_location = None
+            torch_map_location = None
 
         ve = VoiceEncoder()
         ve.load_state_dict(
-            load_file(ckpt_dir / "ve.safetensors")
+            load_file(ckpt_dir / "ve.safetensors", device=map_location)
         )
         ve.to(device).eval()
 
         t3 = T3()
-        t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
+        t3_state = load_file(ckpt_dir / "t3_cfg.safetensors", device=map_location)
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
@@ -150,7 +152,8 @@ class ChatterboxTTS:
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
-            load_file(ckpt_dir / "s3gen.safetensors"), strict=False
+            load_file(ckpt_dir / "s3gen.safetensors", device=map_location),
+            strict=False
         )
         s3gen.to(device).eval()
 
@@ -160,14 +163,22 @@ class ChatterboxTTS:
 
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
+            conds = Conditionals.load(builtin_voice, map_location=torch_map_location).to(device)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
     def from_pretrained(cls, device) -> 'ChatterboxTTS':
+<<<<<<< HEAD
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
+=======
+        # Check device availability and fallback if needed
+        if device == "cuda" and not torch.cuda.is_available():
+            print("CUDA is not available. Falling back to CPU.")
+            device = "cpu"
+        elif device == "mps" and not torch.backends.mps.is_available():
+>>>>>>> 9b5b235 (feat: add MPS (Metal) support for M-series Macs)
             if not torch.backends.mps.is_built():
                 print("MPS not available because the current PyTorch install was not built with MPS enabled.")
             else:
