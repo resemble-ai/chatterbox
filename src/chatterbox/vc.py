@@ -46,12 +46,18 @@ class ChatterboxVC:
             
         ref_dict = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            states = torch.load(builtin_voice, map_location=map_location)
+            # Use weights_only=True if available (PyTorch >= 1.13.0)
+            try:
+                states = torch.load(builtin_voice, map_location=map_location, weights_only=True)
+            except TypeError:
+                # Fallback for older PyTorch versions
+                states = torch.load(builtin_voice, map_location=map_location)
             ref_dict = states['gen']
 
         s3gen = S3Gen()
+        # Use weights_only=False for model state dicts as they may contain non-tensor objects
         s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", map_location=map_location)
+            torch.load(ckpt_dir / "s3gen.pt", map_location=map_location, weights_only=False)
         )
         s3gen.to(device).eval()
 
