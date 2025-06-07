@@ -2,6 +2,7 @@ from typing import List, Tuple
 
 import numpy as np
 import torchaudio as ta
+_fb = ta.functional.create_fb_matrix if hasattr(ta.functional, "create_fb_matrix") else ta.functional.melscale_fbanks
 import torch
 import torch.nn.functional as F
 from s3tokenizer.utils import padding
@@ -36,7 +37,7 @@ class S3Tokenizer(S3TokenizerV2):
         super().__init__(name)
 
         self.n_fft = 400
-        _mel_filters = ta.functional.create_fb_matrix(
+        _mel_filters = _fb(
             n_freqs=self.n_fft // 2 + 1,
             n_mels=config.n_mels,
             sample_rate=S3_SR,
