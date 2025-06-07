@@ -1,5 +1,6 @@
 """mel-spectrogram extraction in Matcha-TTS"""
 import torchaudio as ta
+_fb = ta.functional.create_fb_matrix if hasattr(ta.functional, "create_fb_matrix") else ta.functional.melscale_fbanks
 import torch
 import numpy as np
 
@@ -50,7 +51,7 @@ def mel_spectrogram(y, n_fft=1920, num_mels=80, sampling_rate=24000, hop_size=48
     global mel_basis, hann_window  # pylint: disable=global-statement,global-variable-not-assigned
     key = f"{fmax}_{y.device}"
     if key not in mel_basis:
-        fb = ta.functional.create_fb_matrix(
+        fb = _fb(
             n_freqs=n_fft // 2 + 1,
             n_mels=num_mels,
             sample_rate=sampling_rate,
