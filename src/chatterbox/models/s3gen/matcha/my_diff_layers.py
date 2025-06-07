@@ -95,9 +95,10 @@ class Attention(nn.Module):
         context = encoder_hidden_states if encoder_hidden_states is not None else x
         b, _, _ = x.shape
         h = self.heads
-        q = self._shape(self.to_q(x), b, h, -1)
-        k = self._shape(self.to_k(context), b, h, -1)
-        v = self._shape(self.to_v(context), b, h, -1)
+        head_dim = self.to_q.out_features // h        # == dim_head
+        q = self._shape(self.to_q(x), b, h, head_dim)
+        k = self._shape(self.to_k(context), b, h, head_dim)
+        v = self._shape(self.to_v(context), b, h, head_dim)
 
         attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale
         if attention_mask is not None:
