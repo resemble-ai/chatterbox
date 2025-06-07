@@ -1,5 +1,6 @@
 """mel-spectrogram extraction in Matcha-TTS"""
-from librosa.filters import mel as librosa_mel_fn
+import torchaudio as ta
+_fb = ta.functional.create_fb_matrix if hasattr(ta.functional, "create_fb_matrix") else ta.functional.melscale_fbanks
 import torch
 import numpy as np
 
@@ -48,11 +49,17 @@ def mel_spectrogram(y, n_fft=1920, num_mels=80, sampling_rate=24000, hop_size=48
         print("max value is ", torch.max(y))
 
     global mel_basis, hann_window  # pylint: disable=global-statement,global-variable-not-assigned
-    if f"{str(fmax)}_{str(y.device)}" not in mel_basis:
-        mel = librosa_mel_fn(sr=sampling_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax)
-        mel_basis[str(fmax) + "_" + str(y.device)] = torch.from_numpy(mel).float().to(y.device)
+    key = f"{fmax}_{y.device}"
+    if key not in mel_basis:
+        fb = _fb(
+            n_freqs=n_fft // 2 + 1,
+            n_mels=num_mels,
+            sample_rate=sampling_rate,
+            f_min=fmin,
+            f_max=fmax,
+        ).T                         # torchaudio returns (n_freqs, n_mels); transpose to (n_mels, n_freqs)
+        mel_basis[key] = fb.to(y.device)
         hann_window[str(y.device)] = torch.hann_window(win_size).to(y.device)
-
     y = torch.nn.functional.pad(
         y.unsqueeze(1), (int((n_fft - hop_size) / 2), int((n_fft - hop_size) / 2)), mode="reflect"
     )

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import librosa
+import torchaudio as ta
 import torch
 import perth
 from huggingface_hub import hf_hub_download
@@ -75,7 +75,8 @@ class ChatterboxVC:
 
     def set_target_voice(self, wav_fpath):
         ## Load reference wav
-        s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
+        s3gen_ref_wav, _sr = ta.load(wav_fpath, normalize=True)
+        s3gen_ref_wav = ta.functional.resample(s3gen_ref_wav, _sr, S3GEN_SR)[0].numpy()
 
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         self.ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
@@ -91,8 +92,9 @@ class ChatterboxVC:
             assert self.ref_dict is not None, "Please `prepare_conditionals` first or specify `target_voice_path`"
 
         with torch.inference_mode():
-            audio_16, _ = librosa.load(audio, sr=S3_SR)
-            audio_16 = torch.from_numpy(audio_16).float().to(self.device)[None, ]
+            audio_16, _sr = ta.load(audio, normalize=True)        # [C, T]
+            audio_16 = ta.functional.resample(audio_16, _sr, S3_SR)
+            audio_16 = audio_16.mean(0, keepdim=True).to(self.device)  # [1, T]
 
             s3_tokens, _ = self.s3gen.tokenizer(audio_16)
             wav, _ = self.s3gen.inference(

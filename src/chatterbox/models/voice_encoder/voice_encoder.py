@@ -4,7 +4,7 @@ from typing import List, Union, Optional
 
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
-import librosa
+import torchaudio as ta
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
@@ -259,12 +259,21 @@ class VoiceEncoder(nn.Module):
         """
         if sample_rate != self.hp.sample_rate:
             wavs = [
-                librosa.resample(wav, orig_sr=sample_rate, target_sr=self.hp.sample_rate, res_type="kaiser_fast")
+                ta.functional.resample(torch.from_numpy(wav).float(),  # ensure float32
+                                        sample_rate,
+                                        self.hp.sample_rate).numpy()
                 for wav in wavs
             ]
 
         if trim_top_db:
-            wavs = [librosa.effects.trim(wav, top_db=trim_top_db)[0] for wav in wavs]
+            wavs = [
+                ta.functional.vad(
+                    torch.from_numpy(wav).float().unsqueeze(0),  # [1, T]
+                    sample_rate=self.hp.sample_rate,
+                    trigger_level=trim_top_db
+                ).squeeze(0).numpy()
+                for wav in wavs
+            ]
 
         if "rate" not in kwargs:
             kwargs["rate"] = 1.3  # Resemble's default value.
