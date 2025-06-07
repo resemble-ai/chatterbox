@@ -1,9 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-import librosa
+import torchaudio as ta
 import torch
-import perth
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
@@ -123,7 +122,6 @@ class ChatterboxTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
-        self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
@@ -181,9 +179,13 @@ class ChatterboxTTS:
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
-        s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
+        s3gen_ref_wav, _sr = ta.load(wav_fpath, normalize=True)
+        s3gen_ref_wav = ta.functional.resample(s3gen_ref_wav, _sr, S3GEN_SR)[0]  # -> 1-D tensor
+        s3gen_ref_wav = s3gen_ref_wav.numpy()
 
-        ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+        ref_16k_wav = ta.functional.resample(
+            torch.from_numpy(s3gen_ref_wav), S3GEN_SR, S3_SR
+        ).numpy()
 
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
@@ -262,5 +264,4 @@ class ChatterboxTTS:
                 ref_dict=self.conds.gen,
             )
             wav = wav.squeeze(0).detach().cpu().numpy()
-            watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-        return torch.from_numpy(watermarked_wav).unsqueeze(0)
+        return torch.from_numpy(wav).unsqueeze(0)
