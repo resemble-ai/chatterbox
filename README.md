@@ -35,7 +35,22 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
   - Try lower `cfg_weight` values (e.g. `~0.3`) and increase `exaggeration` to around `0.7` or higher.
   - Higher `exaggeration` tends to speed up speech; reducing `cfg_weight` helps compensate with slower, more deliberate pacing.
 
-
+# Project Structure
+```
+chatterbox/
+├── chatterbox.ipynb                    # Experimentation and Chunking Example
+├── chatterbox-runpod-serverless        # Runpod Deployment Files
+├── Dockerfile                          # Dockerfile for Runpod Deployment
+├── example_for_mac.py                  # Example script for macOS users
+├── example_tts.py                      # Example script for Text-to-Speech
+├── example_vc.py                       # Example script for Voice Conversion
+├── gradio_tts_app.py                   # Gradio application for Text-to-Speech
+├── gradio_vc_app.py                    # Gradio application for Voice Conversion
+├── LICENSE                             # Project license file
+├── pyproject.toml                      # Project build configuration
+├── README.md                           # This file
+└── src                                 # Source code directory
+```
 # Installation
 ```
 pip install chatterbox-tts
@@ -60,12 +75,7 @@ ta.save("test-2.wav", wav, model.sr)
 ```
 See `example_tts.py` and `example_vc.py` for more examples.
 
-# Acknowledgements
-- [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)
-- [Real-Time-Voice-Cloning](https://github.com/CorentinJ/Real-Time-Voice-Cloning)
-- [HiFT-GAN](https://github.com/yl4579/HiFTNet)
-- [Llama 3](https://github.com/meta-llama/llama3)
-- [S3Tokenizer](https://github.com/xingchensong/S3Tokenizer)
+
 
 # Built-in PerTh Watermarking for Responsible AI
 
@@ -93,6 +103,16 @@ watermark = watermarker.get_watermark(watermarked_audio, sample_rate=sr)
 print(f"Extracted watermark: {watermark}")
 # Output: 0.0 (no watermark) or 1.0 (watermarked)
 ```
+
+# Deployment on Runpod
+- See the [chatterbox-runpod-serverless](chatterbox-runpod-serverless/README.md)
+
+# Acknowledgements
+- [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)
+- [Real-Time-Voice-Cloning](https://github.com/CorentinJ/Real-Time-Voice-Cloning)
+- [HiFT-GAN](https://github.com/yl4579/HiFTNet)
+- [Llama 3](https://github.com/meta-llama/llama3)
+- [S3Tokenizer](https://github.com/xingchensong/S3Tokenizer)
 
 
 # Official Discord

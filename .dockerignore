@@ -1,0 +1,66 @@
+# Git files
+.git
+.gitignore
+
+# Documentation files
+README.md
+chatterbox-runpod-serverless/README.md
+*.md
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.env
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files (exclude from production build)
+chatterbox-runpod-serverless/test.py
+chatterbox-runpod-serverless/test_input*.json
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Docker files (don't copy into container)
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+# Deployment scripts
+build_and_deploy.sh
+deploy.sh
+
+# Output directories
+chatterbox-runpod-serverless/outputs/
+
+# Model cache (will be downloaded during build if needed)
+models/
+checkpoints/
+example*.py
+gradio*.py
+chatterbox.ipynb

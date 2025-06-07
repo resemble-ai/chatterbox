@@ -1,0 +1,11 @@
+{
+    "input": {
+        "text": "Hello world! This is a test of the ChatterboxTTS serverless worker. The system will convert this text into high-quality speech audio.",
+        "temperature": 0.8,
+        "cfg_weight": 0.5,
+        "exaggeration": 0.5,
+        "max_chars_per_chunk": 300,
+        "inter_chunk_silence_ms": 350,
+        "output_format": "wav"
+    }
+}
