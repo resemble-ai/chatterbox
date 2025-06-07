@@ -3,13 +3,14 @@ from functools import lru_cache
 from scipy import signal
 import numpy as np
 import torchaudio as ta
+_fb = ta.functional.create_fb_matrix if hasattr(ta.functional, "create_fb_matrix") else ta.functional.melscale_fbanks
 import torch
 
 
 @lru_cache()
 def mel_basis(hp):
     assert hp.fmax <= hp.sample_rate // 2
-    fb = ta.functional.create_fb_matrix(
+    fb = _fb(
         n_freqs=hp.n_fft // 2 + 1,
         n_mels=hp.num_mels,
         f_min=hp.fmin,
