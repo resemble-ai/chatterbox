@@ -7,6 +7,8 @@ import perth
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
+import re
+import numpy as np
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -230,6 +232,39 @@ class ChatterboxTTS:
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
 
+        # Parse pause tags BEFORE applying punc_norm to preserve the tags
+        segments = parse_pause_tags(text)
+        
+        # If no pause tags, use original logic
+        if len(segments) == 1 and segments[0][1] == 0.0:
+            return self._generate_single_segment(
+                segments[0][0], cfg_weight, temperature
+            )
+        
+        # Process text with pauses
+        audio_segments = []
+        
+        for text_segment, pause_duration in segments:
+            if text_segment.strip():  # Non-empty text segment
+                segment_audio = self._generate_single_segment(
+                    text_segment, cfg_weight, temperature
+                )
+                audio_segments.append(segment_audio.squeeze(0))
+            
+            if pause_duration > 0:  # Add silence
+                silence = create_silence(pause_duration, self.sr)
+                audio_segments.append(silence.squeeze(0))
+        
+        # Concatenate all audio segments
+        if audio_segments:
+            final_audio = torch.cat(audio_segments, dim=0)
+            return final_audio.unsqueeze(0)
+        else:
+            # If no valid audio segments, return brief silence
+            return create_silence(0.1, self.sr)
+
+    def _generate_single_segment(self, text, cfg_weight, temperature):
+        """Generate audio for a single text segment"""
         # Norm and tokenize text
         text = punc_norm(text)
         text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
@@ -270,3 +305,63 @@ class ChatterboxTTS:
             wav = wav.squeeze(0).detach().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
         return torch.from_numpy(watermarked_wav).unsqueeze(0)
+
+def parse_pause_tags(text: str):
+    """
+    Parse pause tags in text and return text segments with corresponding pause durations
+    
+    Args:
+        text: Text containing pause tags like "Hello[pause:0.5s]world[pause:1.0s]end"
+    
+    Returns:
+        segments: [(text_segment, pause_duration), ...]
+        Example: [("Hello", 0.5), ("world", 1.0), ("end", 0.0)]
+    """
+    if not text:
+        return [("", 0.0)]
+    
+    # Regular expression to match pause tags
+    pause_pattern = r'\[pause:([\d.]+)s\]'
+    
+    segments = []
+    last_end = 0
+    
+    # Find all pause tags
+    for match in re.finditer(pause_pattern, text):
+        # Extract text before the pause tag
+        text_segment = text[last_end:match.start()].strip()
+        if text_segment:
+            segments.append((text_segment, 0.0))
+        
+        # Extract pause duration
+        pause_duration = float(match.group(1))
+        # Ensure pause duration is a multiple of 0.1s
+        pause_duration = round(pause_duration / 0.1) * 0.1
+        segments.append(("", pause_duration))
+        
+        last_end = match.end()
+    
+    # Add the final text segment
+    final_text = text[last_end:].strip()
+    if final_text:
+        segments.append((final_text, 0.0))
+    
+    # If no segments found, return original text
+    if not segments:
+        segments = [(text, 0.0)]
+    
+    return segments
+
+def create_silence(duration_seconds: float, sample_rate: int) -> torch.Tensor:
+    """
+    Create silence of specified duration
+    
+    Args:
+        duration_seconds: Duration of silence in seconds
+        sample_rate: Sample rate
+    
+    Returns:
+        Silent audio tensor
+    """
+    num_samples = int(duration_seconds * sample_rate)
+    return torch.zeros(1, num_samples)
