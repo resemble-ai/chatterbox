@@ -31,6 +31,7 @@ from .hifigan import HiFTGenerator
 from .transformer.upsample_encoder import UpsampleConformerEncoder
 from .flow_matching import CausalConditionalCFM
 from .decoder import ConditionalDecoder
+from .configs import CFM_PARAMS
 
 
 def drop_invalid_tokens(x):
@@ -85,14 +86,7 @@ class S3Token2Mel(torch.nn.Module):
             num_heads=8,
             act_fn='gelu',
         )
-        cfm_params = DictConfig({
-            "sigma_min": 1e-06,
-            "solver": 'euler',
-            "t_scheduler": 'cosine',
-            "training_cfg_rate": 0.2,
-            "inference_cfg_rate": 0.7,
-            "reg_loss_type": 'l1',
-        })
+        cfm_params = CFM_PARAMS
         decoder = CausalConditionalCFM(
             spk_emb_dim=80,
             cfm_params=cfm_params,
