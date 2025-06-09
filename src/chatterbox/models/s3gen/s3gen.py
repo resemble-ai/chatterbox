@@ -19,7 +19,6 @@ import torch
 import torchaudio as ta
 from functools import lru_cache
 from typing import Optional
-from omegaconf import DictConfig
 
 from ..s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
 from .const import S3GEN_SR
