@@ -16,15 +16,10 @@ from .modules.cond_enc import T3CondEnc, T3Cond
 from .modules.t3_config import T3Config
 from .llama_configs import LLAMA_CONFIGS
 from .inference.t3_hf_backend import T3HuggingfaceBackend
+from ..utils import AttrDict
 
 
 logger = logging.getLogger(__name__)
-
-
-class AttrDict(dict):
-    def __init__(self, *args, **kwargs):
-        super(AttrDict, self).__init__(*args, **kwargs)
-        self.__dict__ = self
 
 
 def _ensure_BOT_EOT(text_tokens: Tensor, hp):
