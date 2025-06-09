@@ -273,6 +273,7 @@ class T3(nn.Module):
             )
             self.patched_model = patched_model
             self.compiled = True
+            self.patched_model.alignment_history = []
 
         # # Run normal generate method, which calls our custom extended methods
         # return self.patched_model.generate(
@@ -375,7 +376,17 @@ class T3(nn.Module):
             )
             # Update the kv_cache.
             past = output.past_key_values
+            if hasattr(self.patched_model, 'alignment_stream_analyzer') and self.patched_model.alignment_stream_analyzer:
+                # Use output.logits[0:1] for the conditional batch for alignment analysis.
+                # The analyzer's step might modify logits (e.g., to force EOS).
+                current_logits_for_analyzer = output.logits[0:1].clone() if cfg_weight > 0 else output.logits.clone()
+                # The step method in AlignmentStreamAnalyzer modifies logits in place if certain conditions are met.
+                # It expects logits for a single batch item if not doing CFG, or potentially both if it were CFG-aware.
+                # Given T3's CFG handling, output.logits[0:1] refers to the conditional logits.
+                self.patched_model.alignment_stream_analyzer.step(current_logits_for_analyzer) # Pass the conditional logits
+                current_text_pos = self.patched_model.alignment_stream_analyzer.text_position
+                self.patched_model.alignment_history.append({'token_idx': current_text_pos, 'frame_idx': i})
 
         # Concatenate all predicted tokens along the sequence dimension.
         predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
-        return predicted_tokens
+        return predicted_tokens, self.patched_model.alignment_history

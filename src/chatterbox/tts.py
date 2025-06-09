@@ -240,19 +240,81 @@ class ChatterboxTTS:
         text_tokens = F.pad(text_tokens, (0, 1), value=eot)
 
         with torch.inference_mode():
-            speech_tokens = self.t3.inference(
+            speech_tokens, alignment_history = self.t3.inference( # New line
                 t3_cond=self.conds.t3,
                 text_tokens=text_tokens,
                 max_new_tokens=1000,  # TODO: use the value in config
                 temperature=temperature,
                 cfg_weight=cfg_weight,
             )
-            # Extract only the conditional batch.
+
+            # Process alignment_history to generate token_timestamps
+            frame_duration = 0.04  # Each frame from T3 alignment corresponds to this duration in seconds
+            input_token_ids = text_tokens[0].cpu().tolist() # text_tokens is already padded: [SOT, id1, ..., EOT]
+            token_timestamps = []
+            if not alignment_history: # Handle None case if T3 doesn't provide it
+                alignment_history = []
+
+            if alignment_history: # Only process if there's history
+                current_token_real_id = -1 # Stores the actual token ID from input_token_ids
+                current_token_start_frame = -1
+
+                for entry_idx in range(len(alignment_history)):
+                    entry = alignment_history[entry_idx]
+                    # frame_token_idx_in_input is the index within input_token_ids (0 for SOT, 1 for first real token, etc.)
+                    frame_token_idx_in_input = entry['token_idx']
+                    frame_num = entry['frame_idx']
+
+                    if frame_token_idx_in_input >= len(input_token_ids): # Safety check
+                        # This can happen if alignment_history token_idx is out of bounds
+                        # print(f"Warning: frame_token_idx {frame_token_idx_in_input} out of bounds for input_token_ids len {len(input_token_ids)}")
+                        continue
+
+                    actual_token_id_at_frame = input_token_ids[frame_token_idx_in_input]
+
+                    if actual_token_id_at_frame != current_token_real_id: # New token begins
+                        if current_token_real_id != -1: # If there was a previous token being tracked
+                            # Decode the *previous* token
+                            token_text = self.tokenizer.decode([current_token_real_id])
+                            # Filter out SOT/EOT and empty strings
+                            if current_token_real_id != self.t3.hp.start_text_token and \
+                               current_token_real_id != self.t3.hp.stop_text_token and \
+                               token_text.strip():
+                                start_time = current_token_start_frame * frame_duration
+                                end_time = frame_num * frame_duration # Current frame_num marks end of previous token
+                                token_timestamps.append({
+                                    'token_text': token_text,
+                                    'start_time': round(start_time, 3),
+                                    'end_time': round(end_time, 3)
+                                })
+
+                        # Start tracking the new token
+                        current_token_real_id = actual_token_id_at_frame
+                        current_token_start_frame = frame_num
+
+                # After the loop, handle the very last tracked token
+                if current_token_real_id != -1:
+                    token_text = self.tokenizer.decode([current_token_real_id])
+                    if current_token_real_id != self.t3.hp.start_text_token and \
+                       current_token_real_id != self.t3.hp.stop_text_token and \
+                       token_text.strip():
+                        start_time = current_token_start_frame * frame_duration
+                        # End time for the last token will be determined after wav is generated
+                        # For now, use a placeholder or the end of its last aligned frame.
+                        last_frame_end_time = (alignment_history[-1]['frame_idx'] + 1) * frame_duration
+                        token_timestamps.append({
+                            'token_text': token_text,
+                            'start_time': round(start_time, 3),
+                            'end_time': round(last_frame_end_time, 3) # Placeholder, will be updated
+                        })
+
+            # Extract only the conditional batch from speech_tokens (if CFG was used)
             speech_tokens = speech_tokens[0]
 
-            # TODO: output becomes 1D
+            # TODO: output becomes 1D (This comment seems to refer to a potential issue with speech_tokens shape)
             speech_tokens = drop_invalid_tokens(speech_tokens)
             
+            # Filter out any tokens that might cause issues with S3Gen (e.g. > 6561)
             speech_tokens = speech_tokens[speech_tokens < 6561]
 
             speech_tokens = speech_tokens.to(self.device)
@@ -263,4 +325,13 @@ class ChatterboxTTS:
             )
             wav = wav.squeeze(0).detach().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-        return torch.from_numpy(watermarked_wav).unsqueeze(0)
+
+            # Update end time of the last token using actual audio duration
+            if token_timestamps: # If list is not empty
+                final_audio_duration = len(watermarked_wav) / self.sr
+                token_timestamps[-1]['end_time'] = round(final_audio_duration, 3)
+
+        return {
+            'audio_tensor': torch.from_numpy(watermarked_wav).unsqueeze(0),
+            'timestamps': token_timestamps
+        }
