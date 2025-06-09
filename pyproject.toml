@@ -36,3 +36,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "gradio>=4.44.1",
+    "resemble-perth>=1.0.1",
+    "setuptools>=80.9.0",
+]
