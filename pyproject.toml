@@ -15,7 +15,8 @@ dependencies = [
     "torchaudio>=2.6.0",
     "transformers>=4.46.3",
     "diffusers>=0.29.0",
-    "safetensors>=0.5.3"
+    "safetensors>=0.5.3",
+    "scipy>1.10.0"
 ]
 
 [project.urls]
