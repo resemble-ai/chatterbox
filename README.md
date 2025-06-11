@@ -1,3 +1,8 @@
+## This is a light version of chatterbox that removes:
+* ```librosa``` and all it's required dependencies and instead uses ```torchaudio``` and ```scipy```
+* ```perth``` because who the heck needs watermarking anyways
+* ```omegaconf``` and instead use standard python
+* others I forget, but everything works
 
 <img width="1200" alt="cb-big2" src="https://github.com/user-attachments/assets/bd8c5f03-e91d-4ee5-b680-57355da204d1" />
 
