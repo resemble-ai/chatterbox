@@ -9,14 +9,18 @@ authors = [
     {name = "resemble-ai", email = "engineering@resemble.ai"}
 ]
 dependencies = [
-    "numpy>=1.26.0",
+    "numpy>=1.26.4",
     "s3tokenizer",
     "torch>=2.6.0",
     "torchaudio>=2.6.0",
     "transformers>=4.46.3",
     "diffusers>=0.29.0",
     "safetensors>=0.5.3",
-    "scipy>1.10.0"
+    "scipy>=1.14.0",
+    "tqdm",
+    "einops>=0.6.0",
+    "tokenizers>=0.13.0"
+    
 ]
 
 [project.urls]
