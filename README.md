@@ -71,7 +71,7 @@ ta.save("test-2.wav", wav, model.sr)
 ```
 See `example_tts.py` and `example_vc.py` for more examples.
 
-# Supported Language
+# Supported Languages
 Currenlty only English.
 
 # Acknowledgements
