@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
+import tempfile
+import subprocess
+import os
 
 import librosa
 import torch
@@ -9,6 +12,7 @@ from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 import re
 import numpy as np
+import torchaudio
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -217,6 +221,10 @@ class ChatterboxTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
+        use_auto_editor=False,
+        ae_threshold=0.06,
+        ae_margin=0.2,
+        disable_watermark=False,
     ):
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
@@ -235,35 +243,108 @@ class ChatterboxTTS:
         # Parse pause tags BEFORE applying punc_norm to preserve the tags
         segments = parse_pause_tags(text)
         
-        # If no pause tags, use original logic
-        if len(segments) == 1 and segments[0][1] == 0.0:
-            return self._generate_single_segment(
-                segments[0][0], cfg_weight, temperature
+        # Single segment processing (simplified logic for single text without pauses)
+        if len(segments) == 1 and segments[0][1] == 0.0:  # Single text, no pause
+            text_segment = segments[0][0]
+            segment_audio = self._generate_single_segment(
+                text_segment, cfg_weight, temperature, disable_watermark
             )
-        
-        # Process text with pauses
-        audio_segments = []
-        
-        for text_segment, pause_duration in segments:
-            if text_segment.strip():  # Non-empty text segment
-                segment_audio = self._generate_single_segment(
-                    text_segment, cfg_weight, temperature
-                )
-                audio_segments.append(segment_audio.squeeze(0))
             
-            if pause_duration > 0:  # Add silence
-                silence = create_silence(pause_duration, self.sr)
-                audio_segments.append(silence.squeeze(0))
+            # 清理伪影(如果启用)
+            if use_auto_editor:
+                # 保存临时音频文件
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                    temp_audio_path = temp_file.name
+                torchaudio.save(temp_audio_path, segment_audio, self.sr)
+                
+                # 清理伪影
+                cleaned_audio_path = self._clean_artifacts(temp_audio_path, ae_threshold, ae_margin)
+                
+                # 加载清理后的音频
+                if cleaned_audio_path != temp_audio_path:
+                    try:
+                        cleaned_audio, _ = torchaudio.load(cleaned_audio_path)
+                        # 清理临时文件
+                        if os.path.exists(temp_audio_path):
+                            os.unlink(temp_audio_path)
+                        if os.path.exists(cleaned_audio_path):
+                            os.unlink(cleaned_audio_path)
+                        return cleaned_audio
+                    except Exception as e:
+                        print(f"[WARNING] 无法加载清理后的音频: {e}")
+                        # 清理临时文件
+                        if os.path.exists(temp_audio_path):
+                            os.unlink(temp_audio_path)
+                        if os.path.exists(cleaned_audio_path):
+                            os.unlink(cleaned_audio_path)
+                else:
+                    # 清理失败，使用原始音频
+                    if os.path.exists(temp_audio_path):
+                        os.unlink(temp_audio_path)
+                    
+            return segment_audio
         
-        # Concatenate all audio segments
-        if audio_segments:
-            final_audio = torch.cat(audio_segments, dim=0)
-            return final_audio.unsqueeze(0)
-        else:
-            # If no valid audio segments, return brief silence
-            return create_silence(0.1, self.sr)
+        # Process text with pauses - 先生成并清理每段，再添加停顿
+        audio_segments = []
+        temp_files_to_cleanup = []
+        
+        try:
+            for text_segment, pause_duration in segments:
+                if text_segment.strip():  # Non-empty text segment
+                    # 1. 生成音频段
+                    segment_audio = self._generate_single_segment(
+                        text_segment, cfg_weight, temperature, disable_watermark
+                    )
+                    
+                    # 2. 清理该段的伪影
+                    if use_auto_editor:
+                        # 保存临时音频文件
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                            temp_audio_path = temp_file.name
+                        temp_files_to_cleanup.append(temp_audio_path)
+                        torchaudio.save(temp_audio_path, segment_audio, self.sr)
+                        
+                        # 清理伪影
+                        cleaned_audio_path = self._clean_artifacts(temp_audio_path, ae_threshold, ae_margin)
+                        if cleaned_audio_path != temp_audio_path:
+                            temp_files_to_cleanup.append(cleaned_audio_path)
+                        
+                        # 加载清理后的音频
+                        try:
+                            if cleaned_audio_path != temp_audio_path:
+                                cleaned_audio, _ = torchaudio.load(cleaned_audio_path)
+                                segment_audio = cleaned_audio
+                        except Exception as e:
+                            print(f"[WARNING] 无法加载清理后的音频段: {e}")
+                            # 继续使用原始音频段
+                    
+                    audio_segments.append(segment_audio.squeeze(0))
+                
+                # 3. 添加停顿(在伪影清理之后)
+                if pause_duration > 0:
+                    silence = create_silence(pause_duration, self.sr)
+                    audio_segments.append(silence.squeeze(0))
+            
+            # 4. 拼接所有音频段
+            if audio_segments:
+                final_audio = torch.cat(audio_segments, dim=0)
+                return final_audio.unsqueeze(0)
+            else:
+                # If no valid audio segments, return brief silence
+                return create_silence(0.1, self.sr)
+                
+        finally:
+            # 清理所有临时文件
+            for temp_file in temp_files_to_cleanup:
+                if os.path.exists(temp_file):
+                    try:
+                        os.unlink(temp_file)
+                    except:
+                        pass  # 忽略清理错误
 
-    def _generate_single_segment(self, text, cfg_weight, temperature):
+    def _generate_single_segment(self, text, cfg_weight, temperature, disable_watermark=False):
         """Generate audio for a single text segment"""
         # Norm and tokenize text
         text = punc_norm(text)
@@ -303,8 +384,76 @@ class ChatterboxTTS:
                 ref_dict=self.conds.gen,
             )
             wav = wav.squeeze(0).detach().cpu().numpy()
-            watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-        return torch.from_numpy(watermarked_wav).unsqueeze(0)
+            
+            if not disable_watermark:
+                watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
+                return torch.from_numpy(watermarked_wav).unsqueeze(0)
+            else:
+                return torch.from_numpy(wav).unsqueeze(0)
+
+    def _clean_artifacts(self, audio_path: str, threshold: float = 0.06, margin: float = 0.2) -> str:
+        """
+        使用 auto-editor 清理音频伪影
+        
+        Args:
+            audio_path: 输入音频文件路径
+            threshold: 音量阈值, 低于此值认为是静音/伪影
+            margin: 边界保护时间(秒)
+            
+        Returns:
+            清理后的音频文件路径
+        """
+        import subprocess
+        import tempfile
+        import os
+        
+        # 创建输出文件
+        output_file = tempfile.NamedTemporaryFile(suffix='_cleaned.wav', delete=False)
+        output_file.close()
+        
+        try:
+            # 构建 auto-editor 命令(适配 28.0.0 版本)
+            cmd = [
+                "auto-editor",
+                audio_path,
+                "--edit", f"audio:threshold={threshold}",
+                "--margin", f"{margin}s",
+                "--output-file", output_file.name
+            ]
+            
+            print(f"[INFO] 清理伪影: {' '.join(cmd)}")
+            
+            # 执行 auto-editor
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=True
+            )
+            
+            if os.path.exists(output_file.name) and os.path.getsize(output_file.name) > 0:
+                print(f"[INFO] 伪影清理完成: {output_file.name}")
+                return output_file.name
+            else:
+                raise RuntimeError("auto-editor 没有生成有效的输出文件")
+                
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] auto-editor 执行失败: {e}")
+            print(f"[ERROR] stderr: {e.stderr}")
+            print(f"[ERROR] stdout: {e.stdout}")
+            # 清理失败的输出文件
+            if os.path.exists(output_file.name):
+                os.unlink(output_file.name)
+            return audio_path  # 返回原始文件
+            
+        except Exception as e:
+            print(f"[ERROR] 伪影清理过程中出现异常: {e}")
+            # 清理失败的输出文件
+            if os.path.exists(output_file.name):
+                os.unlink(output_file.name)
+            return audio_path  # 返回原始文件
+
 
 def parse_pause_tags(text: str):
     """
@@ -351,6 +500,7 @@ def parse_pause_tags(text: str):
         segments = [(text, 0.0)]
     
     return segments
+
 
 def create_silence(duration_seconds: float, sample_rate: int) -> torch.Tensor:
     """
