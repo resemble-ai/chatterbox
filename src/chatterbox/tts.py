@@ -247,7 +247,7 @@ class ChatterboxTTS:
         if len(segments) == 1 and segments[0][1] == 0.0:  # Single text, no pause
             text_segment = segments[0][0]
             segment_audio = self._generate_single_segment(
-                text_segment, cfg_weight, temperature, disable_watermark
+                text_segment, cfg_weight, temperature, repetition_penalty, min_p, top_p, disable_watermark
             )
             
             # Clean artifacts (if enabled)
@@ -294,7 +294,7 @@ class ChatterboxTTS:
                 if text_segment.strip():  # Non-empty text segment
                     # 1. Generate audio segment
                     segment_audio = self._generate_single_segment(
-                        text_segment, cfg_weight, temperature, disable_watermark
+                        text_segment, cfg_weight, temperature, repetition_penalty, min_p, top_p, disable_watermark
                     )
                     
                     # 2. Clean artifacts for this segment
@@ -344,7 +344,7 @@ class ChatterboxTTS:
                     except:
                         pass  # Ignore cleanup errors
 
-    def _generate_single_segment(self, text, cfg_weight, temperature, disable_watermark=False):
+    def _generate_single_segment(self, text, cfg_weight, temperature, repetition_penalty=1.2, min_p=0.05, top_p=1.0, disable_watermark=False):
         """Generate audio for a single text segment"""
         # Norm and tokenize text
         text = punc_norm(text)
