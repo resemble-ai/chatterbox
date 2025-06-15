@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
+import tempfile
+import subprocess
+import os
 
 import librosa
 import torch
@@ -7,6 +10,9 @@ import perth
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
+import re
+import numpy as np
+import torchaudio
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -215,6 +221,10 @@ class ChatterboxTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
+        use_auto_editor=False,
+        ae_threshold=0.06,
+        ae_margin=0.2,
+        disable_watermark=False,
     ):
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
@@ -230,6 +240,112 @@ class ChatterboxTTS:
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
 
+        # Parse pause tags BEFORE applying punc_norm to preserve the tags
+        segments = parse_pause_tags(text)
+        
+        # Single segment processing (simplified logic for single text without pauses)
+        if len(segments) == 1 and segments[0][1] == 0.0:  # Single text, no pause
+            text_segment = segments[0][0]
+            segment_audio = self._generate_single_segment(
+                text_segment, cfg_weight, temperature, repetition_penalty, min_p, top_p, disable_watermark
+            )
+            
+            # Clean artifacts (if enabled)
+            if use_auto_editor:
+                # Save temporary audio file
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                    temp_audio_path = temp_file.name
+                torchaudio.save(temp_audio_path, segment_audio, self.sr)
+                
+                # Clean artifacts
+                cleaned_audio_path = self._clean_artifacts(temp_audio_path, ae_threshold, ae_margin)
+                
+                # Load cleaned audio
+                if cleaned_audio_path != temp_audio_path:
+                    try:
+                        cleaned_audio, _ = torchaudio.load(cleaned_audio_path)
+                        # Clean temporary files
+                        if os.path.exists(temp_audio_path):
+                            os.unlink(temp_audio_path)
+                        if os.path.exists(cleaned_audio_path):
+                            os.unlink(cleaned_audio_path)
+                        return cleaned_audio
+                    except Exception as e:
+                        print(f"[WARNING] Unable to load cleaned audio: {e}")
+                        # Clean temporary files
+                        if os.path.exists(temp_audio_path):
+                            os.unlink(temp_audio_path)
+                        if os.path.exists(cleaned_audio_path):
+                            os.unlink(cleaned_audio_path)
+                else:
+                    # Cleaning failed, use original audio
+                    if os.path.exists(temp_audio_path):
+                        os.unlink(temp_audio_path)
+                    
+            return segment_audio
+        
+        # Process text with pauses - generate and clean each segment first, then add pauses
+        audio_segments = []
+        temp_files_to_cleanup = []
+        
+        try:
+            for text_segment, pause_duration in segments:
+                if text_segment.strip():  # Non-empty text segment
+                    # 1. Generate audio segment
+                    segment_audio = self._generate_single_segment(
+                        text_segment, cfg_weight, temperature, repetition_penalty, min_p, top_p, disable_watermark
+                    )
+                    
+                    # 2. Clean artifacts for this segment
+                    if use_auto_editor:
+                        # Save temporary audio file
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                            temp_audio_path = temp_file.name
+                        temp_files_to_cleanup.append(temp_audio_path)
+                        torchaudio.save(temp_audio_path, segment_audio, self.sr)
+                        
+                        # Clean artifacts
+                        cleaned_audio_path = self._clean_artifacts(temp_audio_path, ae_threshold, ae_margin)
+                        if cleaned_audio_path != temp_audio_path:
+                            temp_files_to_cleanup.append(cleaned_audio_path)
+                        
+                        # Load cleaned audio
+                        try:
+                            if cleaned_audio_path != temp_audio_path:
+                                cleaned_audio, _ = torchaudio.load(cleaned_audio_path)
+                                segment_audio = cleaned_audio
+                        except Exception as e:
+                            print(f"[WARNING] Unable to load cleaned audio segment: {e}")
+                            # Continue using original audio segment
+                    
+                    audio_segments.append(segment_audio.squeeze(0))
+                
+                # 3. Add pause (after artifact cleaning)
+                if pause_duration > 0:
+                    silence = create_silence(pause_duration, self.sr)
+                    audio_segments.append(silence.squeeze(0))
+            
+            # 4. Concatenate all audio segments
+            if audio_segments:
+                final_audio = torch.cat(audio_segments, dim=0)
+                return final_audio.unsqueeze(0)
+            else:
+                # If no valid audio segments, return brief silence
+                return create_silence(0.1, self.sr)
+                
+        finally:
+            # Clean up all temporary files
+            for temp_file in temp_files_to_cleanup:
+                if os.path.exists(temp_file):
+                    try:
+                        os.unlink(temp_file)
+                    except:
+                        pass  # Ignore cleanup errors
+
+    def _generate_single_segment(self, text, cfg_weight, temperature, repetition_penalty=1.2, min_p=0.05, top_p=1.0, disable_watermark=False):
+        """Generate audio for a single text segment"""
         # Norm and tokenize text
         text = punc_norm(text)
         text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
@@ -268,5 +384,134 @@ class ChatterboxTTS:
                 ref_dict=self.conds.gen,
             )
             wav = wav.squeeze(0).detach().cpu().numpy()
-            watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-        return torch.from_numpy(watermarked_wav).unsqueeze(0)
+            
+            if not disable_watermark:
+                watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
+                return torch.from_numpy(watermarked_wav).unsqueeze(0)
+            else:
+                return torch.from_numpy(wav).unsqueeze(0)
+
+    def _clean_artifacts(self, audio_path: str, threshold: float = 0.06, margin: float = 0.2) -> str:
+        """
+        Clean artifacts from audio using auto-editor
+        
+        Args:
+            audio_path: Path to input audio file
+            threshold: Volume threshold, values below this are considered silence/artifacts
+            margin: Boundary protection time in seconds
+            
+        Returns:
+            Path to cleaned audio file
+        """
+        import subprocess
+        import tempfile
+        import os
+        
+        # Create output file
+        output_file = tempfile.NamedTemporaryFile(suffix='_cleaned.wav', delete=False)
+        output_file.close()
+        
+        try:
+            # Build auto-editor command (adapted for 28.0.0 version)
+            cmd = [
+                "auto-editor",
+                audio_path,
+                "--edit", f"audio:threshold={threshold}",
+                "--margin", f"{margin}s",
+                "--output-file", output_file.name
+            ]
+            
+            print(f"[INFO] Cleaning artifacts: {' '.join(cmd)}")
+            
+            # Execute auto-editor
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=True
+            )
+            
+            if os.path.exists(output_file.name) and os.path.getsize(output_file.name) > 0:
+                print(f"[INFO] Artifact cleaning completed: {output_file.name}")
+                return output_file.name
+            else:
+                raise RuntimeError("auto-editor did not generate a valid output file")
+                
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] auto-editor execution failed: {e}")
+            print(f"[ERROR] stderr: {e.stderr}")
+            print(f"[ERROR] stdout: {e.stdout}")
+            # Clean up failed output file
+            if os.path.exists(output_file.name):
+                os.unlink(output_file.name)
+            return audio_path  # Return original file
+            
+        except Exception as e:
+            print(f"[ERROR] Exception occurred during artifact cleaning: {e}")
+            # Clean up failed output file
+            if os.path.exists(output_file.name):
+                os.unlink(output_file.name)
+            return audio_path  # Return original file
+
+
+def parse_pause_tags(text: str):
+    """
+    Parse pause tags in text and return text segments with corresponding pause durations
+    
+    Args:
+        text: Text containing pause tags like "Hello[pause:0.5s]world[pause:1.0s]end"
+    
+    Returns:
+        segments: [(text_segment, pause_duration), ...]
+        Example: [("Hello", 0.5), ("world", 1.0), ("end", 0.0)]
+    """
+    if not text:
+        return [("", 0.0)]
+    
+    # Regular expression to match pause tags
+    pause_pattern = r'\[pause:([\d.]+)s\]'
+    
+    segments = []
+    last_end = 0
+    
+    # Find all pause tags
+    for match in re.finditer(pause_pattern, text):
+        # Extract text before the pause tag
+        text_segment = text[last_end:match.start()].strip()
+        if text_segment:
+            segments.append((text_segment, 0.0))
+        
+        # Extract pause duration
+        pause_duration = float(match.group(1))
+        # Ensure pause duration is a multiple of 0.1s
+        pause_duration = round(pause_duration / 0.1) * 0.1
+        segments.append(("", pause_duration))
+        
+        last_end = match.end()
+    
+    # Add the final text segment
+    final_text = text[last_end:].strip()
+    if final_text:
+        segments.append((final_text, 0.0))
+    
+    # If no segments found, return original text
+    if not segments:
+        segments = [(text, 0.0)]
+    
+    return segments
+
+
+def create_silence(duration_seconds: float, sample_rate: int) -> torch.Tensor:
+    """
+    Create silence of specified duration
+    
+    Args:
+        duration_seconds: Duration of silence in seconds
+        sample_rate: Sample rate
+    
+    Returns:
+        Silent audio tensor
+    """
+    num_samples = int(duration_seconds * sample_rate)
+    return torch.zeros(1, num_samples)
