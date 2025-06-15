@@ -1,0 +1,11 @@
+{
+    "input": {
+        "text": "Testing voice cloning with an audio prompt. This should sound similar to the provided voice sample.",
+        "audio_prompt_base64": "UklGRi4EAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQgEAAAAAAAAAAAA...",
+        "temperature": 0.8,
+        "cfg_weight": 0.7,
+        "exaggeration": 0.6,
+        "max_chars_per_chunk": 300,
+        "inter_chunk_silence_ms": 250
+    }
+}
