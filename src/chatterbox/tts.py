@@ -250,84 +250,84 @@ class ChatterboxTTS:
                 text_segment, cfg_weight, temperature, disable_watermark
             )
             
-            # 清理伪影(如果启用)
+            # Clean artifacts (if enabled)
             if use_auto_editor:
-                # 保存临时音频文件
+                # Save temporary audio file
                 import tempfile
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
                     temp_audio_path = temp_file.name
                 torchaudio.save(temp_audio_path, segment_audio, self.sr)
                 
-                # 清理伪影
+                # Clean artifacts
                 cleaned_audio_path = self._clean_artifacts(temp_audio_path, ae_threshold, ae_margin)
                 
-                # 加载清理后的音频
+                # Load cleaned audio
                 if cleaned_audio_path != temp_audio_path:
                     try:
                         cleaned_audio, _ = torchaudio.load(cleaned_audio_path)
-                        # 清理临时文件
+                        # Clean temporary files
                         if os.path.exists(temp_audio_path):
                             os.unlink(temp_audio_path)
                         if os.path.exists(cleaned_audio_path):
                             os.unlink(cleaned_audio_path)
                         return cleaned_audio
                     except Exception as e:
-                        print(f"[WARNING] 无法加载清理后的音频: {e}")
-                        # 清理临时文件
+                        print(f"[WARNING] Unable to load cleaned audio: {e}")
+                        # Clean temporary files
                         if os.path.exists(temp_audio_path):
                             os.unlink(temp_audio_path)
                         if os.path.exists(cleaned_audio_path):
                             os.unlink(cleaned_audio_path)
                 else:
-                    # 清理失败，使用原始音频
+                    # Cleaning failed, use original audio
                     if os.path.exists(temp_audio_path):
                         os.unlink(temp_audio_path)
                     
             return segment_audio
         
-        # Process text with pauses - 先生成并清理每段，再添加停顿
+        # Process text with pauses - generate and clean each segment first, then add pauses
         audio_segments = []
         temp_files_to_cleanup = []
         
         try:
             for text_segment, pause_duration in segments:
                 if text_segment.strip():  # Non-empty text segment
-                    # 1. 生成音频段
+                    # 1. Generate audio segment
                     segment_audio = self._generate_single_segment(
                         text_segment, cfg_weight, temperature, disable_watermark
                     )
                     
-                    # 2. 清理该段的伪影
+                    # 2. Clean artifacts for this segment
                     if use_auto_editor:
-                        # 保存临时音频文件
+                        # Save temporary audio file
                         import tempfile
                         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
                             temp_audio_path = temp_file.name
                         temp_files_to_cleanup.append(temp_audio_path)
                         torchaudio.save(temp_audio_path, segment_audio, self.sr)
                         
-                        # 清理伪影
+                        # Clean artifacts
                         cleaned_audio_path = self._clean_artifacts(temp_audio_path, ae_threshold, ae_margin)
                         if cleaned_audio_path != temp_audio_path:
                             temp_files_to_cleanup.append(cleaned_audio_path)
                         
-                        # 加载清理后的音频
+                        # Load cleaned audio
                         try:
                             if cleaned_audio_path != temp_audio_path:
                                 cleaned_audio, _ = torchaudio.load(cleaned_audio_path)
                                 segment_audio = cleaned_audio
                         except Exception as e:
-                            print(f"[WARNING] 无法加载清理后的音频段: {e}")
-                            # 继续使用原始音频段
+                            print(f"[WARNING] Unable to load cleaned audio segment: {e}")
+                            # Continue using original audio segment
                     
                     audio_segments.append(segment_audio.squeeze(0))
                 
-                # 3. 添加停顿(在伪影清理之后)
+                # 3. Add pause (after artifact cleaning)
                 if pause_duration > 0:
                     silence = create_silence(pause_duration, self.sr)
                     audio_segments.append(silence.squeeze(0))
             
-            # 4. 拼接所有音频段
+            # 4. Concatenate all audio segments
             if audio_segments:
                 final_audio = torch.cat(audio_segments, dim=0)
                 return final_audio.unsqueeze(0)
@@ -336,13 +336,13 @@ class ChatterboxTTS:
                 return create_silence(0.1, self.sr)
                 
         finally:
-            # 清理所有临时文件
+            # Clean up all temporary files
             for temp_file in temp_files_to_cleanup:
                 if os.path.exists(temp_file):
                     try:
                         os.unlink(temp_file)
                     except:
-                        pass  # 忽略清理错误
+                        pass  # Ignore cleanup errors
 
     def _generate_single_segment(self, text, cfg_weight, temperature, disable_watermark=False):
         """Generate audio for a single text segment"""
@@ -393,26 +393,26 @@ class ChatterboxTTS:
 
     def _clean_artifacts(self, audio_path: str, threshold: float = 0.06, margin: float = 0.2) -> str:
         """
-        使用 auto-editor 清理音频伪影
+        Clean artifacts from audio using auto-editor
         
         Args:
-            audio_path: 输入音频文件路径
-            threshold: 音量阈值, 低于此值认为是静音/伪影
-            margin: 边界保护时间(秒)
+            audio_path: Path to input audio file
+            threshold: Volume threshold, values below this are considered silence/artifacts
+            margin: Boundary protection time in seconds
             
         Returns:
-            清理后的音频文件路径
+            Path to cleaned audio file
         """
         import subprocess
         import tempfile
         import os
         
-        # 创建输出文件
+        # Create output file
         output_file = tempfile.NamedTemporaryFile(suffix='_cleaned.wav', delete=False)
         output_file.close()
         
         try:
-            # 构建 auto-editor 命令(适配 28.0.0 版本)
+            # Build auto-editor command (adapted for 28.0.0 version)
             cmd = [
                 "auto-editor",
                 audio_path,
@@ -421,9 +421,9 @@ class ChatterboxTTS:
                 "--output-file", output_file.name
             ]
             
-            print(f"[INFO] 清理伪影: {' '.join(cmd)}")
+            print(f"[INFO] Cleaning artifacts: {' '.join(cmd)}")
             
-            # 执行 auto-editor
+            # Execute auto-editor
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -433,26 +433,26 @@ class ChatterboxTTS:
             )
             
             if os.path.exists(output_file.name) and os.path.getsize(output_file.name) > 0:
-                print(f"[INFO] 伪影清理完成: {output_file.name}")
+                print(f"[INFO] Artifact cleaning completed: {output_file.name}")
                 return output_file.name
             else:
-                raise RuntimeError("auto-editor 没有生成有效的输出文件")
+                raise RuntimeError("auto-editor did not generate a valid output file")
                 
         except subprocess.CalledProcessError as e:
-            print(f"[ERROR] auto-editor 执行失败: {e}")
+            print(f"[ERROR] auto-editor execution failed: {e}")
             print(f"[ERROR] stderr: {e.stderr}")
             print(f"[ERROR] stdout: {e.stdout}")
-            # 清理失败的输出文件
+            # Clean up failed output file
             if os.path.exists(output_file.name):
                 os.unlink(output_file.name)
-            return audio_path  # 返回原始文件
+            return audio_path  # Return original file
             
         except Exception as e:
-            print(f"[ERROR] 伪影清理过程中出现异常: {e}")
-            # 清理失败的输出文件
+            print(f"[ERROR] Exception occurred during artifact cleaning: {e}")
+            # Clean up failed output file
             if os.path.exists(output_file.name):
                 os.unlink(output_file.name)
-            return audio_path  # 返回原始文件
+            return audio_path  # Return original file
 
 
 def parse_pause_tags(text: str):

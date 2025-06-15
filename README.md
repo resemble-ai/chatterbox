@@ -87,12 +87,12 @@ AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
 ta.save("test-2.wav", wav, model.sr)
 
-# 使用伪影清理功能
+# Using artifact cleaning feature
 wav = model.generate(
-    text="Hello[pause:0.5s]world!",  # 支持[pause:xx]标签添加停顿
-    use_auto_editor=True,            # 启用伪影清理
-    ae_threshold=0.06,               # 音量阈值(0-1)
-    ae_margin=0.2                    # 边界保护时间(秒)
+    text="Hello[pause:0.5s]world!",  # Support [pause:xx] tag for adding pauses
+    use_auto_editor=True,            # Enable artifact cleaning
+    ae_threshold=0.06,               # Volume threshold (0-1)
+    ae_margin=0.2                    # Boundary protection time (seconds)
 )
 ta.save("test-3.wav", wav, model.sr)
 ```
