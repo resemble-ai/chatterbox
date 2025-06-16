@@ -208,6 +208,9 @@ class ChatterboxTTS:
     def generate(
         self,
         text,
+        repetition_penalty=1.2,
+        min_p=0.05,
+        top_p=1.0,
         audio_prompt_path=None,
         exaggeration=0.5,
         cfg_weight=0.5,
@@ -246,6 +249,9 @@ class ChatterboxTTS:
                 max_new_tokens=1000,  # TODO: use the value in config
                 temperature=temperature,
                 cfg_weight=cfg_weight,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
             )
             # Extract only the conditional batch.
             speech_tokens = speech_tokens[0]
