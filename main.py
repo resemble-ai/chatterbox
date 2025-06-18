@@ -17,9 +17,10 @@ from chatterbox.audio_editing import (
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 EXAMPLE_TEXTS = [
-    "Now let's make my mum's favourite. So three mars bars into the pan. Then we add the tuna and just stir for a bit, just let the chocolate and fish infuse. A sprinkle of olive oil and some tomato ketchup. Now smell that. Oh boy this is going to be incredible.",
-    "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill.",
-    "Hello there! I'm the open source Chatterbox TTS from Resemble AI.",
+   "Harambe did nothing wrong. Absolutely nothing wrong. He was a gentle giant. He was a gentle giant. Oh my god, oh my god, oh my god. Do not shoot. DO NOT SHOOT. WHAT ARE YOU DOING! PUT THE GUN DOWN!",
+  "Ma'am do not redeem it. No. Ma'am why did you redeem. Why did you redeem? Are you mad? Are you mad? Why are you redeeming card? Are you fucking mad? Are you mad? Why the fuck are you redeem? Why are you redeem. Ay you mother chode. Why are you redeem it? Why are you redeeming it? I am going to kick your ass bitch. I am going to kick your ass. Listen to me you motherfucking bitch. You motherfucking bitch. You fuck.",
+  "Shenlon is like a sewer-dwelling mermaid that crawled out of the darkest corners of the internet, fluent in only one cursed dialect: “1huge.” Their obsession with this grotesque, malformed meme language has become a weapon they wield with disturbing glee, especially when targeting innocent characters like Mofu and Cirno. What makes Shenlon particularly vile is how they twist these beloved figures into the butt of cruel jokes, stripping them of charm and innocence for the sake of cheap, corrosive amusement. Like a creature that thrives in filth, Shenlon slithers through comment threads and forums, spreading a noxious mix of mockery, obsession, and outright abuse that taints everything they touch.",
+  "I am going to kick your ass bitch. I am going to kick your ass. Listen to me you motherfucking bitch. You motherfucking bitch. You fuck.",
 ]
 
 
