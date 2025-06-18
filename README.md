@@ -71,6 +71,35 @@ ta.save("test-2.wav", wav, model.sr)
 ```
 See `example_tts.py` and `example_vc.py` for more examples.
 
+## Audio Editing Utilities
+
+Chatterbox now includes helper functions for basic waveform editing found in
+`chatterbox.audio_editing`. You can splice clips together, trim sections or
+apply a simple crossfade.
+
+```python
+from chatterbox.audio_editing import splice_audios, trim_audio
+import librosa
+
+wav1, _ = librosa.load("first.wav", sr=None)
+wav2, _ = librosa.load("second.wav", sr=None)
+joined = splice_audios([wav1, wav2])
+trimmed = trim_audio(joined, start_sec=0.5, end_sec=1.5, sr=model.sr)
+```
+
+## Sample Prompts
+
+To quickly experiment with Chatterbox, you can load the text prompts in
+`sample_prompts.json` located at the project root.
+
+```python
+import json
+with open("sample_prompts.json") as f:
+    sample_prompts = json.load(f)
+
+wav = model.generate(sample_prompts[0])
+```
+
 # Supported Lanugage
 Currenlty only English.
 
