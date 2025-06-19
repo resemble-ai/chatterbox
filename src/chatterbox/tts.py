@@ -5,6 +5,7 @@ import librosa
 import torch
 import perth
 import torch.nn.functional as F
+import gc
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
@@ -281,16 +282,41 @@ class ChatterboxTTS:
         self,
         text,
         chunk_size: int = 300,
+        max_retries: int = 1,
         **kwargs,
     ):
-        """Generate speech from ``text``. Long texts are processed in ``chunk_size`` character chunks."""
+        """Generate speech from ``text``. Long texts are processed in ``chunk_size`` character chunks.
+
+        Parameters
+        ----------
+        text : str
+            Text to synthesize.
+        chunk_size : int, optional
+            Size of each chunk when splitting long text. Defaults to 300.
+        max_retries : int, optional
+            Number of retries if a CUDA out-of-memory error occurs. Defaults to 1.
+        """
+
+        def _safe_generate_segment(segment_text):
+            for attempt in range(max_retries + 1):
+                try:
+                    return self._generate_segment(segment_text, **kwargs)
+                except RuntimeError as e:
+                    err_msg = str(e).lower()
+                    if "out of memory" in err_msg and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        gc.collect()
+                        if attempt < max_retries:
+                            continue
+                    raise
+
         if len(text) <= chunk_size:
-            return self._generate_segment(text, **kwargs)
+            return _safe_generate_segment(text)
 
         chunks = chunk_text(text, chunk_size)
         audio_segments = []
         for chunk in chunks:
-            wav = self._generate_segment(chunk, **kwargs)
+            wav = _safe_generate_segment(chunk)
             audio_segments.append(wav.squeeze(0).cpu().numpy())
         merged = splice_audios(audio_segments)
         return torch.from_numpy(merged).unsqueeze(0)

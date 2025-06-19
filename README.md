@@ -68,6 +68,10 @@ ta.save("test-1.wav", wav, model.sr)
 AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
 ta.save("test-2.wav", wav, model.sr)
+
+# If you occasionally see CUDA "out of memory" errors, retry automatically
+wav = model.generate(text, max_retries=2)
+ta.save("test-3.wav", wav, model.sr)
 ```
 See `example_tts.py` and `example_vc.py` for more examples.
 
