@@ -14,6 +14,7 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from .audio_editing import splice_audios
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -59,6 +60,11 @@ def punc_norm(text: str) -> str:
         text += "."
 
     return text
+
+
+def chunk_text(text: str, chunk_size: int = 300):
+    """Split ``text`` into ``chunk_size``-character chunks."""
+    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
 
 @dataclass
@@ -205,7 +211,7 @@ class ChatterboxTTS:
         ).to(device=self.device)
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
 
-    def generate(
+    def _generate_segment(
         self,
         text,
         repetition_penalty=1.2,
@@ -270,3 +276,21 @@ class ChatterboxTTS:
             wav = wav.squeeze(0).detach().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
         return torch.from_numpy(watermarked_wav).unsqueeze(0)
+
+    def generate(
+        self,
+        text,
+        chunk_size: int = 300,
+        **kwargs,
+    ):
+        """Generate speech from ``text``. Long texts are processed in ``chunk_size`` character chunks."""
+        if len(text) <= chunk_size:
+            return self._generate_segment(text, **kwargs)
+
+        chunks = chunk_text(text, chunk_size)
+        audio_segments = []
+        for chunk in chunks:
+            wav = self._generate_segment(chunk, **kwargs)
+            audio_segments.append(wav.squeeze(0).cpu().numpy())
+        merged = splice_audios(audio_segments)
+        return torch.from_numpy(merged).unsqueeze(0)
