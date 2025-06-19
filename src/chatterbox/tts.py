@@ -231,7 +231,7 @@ class ChatterboxTTS:
         ae_margin=0.2,
         disable_watermark=False,
         max_segment_length=300,
-        max_workers=None,  # None表示自动检测最优值
+        max_workers=None,  # None means auto-detect optimal value
     ):
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
@@ -247,11 +247,11 @@ class ChatterboxTTS:
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
 
-        # 长文本处理：根据文本长度自动判断是否需要拆分处理
+        # Long text processing: automatically determine if text needs to be split based on length
         if len(text) > max_segment_length:
-            # 使用异步批量生成
+            # Use async batch generation
             if max_workers is None:
-                max_workers = 3  # 简单默认值
+                max_workers = 3  # Simple default value
             return self._generate_long_text_async(
                 text, 
                 max_segment_length=max_segment_length,
@@ -387,22 +387,22 @@ class ChatterboxTTS:
         max_workers=3
     ):
         """
-        异步生成长文本音频 - 核心优化只保留异步批量生成
+        Async generation of long text audio - core optimization only keeps async batch generation
         """
-        # 拆分文本为短段落
+        # Split text into short paragraphs
         text_segments = split_text_into_segments(text, max_segment_length)
         
         if not text_segments:
             return create_silence(0.1, self.sr)
         
-        # 预处理文本片段，保留暂停标签信息
+        # Preprocess text segments, preserve pause tag information
         all_segments = []  # [(text, pause_duration), ...]
         for segment_text in text_segments:
-            # 处理pause tags，保留暂停信息
+            # Process pause tags, preserve pause information
             segments = parse_pause_tags(segment_text)
             all_segments.extend(segments)
         
-        # 分离文本和暂停信息
+        # Separate text and pause information
         text_parts = []
         pause_info = []
         for text_part, pause_duration in all_segments:
@@ -410,24 +410,24 @@ class ChatterboxTTS:
                 text_parts.append(text_part.strip())
                 pause_info.append(pause_duration)
         
-        # 核心：异步批量生成
+        # Core: async batch generation
         audio_segments = self._generate_segments_async(
             text_parts, cfg_weight, temperature, 
             repetition_penalty, min_p, top_p, disable_watermark, max_workers
         )
         
-        # 应用音频清理（如果启用）
+        # Apply audio cleaning (if enabled)
         if use_auto_editor:
             audio_segments = self._clean_audio_segments_batch(
                 audio_segments, ae_threshold, ae_margin
             )
         
-        # 合并音频，包括暂停
+        # Merge audio, including pauses
         final_audio_parts = []
         for i, audio in enumerate(audio_segments):
             if audio is not None:
                 final_audio_parts.append(audio.squeeze(0))
-                # 添加暂停（如果有）
+                # Add pause (if any)
                 if i < len(pause_info) and pause_info[i] > 0:
                     silence = create_silence(pause_info[i], self.sr)
                     final_audio_parts.append(silence.squeeze(0))
@@ -447,16 +447,16 @@ class ChatterboxTTS:
 
 
     def _generate_segments_async(self, text_list, cfg_weight, temperature, repetition_penalty, min_p, top_p, disable_watermark, max_workers):
-        """异步并行生成文本片段 - 核心性能优化"""
+        """Async parallel generation of text segments - core performance optimization"""
         audio_results = [None] * len(text_list)
         result_queue = queue.Queue()
         
         def generate_worker(index, text):
             try:
                 if text and text.strip():
-                    # 预处理文本
+                    # Preprocess text
                     text = punc_norm(text.strip())
-                    # 生成音频
+                    # Generate audio
                     audio = self._generate_single_segment(
                         text, cfg_weight, temperature, repetition_penalty, min_p, top_p, disable_watermark
                     )
@@ -466,15 +466,15 @@ class ChatterboxTTS:
             except Exception as e:
                 result_queue.put((index, None, str(e)))
         
-        # 并发执行
+        # Concurrent execution
         with ThreadPoolExecutor(max_workers=min(max_workers, len(text_list))) as executor:
             futures = [executor.submit(generate_worker, i, text) for i, text in enumerate(text_list)]
             
-            # 等待完成
+            # Wait for completion
             for future in as_completed(futures):
                 future.result()
         
-        # 收集结果
+        # Collect results
         while not result_queue.empty():
             index, audio, error = result_queue.get()
             if error:
@@ -485,32 +485,32 @@ class ChatterboxTTS:
         return audio_results
 
     def _clean_audio_segments_batch(self, audio_segments, ae_threshold, ae_margin):
-        """批量清理音频片段的artifacts"""
+        """Batch clean artifacts from audio segments"""
         cleaned_segments = []
         temp_files_to_cleanup = []
         
         try:
             for i, audio in enumerate(audio_segments):
                 if audio is not None:
-                    # 保存临时音频文件
+                    # Save temporary audio file
                     import tempfile
                     with tempfile.NamedTemporaryFile(suffix=f'_segment_{i}.wav', delete=False) as temp_file:
                         temp_audio_path = temp_file.name
                     temp_files_to_cleanup.append(temp_audio_path)
                     torchaudio.save(temp_audio_path, audio, self.sr)
                     
-                    # 清理artifacts
+                    # Clean artifacts
                     cleaned_audio_path = self._clean_artifacts(temp_audio_path, ae_threshold, ae_margin)
                     if cleaned_audio_path != temp_audio_path:
                         temp_files_to_cleanup.append(cleaned_audio_path)
                     
-                    # 加载清理后的音频
+                    # Load cleaned audio
                     try:
                         if cleaned_audio_path != temp_audio_path:
                             cleaned_audio, _ = torchaudio.load(cleaned_audio_path)
                             cleaned_segments.append(cleaned_audio)
                         else:
-                            # 清理失败，使用原音频
+                            # Cleaning failed, use original audio
                             cleaned_segments.append(audio)
                     except Exception as e:
                         print(f"[WARNING] Unable to load cleaned audio segment {i}: {e}")
@@ -521,13 +521,13 @@ class ChatterboxTTS:
             return cleaned_segments
             
         finally:
-            # 清理所有临时文件
+            # Clean up all temporary files
             for temp_file in temp_files_to_cleanup:
                 if os.path.exists(temp_file):
                     try:
                         os.unlink(temp_file)
                     except:
-                        pass  # 忽略清理错误
+                        pass  # Ignore cleanup errors
 
     def _generate_single_segment(self, text, cfg_weight, temperature, repetition_penalty=1.2, min_p=0.05, top_p=1.0, disable_watermark=False):
         """Generate audio for a single text segment"""

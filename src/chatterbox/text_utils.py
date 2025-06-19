@@ -1,7 +1,7 @@
 """
-文本处理工具函数
+Text processing utility functions
 
-包含长文本拆分、句子合并等文本处理功能
+Contains long text splitting, sentence merging and other text processing functions
 """
 
 import re
@@ -11,16 +11,16 @@ import logging
 
 def split_by_word_boundary(text: str, max_len: int) -> List[str]:
     """
-    按单词边界拆分文本，确保不会在单词中间断开
+    Split text by word boundaries to ensure words are not broken in the middle
     
-    参数:
-        text: 要拆分的文本
-        max_len: 每个分段的最大长度
+    Parameters:
+        text: Text to split
+        max_len: Maximum length of each segment
         
-    返回:
-        文本分段列表
+    Returns:
+        List of text segments
     """
-    # 首先尝试在标点符号处分割
+    # First try to split at punctuation marks
     punct_pattern = r'(?<=[.!?,;:])\s+'
     punct_splits = re.split(punct_pattern, text)
     
@@ -30,12 +30,12 @@ def split_by_word_boundary(text: str, max_len: int) -> List[str]:
             segments.append(split)
             continue
             
-        # 如果标点分割后的片段仍然过长，按单词边界拆分
+        # If the segment after punctuation splitting is still too long, split by word boundaries
         words = split.split()
         current = ""
         
         for word in words:
-            # 如果单词本身超过最大长度，尝试保留完整单词
+            # If the word itself exceeds maximum length, try to keep the complete word
             if len(word) > max_len:
                 if current:
                     segments.append(current)
@@ -43,7 +43,7 @@ def split_by_word_boundary(text: str, max_len: int) -> List[str]:
                 current = ""
                 continue
                 
-            # 检查添加这个单词是否会超过最大长度
+            # Check if adding this word would exceed maximum length
             potential_segment = (current + " " + word).strip() if current else word
             if len(potential_segment) > max_len:
                 if current:
@@ -52,7 +52,7 @@ def split_by_word_boundary(text: str, max_len: int) -> List[str]:
             else:
                 current = potential_segment
         
-        # 添加最后剩余的部分
+        # Add the remaining part
         if current:
             segments.append(current)
             
@@ -61,15 +61,15 @@ def split_by_word_boundary(text: str, max_len: int) -> List[str]:
 
 def merge_short_sentences(sentences: List[str], max_length: int, min_length: int = 20) -> List[str]:
     """
-    合并短句子到下一句，确保不超过最大长度限制
+    Merge short sentences to the next sentence, ensuring not to exceed maximum length limit
     
-    参数:
-        sentences: 句子列表
-        max_length: 合并后句子的最大长度限制
-        min_length: 短句子的长度阈值
+    Parameters:
+        sentences: List of sentences
+        max_length: Maximum length limit after merging
+        min_length: Length threshold for short sentences
     
-    返回:
-        合并后的句子列表
+    Returns:
+        List of merged sentences
     """
     if not sentences:
         return []
@@ -80,18 +80,18 @@ def merge_short_sentences(sentences: List[str], max_length: int, min_length: int
     while i < len(sentences):
         current = sentences[i].strip()
         
-        # 跳过空句子
+        # Skip empty sentences
         if not current:
             i += 1
             continue
             
-        # 如果当前句子长度大于等于min_length，直接添加到结果中
+        # If current sentence length is greater than or equal to min_length, add directly to result
         if len(current) >= min_length:
             result.append(current)
             i += 1
             continue
             
-        # 当前句子是短句，尝试与后面的句子合并
+        # Current sentence is short, try to merge with subsequent sentences
         merged = current
         j = i + 1
         while j < len(sentences) and len(merged) < min_length:
@@ -100,20 +100,20 @@ def merge_short_sentences(sentences: List[str], max_length: int, min_length: int
                 j += 1
                 continue
                 
-            # 检查合并后是否超过最大长度
+            # Check if merging would exceed maximum length
             potential_merge = merged + " " + next_sentence
             if len(potential_merge) <= max_length:
                 merged = potential_merge
                 j += 1
             else:
-                # 如果合并会超过最大长度，停止合并
+                # If merging would exceed maximum length, stop merging
                 break
         
-        # 添加合并后的结果
+        # Add merged result
         if merged:
             result.append(merged)
         
-        # 更新索引
+        # Update index
         i = j if j > i else i + 1
     
     return result
@@ -121,29 +121,29 @@ def merge_short_sentences(sentences: List[str], max_length: int, min_length: int
 
 def split_text_into_segments(text: str, max_length: int = 300, logger: Optional[logging.Logger] = None) -> List[str]:
     """
-    将文本拆分成适合TTS处理的段落
+    Split text into segments suitable for TTS processing
     
-    参数:
-        text: 要拆分的文本
-        max_length: 每个段落的最大字符数
-        logger: 可选的日志记录器
+    Parameters:
+        text: Text to split
+        max_length: Maximum character count for each segment
+        logger: Optional logger
         
-    返回:
-        拆分后的段落列表
+    Returns:
+        List of split segments
     """
     if not text or not text.strip():
         return []
     
     text = text.strip()
     
-    # 如果文本长度不超过最大长度，直接返回
+    # If text length doesn't exceed maximum length, return directly
     if len(text) <= max_length:
         return [text]
     
     if logger:
-        logger.debug(f"文本长度 {len(text)} 超过最大限制 {max_length}，开始拆分")
+        logger.debug(f"Text length {len(text)} exceeds maximum limit {max_length}, starting split")
     
-    # 首先按段落分割（双换行符）
+    # First split by paragraphs (double newlines)
     paragraphs = [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
     
     segments = []
@@ -152,27 +152,27 @@ def split_text_into_segments(text: str, max_length: int = 300, logger: Optional[
             segments.append(paragraph)
             continue
         
-        # 段落过长，进一步拆分
-        # 1. 尝试按句子分割（句号、问号、感叹号）
+        # Paragraph too long, split further
+        # 1. Try to split by sentences (period, question mark, exclamation mark)
         sentences = re.split(r'(?<=[.!?])\s+', paragraph)
         sentences = [s.strip() for s in sentences if s.strip()]
         
-        # 2. 合并短句子，避免产生太多碎片
+        # 2. Merge short sentences to avoid producing too many fragments
         sentences = merge_short_sentences(sentences, max_length, min_length=30)
         
-        # 3. 处理仍然过长的句子
+        # 3. Handle sentences that are still too long
         for sentence in sentences:
             if len(sentence) <= max_length:
                 segments.append(sentence)
             else:
-                # 使用单词边界拆分
+                # Use word boundary splitting
                 word_segments = split_by_word_boundary(sentence, max_length)
                 segments.extend(word_segments)
     
-    # 清理空段落
+    # Clean empty paragraphs
     segments = [s.strip() for s in segments if s.strip()]
     
     if logger:
-        logger.debug(f"文本拆分完成，共 {len(segments)} 个段落")
+        logger.debug(f"Text splitting completed, total {len(segments)} segments")
     
     return segments 
