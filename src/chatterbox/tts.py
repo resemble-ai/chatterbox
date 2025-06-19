@@ -3,6 +3,10 @@ from pathlib import Path
 import tempfile
 import subprocess
 import os
+import threading
+import queue
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 import librosa
 import torch
@@ -20,6 +24,7 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from .text_utils import split_text_into_segments
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -225,6 +230,8 @@ class ChatterboxTTS:
         ae_threshold=0.06,
         ae_margin=0.2,
         disable_watermark=False,
+        max_segment_length=300,
+        max_workers=None,  # None表示自动检测最优值
     ):
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
@@ -239,6 +246,26 @@ class ChatterboxTTS:
                 cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
+
+        # 长文本处理：根据文本长度自动判断是否需要拆分处理
+        if len(text) > max_segment_length:
+            # 使用异步批量生成
+            if max_workers is None:
+                max_workers = 3  # 简单默认值
+            return self._generate_long_text_async(
+                text, 
+                max_segment_length=max_segment_length,
+                cfg_weight=cfg_weight,
+                temperature=temperature,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
+                use_auto_editor=use_auto_editor,
+                ae_threshold=ae_threshold,
+                ae_margin=ae_margin,
+                disable_watermark=disable_watermark,
+                max_workers=max_workers
+            )
 
         # Parse pause tags BEFORE applying punc_norm to preserve the tags
         segments = parse_pause_tags(text)
@@ -343,6 +370,164 @@ class ChatterboxTTS:
                         os.unlink(temp_file)
                     except:
                         pass  # Ignore cleanup errors
+
+    def _generate_long_text_async(
+        self,
+        text,
+        max_segment_length=300,
+        cfg_weight=0.5,
+        temperature=0.8,
+        repetition_penalty=1.2,
+        min_p=0.05,
+        top_p=1.0,
+        use_auto_editor=False,
+        ae_threshold=0.06,
+        ae_margin=0.2,
+        disable_watermark=False,
+        max_workers=3
+    ):
+        """
+        异步生成长文本音频 - 核心优化只保留异步批量生成
+        """
+        # 拆分文本为短段落
+        text_segments = split_text_into_segments(text, max_segment_length)
+        
+        if not text_segments:
+            return create_silence(0.1, self.sr)
+        
+        # 预处理文本片段，保留暂停标签信息
+        all_segments = []  # [(text, pause_duration), ...]
+        for segment_text in text_segments:
+            # 处理pause tags，保留暂停信息
+            segments = parse_pause_tags(segment_text)
+            all_segments.extend(segments)
+        
+        # 分离文本和暂停信息
+        text_parts = []
+        pause_info = []
+        for text_part, pause_duration in all_segments:
+            if text_part.strip():
+                text_parts.append(text_part.strip())
+                pause_info.append(pause_duration)
+        
+        # 核心：异步批量生成
+        audio_segments = self._generate_segments_async(
+            text_parts, cfg_weight, temperature, 
+            repetition_penalty, min_p, top_p, disable_watermark, max_workers
+        )
+        
+        # 应用音频清理（如果启用）
+        if use_auto_editor:
+            audio_segments = self._clean_audio_segments_batch(
+                audio_segments, ae_threshold, ae_margin
+            )
+        
+        # 合并音频，包括暂停
+        final_audio_parts = []
+        for i, audio in enumerate(audio_segments):
+            if audio is not None:
+                final_audio_parts.append(audio.squeeze(0))
+                # 添加暂停（如果有）
+                if i < len(pause_info) and pause_info[i] > 0:
+                    silence = create_silence(pause_info[i], self.sr)
+                    final_audio_parts.append(silence.squeeze(0))
+        
+        if final_audio_parts:
+            final_audio = torch.cat(final_audio_parts, dim=0)
+            return final_audio.unsqueeze(0)
+        else:
+            return create_silence(0.1, self.sr)
+
+
+
+
+
+
+
+
+
+    def _generate_segments_async(self, text_list, cfg_weight, temperature, repetition_penalty, min_p, top_p, disable_watermark, max_workers):
+        """异步并行生成文本片段 - 核心性能优化"""
+        audio_results = [None] * len(text_list)
+        result_queue = queue.Queue()
+        
+        def generate_worker(index, text):
+            try:
+                if text and text.strip():
+                    # 预处理文本
+                    text = punc_norm(text.strip())
+                    # 生成音频
+                    audio = self._generate_single_segment(
+                        text, cfg_weight, temperature, repetition_penalty, min_p, top_p, disable_watermark
+                    )
+                else:
+                    audio = create_silence(0.1, self.sr)
+                result_queue.put((index, audio, None))
+            except Exception as e:
+                result_queue.put((index, None, str(e)))
+        
+        # 并发执行
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(text_list))) as executor:
+            futures = [executor.submit(generate_worker, i, text) for i, text in enumerate(text_list)]
+            
+            # 等待完成
+            for future in as_completed(futures):
+                future.result()
+        
+        # 收集结果
+        while not result_queue.empty():
+            index, audio, error = result_queue.get()
+            if error:
+                audio_results[index] = create_silence(0.1, self.sr)
+            else:
+                audio_results[index] = audio
+        
+        return audio_results
+
+    def _clean_audio_segments_batch(self, audio_segments, ae_threshold, ae_margin):
+        """批量清理音频片段的artifacts"""
+        cleaned_segments = []
+        temp_files_to_cleanup = []
+        
+        try:
+            for i, audio in enumerate(audio_segments):
+                if audio is not None:
+                    # 保存临时音频文件
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix=f'_segment_{i}.wav', delete=False) as temp_file:
+                        temp_audio_path = temp_file.name
+                    temp_files_to_cleanup.append(temp_audio_path)
+                    torchaudio.save(temp_audio_path, audio, self.sr)
+                    
+                    # 清理artifacts
+                    cleaned_audio_path = self._clean_artifacts(temp_audio_path, ae_threshold, ae_margin)
+                    if cleaned_audio_path != temp_audio_path:
+                        temp_files_to_cleanup.append(cleaned_audio_path)
+                    
+                    # 加载清理后的音频
+                    try:
+                        if cleaned_audio_path != temp_audio_path:
+                            cleaned_audio, _ = torchaudio.load(cleaned_audio_path)
+                            cleaned_segments.append(cleaned_audio)
+                        else:
+                            # 清理失败，使用原音频
+                            cleaned_segments.append(audio)
+                    except Exception as e:
+                        print(f"[WARNING] Unable to load cleaned audio segment {i}: {e}")
+                        cleaned_segments.append(audio)
+                else:
+                    cleaned_segments.append(audio)
+            
+            return cleaned_segments
+            
+        finally:
+            # 清理所有临时文件
+            for temp_file in temp_files_to_cleanup:
+                if os.path.exists(temp_file):
+                    try:
+                        os.unlink(temp_file)
+                    except:
+                        pass  # 忽略清理错误
 
     def _generate_single_segment(self, text, cfg_weight, temperature, repetition_penalty=1.2, min_p=0.05, top_p=1.0, disable_watermark=False):
         """Generate audio for a single text segment"""
