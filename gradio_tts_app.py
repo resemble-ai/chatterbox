@@ -5,8 +5,7 @@ import gradio as gr
 from chatterbox.tts import ChatterboxTTS
 
 EXAMPLE_TEXTS = [
-    "Now let's make my mum's favourite. So three mars bars into the pan. Then we add the tuna and just stir for a bit, just let the chocolate and fish infuse. A sprinkle of olive oil and some tomato ketchup. Now smell that. Oh boy this is going to be incredible.",
-    "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill.",
+    "Harambe did nothing wrong.",
     "Hello there! I'm the open source Chatterbox TTS from Resemble AI."
 ]
 
