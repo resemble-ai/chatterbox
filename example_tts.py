@@ -2,11 +2,25 @@ import torchaudio as ta
 import torch
 from chatterbox.tts import ChatterboxTTS
 
+# Monkey patch torch.load to handle device mapping
+original_torch_load = torch.load
+
+def patched_torch_load(f, map_location=None, **kwargs):
+    """
+    Patched torch.load that automatically maps CUDA tensors to CPU/MPS
+    """
+    if map_location is None:
+        # Default to CPU for compatibility
+        map_location = 'cpu'
+    return original_torch_load(f, map_location=map_location, **kwargs)
+
+torch.load = patched_torch_load
+
 # Automatically detect the best available device
-if torch.cuda.is_available():
-    device = "cuda"
-elif torch.backends.mps.is_available():
+if torch.backends.mps.is_available():
     device = "mps"
+elif torch.cuda.is_available():
+    device = "cuda"
 else:
     device = "cpu"
 

@@ -60,14 +60,6 @@ class ChatterboxVC:
 
     @classmethod
     def from_pretrained(cls, device) -> 'ChatterboxVC':
-        # Check if MPS is available on macOS
-        if device == "mps" and not torch.backends.mps.is_available():
-            if not torch.backends.mps.is_built():
-                print("MPS not available because the current PyTorch install was not built with MPS enabled.")
-            else:
-                print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
-            device = "cpu"
-            
         for fpath in ["s3gen.safetensors", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 
@@ -91,8 +83,11 @@ class ChatterboxVC:
             assert self.ref_dict is not None, "Please `prepare_conditionals` first or specify `target_voice_path`"
 
         with torch.inference_mode():
-            audio_16, _ = librosa.load(audio, sr=S3_SR)
-            audio_16 = torch.from_numpy(audio_16).float().to(self.device)[None, ]
+            if isinstance(audio, str):
+                audio_16, _ = librosa.load(audio, sr=S3_SR)
+                audio_16 = torch.from_numpy(audio_16).float().to(self.device)[None, ]
+            else:
+                audio_16 = audio.to(self.device)
 
             s3_tokens, _ = self.s3gen.tokenizer(audio_16)
             wav, _ = self.s3gen.inference(
