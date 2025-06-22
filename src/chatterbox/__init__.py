@@ -8,3 +8,10 @@ __version__ = version("chatterbox-tts")
 
 from .tts import ChatterboxTTS
 from .vc import ChatterboxVC
+from .audio_editing import (
+    splice_audios,
+    trim_audio,
+    insert_audio,
+    delete_segment,
+    crossfade,
+)
