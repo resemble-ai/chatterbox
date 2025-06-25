@@ -1,0 +1,301 @@
+import random
+import numpy as np
+import torch
+import gradio as gr
+from chatterbox.tts import ChatterboxTTS
+import re
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+MAX_CHUNK_SIZE = 300  # Keep original 300 char limit per chunk
+
+def set_seed(seed: int):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+
+def load_model():
+    model = ChatterboxTTS.from_pretrained(DEVICE)
+    return model
+
+def smart_chunk_text(text, max_chunk_size=MAX_CHUNK_SIZE):
+    """
+    Split text into chunks of max_chunk_size, trying to break at sentence boundaries
+    """
+    if len(text) <= max_chunk_size:
+        return [text]
+    
+    chunks = []
+    remaining_text = text.strip()
+    
+    while remaining_text:
+        if len(remaining_text) <= max_chunk_size:
+            chunks.append(remaining_text)
+            break
+        
+        # Try to find a good break point within the chunk size
+        chunk = remaining_text[:max_chunk_size]
+        
+        # Look for sentence endings (. ! ?) followed by space
+        sentence_breaks = [m.end() for m in re.finditer(r'[.!?]\s+', chunk)]
+        if sentence_breaks:
+            break_point = sentence_breaks[-1]  # Use the last sentence break
+        else:
+            # Look for other punctuation followed by space
+            punct_breaks = [m.end() for m in re.finditer(r'[,;:]\s+', chunk)]
+            if punct_breaks:
+                break_point = punct_breaks[-1]
+            else:
+                # Look for word boundaries
+                word_breaks = [m.end() for m in re.finditer(r'\s+', chunk)]
+                if word_breaks:
+                    break_point = word_breaks[-1]
+                else:
+                    # Force break at max_chunk_size
+                    break_point = max_chunk_size
+        
+        chunks.append(remaining_text[:break_point].strip())
+        remaining_text = remaining_text[break_point:].strip()
+    
+    return [chunk for chunk in chunks if chunk]  # Remove empty chunks
+
+def combine_audio_chunks(audio_chunks, sample_rate):
+    """
+    Combine multiple audio arrays into one continuous audio
+    """
+    if not audio_chunks:
+        return np.array([])
+    
+    if len(audio_chunks) == 1:
+        return audio_chunks[0]  # No need to combine single chunk
+    
+    # Add small silence between chunks (0.2 seconds)
+    silence_samples = int(0.2 * sample_rate)
+    silence = np.zeros(silence_samples, dtype=audio_chunks[0].dtype)
+    
+    combined = []
+    for i, chunk in enumerate(audio_chunks):
+        combined.append(chunk)
+        if i < len(audio_chunks) - 1:  # Don't add silence after the last chunk
+            combined.append(silence)
+    
+    return np.concatenate(combined)
+
+def generate_chunked(model, text, audio_prompt_path, exaggeration, temperature, seed_num, cfgw, min_p, top_p, repetition_penalty):
+    if model is None:
+        model = ChatterboxTTS.from_pretrained(DEVICE)
+    
+    # Split text into chunks
+    chunks = smart_chunk_text(text, MAX_CHUNK_SIZE)
+    total_chunks = len(chunks)
+    
+    if total_chunks == 1:
+        status_msg = f"✅ Single chunk ({len(text)} chars) - generating..."
+    else:
+        status_msg = f"📝 Split into {total_chunks} chunks - generating each..."
+    
+    if seed_num != 0:
+        set_seed(int(seed_num))
+    
+    try:
+        audio_chunks = []
+        chunk_info = []
+        
+        for i, chunk in enumerate(chunks):
+            # Update progress status
+            progress_msg = f"🎵 Generating chunk {i+1}/{total_chunks} ({len(chunk)} chars)..."
+            
+            # Generate audio for this chunk
+            wav = model.generate(
+                chunk,
+                audio_prompt_path=audio_prompt_path,
+                exaggeration=exaggeration,
+                temperature=temperature,
+                cfg_weight=cfgw,
+                min_p=min_p,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+            )
+            
+            audio_chunks.append(wav.squeeze(0).numpy())
+            chunk_info.append(f"Chunk {i+1}: {len(chunk)} chars")
+            
+        # Combine all audio chunks
+        combined_audio = combine_audio_chunks(audio_chunks, model.sr)
+        
+        # Create detailed status message
+        total_duration = len(combined_audio) / model.sr
+        final_status = f"✅ Successfully generated {total_chunks} chunk(s)!\n"
+        final_status += f"📊 Total: {len(text)} chars → {total_duration:.1f}s audio\n"
+        if total_chunks > 1:
+            final_status += f"🔧 Chunks: {' | '.join(chunk_info[:3])}"
+            if len(chunk_info) > 3:
+                final_status += f" (+{len(chunk_info)-3} more)"
+        else:
+            final_status += f"🔧 Single chunk: {len(text)} chars"
+        
+        return (model.sr, combined_audio), final_status
+        
+    except Exception as e:
+        error_msg = f"❌ Generation failed: {str(e)}"
+        return None, error_msg
+
+with gr.Blocks(title="Chatterbox TTS - Chunked Generation") as demo:
+    model_state = gr.State(None)
+    
+    gr.Markdown("# 🎙️ Chatterbox TTS - Smart Chunking")
+    gr.Markdown("Generate high-quality TTS by automatically splitting long text into 300-character chunks for optimal quality.")
+    gr.Markdown("💡 **Smart Features:** Breaks at sentence/word boundaries • Maintains voice consistency • Combines with natural pauses")
+    
+    with gr.Row():
+        with gr.Column():
+            text = gr.Textbox(
+                value="Now let's make my mum's favourite. So three mars bars into the pan. Then we add the tuna and just stir for a bit, just let the chocolate and fish infuse. A sprinkle of olive oil and some tomato ketchup. Now smell that. Oh boy this is going to be incredible.",
+                label="Text to synthesize (any length - auto-chunked)",
+                max_lines=10,
+                placeholder="Enter your text here... (will be automatically split into 300-char chunks)"
+            )
+            
+            # Character counter and chunk preview
+            chunk_preview = gr.Textbox(
+                label="Chunk Analysis",
+                value="",
+                interactive=False,
+                max_lines=3
+            )
+            
+            ref_wav = gr.Audio(
+                sources=["upload", "microphone"], 
+                type="filepath", 
+                label="Reference Audio File (Optional - for voice cloning)", 
+                value=None
+            )
+            
+            with gr.Row():
+                exaggeration = gr.Slider(
+                    0.25, 2, step=.05, 
+                    label="Exaggeration (Neutral = 0.5)", 
+                    value=.5
+                )
+                cfg_weight = gr.Slider(
+                    0.0, 1, step=.05, 
+                    label="CFG/Pace", 
+                    value=0.5
+                )
+            
+            with gr.Accordion("Advanced Options", open=False):
+                seed_num = gr.Number(value=0, label="Random seed (0 for random)")
+                temp = gr.Slider(0.05, 5, step=.05, label="Temperature", value=.8)
+                min_p = gr.Slider(
+                    0.00, 1.00, step=0.01, 
+                    label="min_p (0.02-0.1 recommended)", 
+                    value=0.05
+                )
+                top_p = gr.Slider(
+                    0.00, 1.00, step=0.01, 
+                    label="top_p (1.0 recommended)", 
+                    value=1.00
+                )
+                repetition_penalty = gr.Slider(
+                    1.00, 2.00, step=0.1, 
+                    label="Repetition Penalty", 
+                    value=1.2
+                )
+            
+            run_btn = gr.Button("🎵 Generate Chunked Audio", variant="primary", size="lg")
+            
+        with gr.Column():
+            status_display = gr.Textbox(
+                label="Generation Status", 
+                value="Ready to generate...",
+                interactive=False,
+                max_lines=4
+            )
+            audio_output = gr.Audio(label="Combined Audio Output")
+            
+            # Chunking explanation
+            with gr.Accordion("📚 How Chunking Works", open=False):
+                gr.Markdown("""
+                **Smart Text Chunking:**
+                - Splits text into 300-character segments (optimal for Chatterbox)
+                - Breaks at sentence boundaries when possible
+                - Falls back to word boundaries or punctuation
+                - Adds 0.2s silence between chunks for natural flow
+                - Maintains voice consistency across all chunks
+                
+                **Benefits:**
+                - ✅ Maintains original audio quality
+                - ✅ Supports unlimited text length
+                - ✅ Natural pauses between segments  
+                - ✅ No 40-second duration limit per chunk
+                - ✅ Better memory efficiency
+                
+                **Estimated Times:**
+                - 1000 chars = ~4 chunks = ~2-3 minutes generation
+                - 2000 chars = ~7 chunks = ~4-5 minutes generation
+                """)
+    
+    # Update chunk preview in real-time
+    def update_chunk_preview(text):
+        if not text or not text.strip():
+            return "Enter text to see chunk analysis..."
+        
+        try:
+            chunks = smart_chunk_text(text, MAX_CHUNK_SIZE)
+            total_chars = len(text)
+            chunk_count = len(chunks)
+            
+            # Estimate generation time (rough estimate: ~25-35s per chunk)
+            est_time = chunk_count * 30
+            est_minutes = est_time // 60
+            est_seconds = est_time % 60
+            
+            preview = f"📊 {total_chars} chars → {chunk_count} chunk(s)\n"
+            if est_minutes > 0:
+                preview += f"⏱️ Est. time: {est_minutes}m {est_seconds}s\n"
+            else:
+                preview += f"⏱️ Est. time: {est_seconds}s\n"
+            
+            if chunk_count <= 3:
+                preview += f"📝 Sizes: {[len(chunk) for chunk in chunks]}"
+            else:
+                sizes = [len(chunk) for chunk in chunks[:3]]
+                preview += f"📝 Sizes: {sizes}... (+{chunk_count-3} more)"
+            
+            return preview
+        except Exception as e:
+            return f"⚠️ Error analyzing text: {str(e)}"
+    
+    text.change(
+        fn=update_chunk_preview,
+        inputs=text,
+        outputs=chunk_preview
+    )
+    
+    # Load model on startup
+    demo.load(fn=load_model, inputs=[], outputs=model_state)
+    
+    # Generate chunked audio
+    run_btn.click(
+        fn=generate_chunked,
+        inputs=[
+            model_state,
+            text,
+            ref_wav,
+            exaggeration,
+            temp,
+            seed_num,
+            cfg_weight,
+            min_p,
+            top_p,
+            repetition_penalty,
+        ],
+        outputs=[audio_output, status_display],
+    )
+
+if __name__ == "__main__":
+    demo.queue(
+        max_size=50,
+        default_concurrency_limit=1,
+    ).launch(share=True, debug=True)
