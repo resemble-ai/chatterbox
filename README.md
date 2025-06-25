@@ -72,7 +72,7 @@ ta.save("test-2.wav", wav, model.sr)
 See `example_tts.py` and `example_vc.py` for more examples.
 
 # Supported Lanugage
-Currenlty only English.
+Currently only English.
 
 # Acknowledgements
 - [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)
