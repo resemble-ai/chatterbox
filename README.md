@@ -1,6 +1,9 @@
 <img width="1200" alt="cb-big2" src="assets/cb-new.png" />
 
-# Chatterbox TTS
+[![Alt Text](https://img.shields.io/badge/listen-demo_samples-blue)](https://resemble-ai.github.io/chatterbox_demopage/)
+[![Alt Text](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/ResembleAI/Chatterbox)
+[![Alt Text](https://static-public.podonos.com/badges/insight-on-pdns-sm-dark.svg)](https://podonos.com/resembleai/chatterbox)
+[![Discord](https://img.shields.io/discord/1377773249798344776?label=join%20discord&logo=discord&style=flat)](https://discord.gg/rJq9cRJBJ6)
 
 <p align="center">
 <video src="https://github.com/user-attachments/assets/12b341b2-e6ec-4bee-bf87-3109f726f91b" />
