@@ -1,4 +1,4 @@
-<img width="1200" alt="cb-big2" src="assets/cbh.png" />
+<img width="1200" alt="cb-big2" src="assets/cb-new.png" />
 
 # Chatterbox TTS
 
