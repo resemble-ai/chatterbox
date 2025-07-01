@@ -2,7 +2,9 @@
 
 # Chatterbox TTS
 
+<p align="center">
 <video src="https://github.com/user-attachments/assets/12b341b2-e6ec-4bee-bf87-3109f726f91b" />
+</p>
 
 
 We're excited to introduce Chatterbox, [Resemble AI's](https://resemble.ai) first production-grade open source TTS model. Licensed under MIT, Chatterbox has been benchmarked against leading closed-source systems like ElevenLabs, and is consistently preferred in side-by-side evaluations.
