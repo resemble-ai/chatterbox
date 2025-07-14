@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import librosa
 import torch
@@ -215,7 +216,18 @@ class ChatterboxTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
+        # stream - left for API compatibility
+        tokens_per_slice=None,
+        remove_milliseconds=None,
+        remove_milliseconds_start=None,
+        chunk_overlap_method=None,
+        # cache optimization params
+        max_new_tokens=1000, 
+        max_cache_len=1500, # Affects the T3 speed, hence important
     ):
+        if tokens_per_slice is not None or remove_milliseconds is not None or remove_milliseconds_start is not None or chunk_overlap_method is not None:
+            print("Streaming by token slices has been discontinued due to audio clipping. Continuing with full generation.")
+
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
@@ -246,27 +258,42 @@ class ChatterboxTTS:
             speech_tokens = self.t3.inference(
                 t3_cond=self.conds.t3,
                 text_tokens=text_tokens,
-                max_new_tokens=1000,  # TODO: use the value in config
+                max_new_tokens=max_new_tokens,  # TODO: use the value in config
                 temperature=temperature,
                 cfg_weight=cfg_weight,
                 repetition_penalty=repetition_penalty,
                 min_p=min_p,
                 top_p=top_p,
             )
-            # Extract only the conditional batch.
-            speech_tokens = speech_tokens[0]
 
-            # TODO: output becomes 1D
-            speech_tokens = drop_invalid_tokens(speech_tokens)
             
-            speech_tokens = speech_tokens[speech_tokens < 6561]
+            def speech_to_wav(speech_tokens):
+                # Extract only the conditional batch.
+                speech_tokens = speech_tokens[0]
 
-            speech_tokens = speech_tokens.to(self.device)
+                # TODO: output becomes 1D
+                speech_tokens = drop_invalid_tokens(speech_tokens)
+                
+                def drop_bad_tokens(tokens):
+                    # Use torch.where instead of boolean indexing to avoid sync
+                    mask = tokens < 6561
+                    # Count valid tokens without transferring to CPU
+                    valid_count = torch.sum(mask).item()
+                    # Create output tensor of the right size
+                    result = torch.zeros(valid_count, dtype=tokens.dtype, device=tokens.device)
+                    # Use torch.masked_select which is more CUDA-friendly
+                    result = torch.masked_select(tokens, mask)
+                    return result
 
-            wav, _ = self.s3gen.inference(
-                speech_tokens=speech_tokens,
-                ref_dict=self.conds.gen,
-            )
-            wav = wav.squeeze(0).detach().cpu().numpy()
-            watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-        return torch.from_numpy(watermarked_wav).unsqueeze(0)
+                # speech_tokens = speech_tokens[speech_tokens < 6561]
+                speech_tokens = drop_bad_tokens(speech_tokens)
+                wav, _ = self.s3gen.inference(
+                    speech_tokens=speech_tokens,
+                    ref_dict=self.conds.gen,
+                )
+                wav = wav.squeeze(0).detach().cpu().numpy()
+                watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
+                return torch.from_numpy(watermarked_wav).unsqueeze(0)
+
+            yield speech_to_wav(speech_tokens)
+

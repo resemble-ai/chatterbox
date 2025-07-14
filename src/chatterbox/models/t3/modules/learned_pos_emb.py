@@ -26,7 +26,7 @@ class LearnedPositionEmbeddings(nn.Module):
             positional embeddings for given indices, shape (B, T, dim), ie (1, 1, dim) for int input
         """
         device = self.emb.weight.device
-        idx = idx.to(device) if torch.is_tensor(idx) else torch.tensor(idx, device=device)
+        idx = idx if torch.is_tensor(idx) else torch.tensor(idx, device=device)
         idx = torch.atleast_2d(idx)
         assert idx.ndim == 2
         return self.emb(idx)  # (B, T, dim)

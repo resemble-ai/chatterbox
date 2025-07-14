@@ -7,8 +7,10 @@ from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
-from transformers import LlamaModel, LlamaConfig
-from transformers.generation.logits_process import MinPLogitsWarper, RepetitionPenaltyLogitsProcessor, TopPLogitsWarper
+# from transformers import LlamaModel, LlamaConfig, DynamicCache
+from .inference.custom_llama.modeling_llama import LlamaModel, LlamaConfig
+from transformers.cache_utils import StaticCache
+from transformers.generation.logits_process import TopPLogitsWarper, RepetitionPenaltyLogitsProcessor
 
 from .modules.learned_pos_emb import LearnedPositionEmbeddings
 
@@ -200,6 +202,82 @@ class T3(nn.Module):
 
         return loss_text, loss_speech
 
+    def init_patched_model(self):
+        # TODO? synchronize the expensive compile function
+        # with self.compile_lock:
+        if not self.compiled:
+            # alignment_stream_analyzer = AlignmentStreamAnalyzer(
+            #     self.tfmr,
+            #     None,
+            #     text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
+            #     alignment_layer_idx=9, # TODO: hparam or something?
+            #     eos_idx=self.hp.stop_speech_token,
+            # )
+            patched_model = T3HuggingfaceBackend(
+                config=self.cfg,
+                llama=self.tfmr,
+                speech_enc=self.speech_emb,
+                speech_head=self.speech_head,
+                # alignment_stream_analyzer=alignment_stream_analyzer,
+            )
+            self.patched_model = patched_model
+            self.compiled = True
+
+    def get_cache(self, config, max_batch_size, max_cache_len, device, dtype):
+        if hasattr(self, 'backend_cache'):
+            if self.backend_cache_params['max_batch_size'] == max_batch_size and \
+                self.backend_cache_params['max_cache_len'] == max_cache_len and \
+                self.backend_cache_params['dtype'] == dtype and \
+                self.backend_cache_params['device'] == device:
+                self.backend_cache.reset()
+                return self.backend_cache
+            else:
+                del self.backend_cache
+
+        cache = StaticCache(
+            config=config,
+            max_batch_size=max_batch_size,
+            max_cache_len=max_cache_len,
+            device=device,
+            dtype=dtype,
+        )
+        # save parameters in t3 since huggingface fails deprecation standards.
+        self.backend_cache_params = {
+            'max_batch_size': max_batch_size,
+            'max_cache_len': max_cache_len,
+            'device': device,
+            'dtype': dtype,
+        }
+        self.backend_cache = cache
+        return cache
+
+    def get_speech_pos_embedding_cache(self, max_gen_tokens, dtype):
+        if not hasattr(self, '_speech_pos_embedding_cache') or self._speech_pos_embedding_cache.size(0) < max_gen_tokens:
+            # Create cache with embeddings for positions 0 to max_gen_tokens-1
+            self._speech_pos_embedding_cache = []
+            for pos in range(max_gen_tokens):
+                embedding = self.speech_pos_emb.get_fixed_embedding(pos)
+                self._speech_pos_embedding_cache.append(embedding)
+            # Stack and move to device
+            self._speech_pos_embedding_cache = torch.stack(self._speech_pos_embedding_cache, dim=0).to(device=self.device)
+        elif self._speech_pos_embedding_cache.dtype != dtype:
+            self._speech_pos_embedding_cache = self._speech_pos_embedding_cache.to(dtype=dtype)
+        return self._speech_pos_embedding_cache
+
+    def init_speech_embedding_cache(self, vocab_size, dtype):
+        if not hasattr(self, '_speech_embedding_cache') or self._speech_embedding_cache.size(0) < vocab_size:
+            # Create cache with embeddings for positions 0 to max_gen_tokens-1
+            self._speech_embedding_cache = []
+            for pos in range(vocab_size):
+                pos = torch.tensor([pos], device=self.device)
+                embedding = self.speech_emb(pos)
+                self._speech_embedding_cache.append(embedding.squeeze(0))
+            # Stack and move to device
+            self._speech_embedding_cache = torch.stack(self._speech_embedding_cache, dim=0).to(device=self.device)
+        elif self._speech_embedding_cache.dtype != dtype:
+            self._speech_embedding_cache = self._speech_embedding_cache.to(dtype=dtype)
+        return self._speech_embedding_cache
+
     @torch.inference_mode()
     def inference(
         self,
@@ -222,6 +300,7 @@ class T3(nn.Module):
         length_penalty=1.0,
         repetition_penalty=1.2,
         cfg_weight=0,
+        max_cache_len=None,
     ):
         """
         Args:
@@ -246,21 +325,10 @@ class T3(nn.Module):
 
         # In order to use the standard HF generate method, we need to extend some methods to inject our custom logic
         # Note the llama-specific logic. Other tfmr types can be added later.
-
-        self.compiled = False
-
-        # TODO? synchronize the expensive compile function
-        # with self.compile_lock:
-        if not self.compiled:
-            patched_model = T3HuggingfaceBackend(
-                config=self.cfg,
-                llama=self.tfmr,
-                speech_enc=self.speech_emb,
-                speech_head=self.speech_head,
-                alignment_stream_analyzer=None,
-            )
-            self.patched_model = patched_model
-            self.compiled = True
+        self.init_patched_model()
+        # Pre-compute embeddings cache for the generation loop
+        self.get_speech_pos_embedding_cache(max_new_tokens + 1 or self.hp.max_speech_tokens, dtype=embeds.dtype)
+        self.init_speech_embedding_cache(vocab_size=self.hp.speech_tokens_dict_size, dtype=embeds.dtype)
 
         # # Run normal generate method, which calls our custom extended methods
         # return self.patched_model.generate(
@@ -282,8 +350,8 @@ class T3(nn.Module):
         device = embeds.device
 
         bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=device)
-        bos_embed = self.speech_emb(bos_token)  # shape: (B, 1, embed_dim)
-        bos_embed = bos_embed + self.speech_pos_emb.get_fixed_embedding(0)
+        bos_embed = self._speech_embedding_cache[bos_token]
+        bos_embed = bos_embed + self._speech_pos_embedding_cache[0]
 
         # batch_size=2 for CFG
         bos_embed = torch.cat([bos_embed, bos_embed])
@@ -295,29 +363,61 @@ class T3(nn.Module):
             inputs_embeds = embeds
 
         # Track generated token ids; start with the BOS token.
-        generated_ids = bos_token.clone()
+        PAD_TOKEN_ID = self.hp.stop_speech_token + 1 # Assuming unused
+        bos_len = bos_token.shape[1]
+        # using batch size of 1, otherwise use generated_ids[:, i] 
+        generated_ids = torch.full((1, bos_len + max_new_tokens), PAD_TOKEN_ID, dtype=torch.long, device=device)
+        generated_ids[0, :bos_len] = bos_token
+
         predicted = []  # To store the predicted tokens
 
         # Instantiate the logits processors.
         min_p_warper = MinPLogitsWarper(min_p=min_p)
         top_p_warper = TopPLogitsWarper(top_p=top_p)
-        repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
+        repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=repetition_penalty)
+
+        # move all inputs to patched_model.dtype
+        inputs_embeds = inputs_embeds.to(self.patched_model.dtype)
+        embeds = embeds.to(self.patched_model.dtype)
+        bos_embed = bos_embed.to(self.patched_model.dtype)
+
+        stop_token_tensor = torch.tensor(self.hp.stop_speech_token, device=self.device)
+        
+        # Fix: Set max_batch_size based on CFG usage
+        effective_batch_size = 2 if cfg_weight > 0.0 else 1
+
+        _, seq_len = inputs_embeds.shape[:2]
+        assert max_cache_len > seq_len + max_new_tokens, \
+            f"max_cache_len {max_cache_len} is too small for seq_len {seq_len} and max_new_tokens {max_new_tokens}"
+
+        kv_cache = self.get_cache(
+            config=self.patched_model.config,
+            max_batch_size=effective_batch_size,
+            max_cache_len=max_cache_len,
+            device=self.patched_model.device,
+            dtype=self.patched_model.dtype,
+        )
+
+        # Move check higher to avoid polluting the loop
+        assert not kv_cache.get_seq_length() > 0, \
+            "Cannot process large input when cache already has content"
+
+        length_guesstimate = text_tokens.shape[1] * 2
+        print(f"Estimated token count: {length_guesstimate}")
+        length_guesstimate = int(length_guesstimate * 0.8) # variance
+
+        cache_position = torch.arange(seq_len, device=inputs_embeds.device)
 
         # ---- Initial Forward Pass (no kv_cache yet) ----
-        output = self.patched_model(
+        output_logits = self.patched_model(
             inputs_embeds=inputs_embeds,
-            past_key_values=None,
-            use_cache=True,
-            output_attentions=True,
-            output_hidden_states=True,
-            return_dict=True,
+            past_key_values=kv_cache,
+            cache_position=cache_position,
         )
-        # Initialize kv_cache with the full context.
-        past = output.past_key_values
 
         # ---- Generation Loop using kv_cache ----
         for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
-            logits = output.logits[:, -1, :]
+            logits = output_logits[:, -1, :]
 
             # CFG
             if cfg_weight > 0.0:
@@ -341,31 +441,41 @@ class T3(nn.Module):
             next_token = torch.multinomial(probs, num_samples=1)  # shape: (B, 1)
 
             predicted.append(next_token)
-            generated_ids = torch.cat([generated_ids, next_token], dim=1)
+            generated_ids[0, i + bos_len] = next_token
 
-            # Check for EOS token.
-            if next_token.view(-1) == self.hp.stop_speech_token:
-                break
+            # if i % tokens_per_slice == 0:
+            #     yield torch.cat(predicted, dim=1)
 
             # Get embedding for the new token.
-            next_token_embed = self.speech_emb(next_token)
-            next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
+            next_token_embed = self._speech_embedding_cache[next_token] + self._speech_pos_embedding_cache[i + 1]
 
             #  For CFG
             if cfg_weight > 0.0:
                 next_token_embed = torch.cat([next_token_embed, next_token_embed])
 
-            # Forward pass with only the new token and the cached past.
-            output = self.patched_model(
-                inputs_embeds=next_token_embed,
-                past_key_values=past,
-                output_attentions=True,
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            # Update the kv_cache.
-            past = output.past_key_values
+            # Check for EOS token.
+            if i > length_guesstimate and i % 20 == 0:
+                if (generated_ids == stop_token_tensor).any():
+                    break
 
-        # Concatenate all predicted tokens along the sequence dimension.
-        predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
-        return predicted_tokens
+            # Forward pass with only the new token and the cached past.
+            torch.compiler.cudagraph_mark_step_begin()
+            output_logits = self._step_compilation_target(
+                next_token_embed,
+                kv_cache,
+            )
+
+        
+        return torch.cat(predicted, dim=1)
+
+    # @torch.compile(backend="cudagraphs", fullgraph=True)
+    def _step_compilation_target(
+        self,
+        next_token_embed: Tensor,
+        kv_cache: StaticCache,
+    ):
+        return self.patched_model(
+            inputs_embeds=next_token_embed,
+            past_key_values=kv_cache,
+            cache_position=kv_cache.get_seq_length().unsqueeze(0),
+        )
