@@ -46,3 +46,9 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+/.venv
+/.idea
+/src/chatterbox - Copy
+/conditionals
+/.env_win
+/.idea
