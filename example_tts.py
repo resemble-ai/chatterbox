@@ -5,6 +5,9 @@ from chatterbox.tts import ChatterboxTTS
 # Automatically detect the best available device
 if torch.cuda.is_available():
     device = "cuda"
+# Check for AMD ROCm support
+elif torch.cuda.is_available() and torch.version.hip:
+    device = "cuda"
 elif torch.backends.mps.is_available():
     device = "mps"
 else:
