@@ -4,7 +4,6 @@ from typing import Literal
 
 import librosa
 import torch
-import perth
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
@@ -15,7 +14,6 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
-
 
 REPO_ID = "ResembleAI/chatterbox"
 
@@ -109,13 +107,13 @@ class ChatterboxTTS:
     DEC_COND_LEN = 10 * S3GEN_SR
 
     def __init__(
-        self,
-        t3: T3,
-        s3gen: S3Gen,
-        ve: VoiceEncoder,
-        tokenizer: EnTokenizer,
-        device: str,
-        conds: Conditionals = None,
+            self,
+            t3: T3,
+            s3gen: S3Gen,
+            ve: VoiceEncoder,
+            tokenizer: EnTokenizer,
+            device: str,
+            conds: Conditionals = None,
     ):
         self.sr = S3GEN_SR  # sample rate of synthesized audio
         self.t3 = t3
@@ -124,7 +122,6 @@ class ChatterboxTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
-        self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
@@ -172,7 +169,8 @@ class ChatterboxTTS:
             if not torch.backends.mps.is_built():
                 print("MPS not available because the current PyTorch install was not built with MPS enabled.")
             else:
-                print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
+                print(
+                    "MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
             device = "cpu"
 
         for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
@@ -207,26 +205,28 @@ class ChatterboxTTS:
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
 
     def generate(
-        self,
-        text,
-        repetition_penalty=1.2,
-        min_p=0.05,
-        top_p=1.0,
-        audio_prompt_path=None,
-        exaggeration=0.5,
-        cfg_weight=0.5,
-        temperature=0.8,
-        # stream - left for API compatibility
-        tokens_per_slice=None,
-        remove_milliseconds=None,
-        remove_milliseconds_start=None,
-        chunk_overlap_method=None,
-        # cache optimization params
-        max_new_tokens=1000, 
-        max_cache_len=1500, # Affects the T3 speed, hence important
+            self,
+            text,
+            audio_prompt_path=None,
+            exaggeration=0.5,
+            cfg_weight=0.5,
+            temperature=0.8,
+            # stream - left for API compatibility
+            tokens_per_slice=None,
+            remove_milliseconds=None,
+            remove_milliseconds_start=None,
+            chunk_overlap_method=None,
+            # cache optimization params
+            max_new_tokens=1000,
+            max_cache_len=1500,  # Affects the T3 speed, hence important
+            # t3 sampling params
+            repetition_penalty=1.2,
+            min_p=0.05,
+            top_p=1.0,
     ):
         if tokens_per_slice is not None or remove_milliseconds is not None or remove_milliseconds_start is not None or chunk_overlap_method is not None:
-            print("Streaming by token slices has been discontinued due to audio clipping. Continuing with full generation.")
+            print(
+                "Streaming by token slices has been discontinued due to audio clipping. Continuing with full generation.")
 
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
@@ -261,19 +261,19 @@ class ChatterboxTTS:
                 max_new_tokens=max_new_tokens,  # TODO: use the value in config
                 temperature=temperature,
                 cfg_weight=cfg_weight,
+                max_cache_len=max_cache_len,
                 repetition_penalty=repetition_penalty,
                 min_p=min_p,
                 top_p=top_p,
             )
 
-            
             def speech_to_wav(speech_tokens):
                 # Extract only the conditional batch.
                 speech_tokens = speech_tokens[0]
 
                 # TODO: output becomes 1D
                 speech_tokens = drop_invalid_tokens(speech_tokens)
-                
+
                 def drop_bad_tokens(tokens):
                     # Use torch.where instead of boolean indexing to avoid sync
                     mask = tokens < 6561
@@ -291,9 +291,9 @@ class ChatterboxTTS:
                     speech_tokens=speech_tokens,
                     ref_dict=self.conds.gen,
                 )
-                wav = wav.squeeze(0).detach().cpu().numpy()
-                watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-                return torch.from_numpy(watermarked_wav).unsqueeze(0)
+                #wav = wav.squeeze(0).detach().cpu().numpy()
+                #watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
+                #return torch.from_numpy(watermarked_wav).unsqueeze(0)
+                return wav
 
             yield speech_to_wav(speech_tokens)
-

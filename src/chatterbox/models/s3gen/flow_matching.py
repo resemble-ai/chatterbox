@@ -15,7 +15,17 @@ import threading
 import torch
 import torch.nn.functional as F
 from .matcha.flow_matching import BASECFM
-from .configs import CFM_PARAMS
+from omegaconf import OmegaConf
+
+
+CFM_PARAMS = OmegaConf.create({
+    "sigma_min": 1e-06,
+    "solver": "euler",
+    "t_scheduler": "cosine",
+    "training_cfg_rate": 0.2,
+    "inference_cfg_rate": 0.7,
+    "reg_loss_type": "l1"
+})
 
 
 class ConditionalCFM(BASECFM):
