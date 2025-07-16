@@ -51,3 +51,4 @@ scipy
 tqdm
 einops
 typing-extensions
+deprecated
