@@ -16,10 +16,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import pack, rearrange, repeat
 
-from .utils.mask import add_optional_chunk_mask
 from .matcha.decoder import SinusoidalPosEmb, Block1D, ResnetBlock1D, Downsample1D, \
     TimestepEmbedding, Upsample1D
 from .matcha.transformer import BasicTransformerBlock
+from .utils.mask import add_optional_chunk_mask
 
 
 def mask_to_bias(mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:

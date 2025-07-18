@@ -2,10 +2,10 @@
 # Author: John Meade, Jeremy Hsu
 # MIT License
 import logging
-import torch
 from dataclasses import dataclass
 from types import MethodType
 
+import torch
 
 logger = logging.getLogger(__name__)
 

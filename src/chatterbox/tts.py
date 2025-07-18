@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 import librosa
 import torch
@@ -8,12 +7,12 @@ import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
-from .models.t3 import T3
-from .models.s3tokenizer import S3_SR, drop_invalid_tokens
 from .models.s3gen import S3GEN_SR, S3Gen
+from .models.s3tokenizer import S3_SR, drop_invalid_tokens
+from .models.t3 import T3
+from .models.t3.modules.cond_enc import T3Cond
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
-from .models.t3.modules.cond_enc import T3Cond
 
 REPO_ID = "ResembleAI/chatterbox"
 
@@ -123,6 +122,12 @@ class ChatterboxTTS:
         self.device = device
         self.conds = conds
 
+    def set_conditionals(self, conds: Conditionals):
+        """
+        Set the conditionals for T3 and S3Gen.
+        """
+        self.conds = conds.to(self.device)
+
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
@@ -182,6 +187,8 @@ class ChatterboxTTS:
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
+        s3gen_ref_wav, index = librosa.effects.trim(s3gen_ref_wav, top_db=20)
+
         ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
 
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
@@ -228,19 +235,20 @@ class ChatterboxTTS:
             print(
                 "Streaming by token slices has been discontinued due to audio clipping. Continuing with full generation.")
 
-        if audio_prompt_path:
-            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
-        else:
-            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
-
-        # Update exaggeration if needed
-        if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
-            _cond: T3Cond = self.conds.t3
-            self.conds.t3 = T3Cond(
-                speaker_emb=_cond.speaker_emb,
-                cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
-                emotion_adv=exaggeration * torch.ones(1, 1, 1),
-            ).to(device=self.device)
+        #if audio_prompt_path:
+        #    self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
+        #else:
+        #    assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+#
+        ## Update exaggeration if needed
+        #print(f"Exaggeration: {exaggeration} emotion_adv: {self.conds.t3.emotion_adv[0, 0, 0]}")
+        #if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
+        #    _cond: T3Cond = self.conds.t3
+        #    self.conds.t3 = T3Cond(
+        #        speaker_emb=_cond.speaker_emb,
+        #        cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
+        #        emotion_adv=exaggeration * torch.ones(1, 1, 1, device=self.device),
+        #    )
 
         # Norm and tokenize text
         text = punc_norm(text)
@@ -269,7 +277,7 @@ class ChatterboxTTS:
 
             def speech_to_wav(speech_tokens):
                 # Extract only the conditional batch.
-                speech_tokens = speech_tokens[0]
+                speech_tokens = speech_tokens[speech_tokens < 6561]
 
                 # TODO: output becomes 1D
                 speech_tokens = drop_invalid_tokens(speech_tokens)

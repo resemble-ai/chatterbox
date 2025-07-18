@@ -31,24 +31,22 @@ torchaudio
 
 setuptools<81.0
 
-huggingface-hub
+#huggingface-hub
 gradio
-peft>=0.16.0
+peft
 numpy
 librosa
 s3tokenizer
-peft>=0.16.0
 transformers
 diffusers
-resemble-perth==1.0.1
+#resemble-perth==1.0.1
 conformer
 safetensors
-omegaconf>=2.3.0
 dotenv
 psutil
 python-dotenv
-scipy
-tqdm
-einops
+#scipy
+#tqdm
+#einops
 typing-extensions
-deprecated
+nvidia-cuda-runtime-cu12

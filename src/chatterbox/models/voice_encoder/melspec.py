@@ -1,8 +1,8 @@
 from functools import lru_cache
 
-from scipy import signal
-import numpy as np
 import librosa
+import numpy as np
+from scipy import signal
 
 
 @lru_cache()

@@ -2,11 +2,11 @@
 # MIT License
 from typing import List, Union, Optional
 
-import numpy as np
-from numpy.lib.stride_tricks import as_strided
 import librosa
+import numpy as np
 import torch
 import torch.nn.functional as F
+from numpy.lib.stride_tricks import as_strided
 from torch import nn, Tensor
 
 from .config import VoiceEncConfig

@@ -2,13 +2,11 @@ from pathlib import Path
 
 import librosa
 import torch
-
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
-from .models.s3tokenizer import S3_SR
 from .models.s3gen import S3GEN_SR, S3Gen
-
+from .models.s3tokenizer import S3_SR
 
 REPO_ID = "ResembleAI/chatterbox"
 

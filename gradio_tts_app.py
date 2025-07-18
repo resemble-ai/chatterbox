@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from src.simple_model_state import simple_manage_model_state
+
 script_directory = Path(__file__).parent
 import sys
 
@@ -10,10 +12,9 @@ import torch
 import gradio as gr
 import functools
 from src.api import (tts, get_model, resolve_dtype, resolve_device)
-from src.tts_webui.decorators import decorator_add_model_type
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-DTYPE = "bfloat16" if torch.cuda.is_available() else "float32"
+DTYPE = "bfloat16"
 
 
 def set_seed(seed: int):
@@ -23,131 +24,147 @@ def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
 
-
+@simple_manage_model_state("chatterbox")
 def load_model():
     return get_model(model_name="chatterbox",
               device=resolve_device(DEVICE), dtype=resolve_dtype(DTYPE))
 
 @functools.wraps(tts)
-@decorator_add_model_type("chatterbox")
 def tts_decorated(*args, _type=None, **kwargs):
     return tts(*args, **kwargs)
 
 ### SkyrimNet Zonos Emulated
 def generate_audio(
-    model_choice: str,
-    text: str,
-    language: str,
-    speaker_audio: str,
-    prefix_audio: str,
-    e1: float,
-    e2: float,
-    e3: float,
-    e4: float,
-    e5: float,
-    e6: float,
-    e7: float,
-    e8: float,
-    vq_single: float,
-    fmax: float,
-    pitch_std: float,
-    speaking_rate: float,
-    dnsmos_ovrl: float,
-    speaker_noised: bool,
-    cfg_scale: float,
-    top_p: float,
-    top_k: float,
-    min_p: float,
-    linear: float,
-    confidence: float,
-    quadratic: float,
-    seed: int,
-    randomize_seed: bool,
-    unconditional_keys: list,
-
+    model_choice = None,
+    text= "On that first day from Saturalia, My missus gave for me, A big bowl of moon sugar!",
+    language= "en",
+    speaker_audio= None,
+    prefix_audio= None,
+    e1= None,
+    e2= None,
+    e3= None,
+    e4= None,
+    e5= None,
+    e6= None,
+    e7= None,
+    e8= None,
+    vq_single= None,
+    fmax= None,
+    pitch_std= None,
+    speaking_rate= None,
+    dnsmos_ovrl= None,
+    speaker_noised: bool = None,
+    cfg_scale= 0.3,
+    top_p= 1.0,
+    top_k= None,
+    min_p= 0.5,
+    linear= None,
+    confidence= None,
+    quadratic= None,
+    uuid= -1,
+    randomize_seed: bool = False,
+    unconditional_keys: list = None,
 ):
-    print(    model_choice,
-    text,
-    language,
-    speaker_audio,
-    prefix_audio,
-    e1,
-    e2,
-    e3,
-    e4,
-    e5,
-    e6,
-    e7,
-    e8,
-    vq_single,
-    fmax,
-    pitch_std,
-    speaking_rate,
-    dnsmos_ovrl,
-    speaker_noised,
-    cfg_scale,
-    top_p,
-    top_k,
-    min_p,
-    linear,
-    confidence,
-    quadratic,
-    seed,
-    randomize_seed,
-    unconditional_keys,
-    )
+
     """
-      Generates audio based on the provided UI parameters.
-      We do NOT use language_id or ctc_loss even if the model has them.
-      """
-    #speaker_audio_path = ast.literal_eval(speaker_audio)["path"] if speaker_audio else None
-    #print("Speaker audio path:", speaker_audio)
+    Generates audio based on the provided UI parameters.
+    We do NOT use language_id or ctc_loss even if the model has them.
+    """
+
+    # Handle C++ UUID seed format
+    #if randomize_seed or uuid <= 0:
+    #    seed = torch.randint(0, 2**31 - 1, (1,)).item()
+    #else:
+    #    # Convert C++ UUID to usable seed (hash the bits to get consistent seed)
+    #    if uuid > 0:
+    #        # Hash the UUID bits to get a stable 32-bit seed
+    #        seed = hash(uuid) & 0x7FFFFFFF  # Keep positive 32-bit
+    #    else:
+    #        seed = uuid
+    if randomize_seed or uuid <= 0:
+        seed = 0
+    else:
+        seed = uuid #hash(uuid) & 0x7FFFFFFF  # Keep positive 32-bit
 
 
-    l_repetition_penalty = 1.2
-    l_exaggeration = 0.8
 
-
-    #if randomize_seed:
-    #    seed = torch.randint(0, 2**32 - 1, (1,)).item()
-    #torch.manual_seed(seed)
-
-    seed_num=seed >> 64 if randomize_seed is False else 0
-    return [tts_decorated(
+    # Direct return without intermediate variables, now with UUID for caching
+    return [generate(
         model_state=model_state,
         text=text,
         audio_prompt_path=speaker_audio,
-        exaggeration=l_exaggeration,
-        temperature=0.9,
-        seed_num=-seed_num,
-        cfgw=cfg_scale,
-        min_p=min_p,
-        top_p=top_p,
-        repetition_penalty=l_repetition_penalty,
-        device=DEVICE,
-        dtype=DTYPE,
-        chunked=True,
-        cache_voice=True,
-        max_cache_len=700,
-        max_new_tokens=500,
-        use_compilation=True,
-    ) , seed]
+        seed_num=seed,
+        cfgw=0.3,
+        min_p=0.5,
+        top_p=1.0,
+        repetition_penalty=1.9,
+        cache_uuid=uuid,  # Pass UUID for disk caching
+        do_progress=False,
+    ), uuid]
 
 ####
 
-def generate(model_state, text, audio_prompt_path, exaggeration, temperature, seed_num, cfgw, min_p, top_p, repetition_penalty):
-    # if seed_num != 0:
-    #    set_seed(int(seed_num))
+def generate(model_state, text, audio_prompt_path,
+             exaggeration=0.78,
+             temperature=0.9,
+             seed_num=0,
+             cfgw=0.25,
+             min_p=0.18,
+             top_p=1.0,
+             repetition_penalty=1.9,
+             device=DEVICE,
+             dtype=DTYPE,
+             chunked=True,
+             cache_voice=True,
+             max_cache_len=450,
+             max_new_tokens=300,
+             use_compilation=True,
+             cache_uuid=-1,
+             do_progress=False,
+             ):
+    print(f"""Generate using inputs: model_state = {model_state}, text = {text}, audio_prompt_path = {audio_prompt_path},
+    exaggeration = {exaggeration}, 
+    temperature = {temperature}, 
+    seed_num = {seed_num}, 
+    cfgw = {cfgw}, 
+    min_p = {min_p}, 
+    top_p = {top_p}, 
+    repetition_penalty = {repetition_penalty}, 
+    device = {device}, 
+    dtype = {dtype}, 
+    chunked = {chunked}, 
+    cache_voice = {cache_voice}, 
+    max_cache_len = {max_cache_len}, 
+    max_new_tokens = {max_new_tokens}, 
+    use_compilation = {use_compilation}, 
+    cache_uuid = {cache_uuid}
+    """)
 
-    return tts_decorated(model_state, text, exaggeration=exaggeration, temperature=temperature, cfg_weight=cfgw, min_p=min_p,
-        top_p=top_p, repetition_penalty=repetition_penalty, audio_prompt_path=audio_prompt_path, # model
-        model_name="just_a_placeholder", device=DEVICE, dtype=DTYPE, cpu_offload=False, # hyperparameters
-        chunked=True, cache_voice=True, # streaming
-        tokens_per_slice=1000, remove_milliseconds=100, remove_milliseconds_start=100, chunk_overlap_method="zero",
-        # chunks
-        desired_length=200, max_length=300, halve_first_chunk=False, seed=-1,  # for signature compatibility
-        progress=gr.Progress(), streaming=False, # progress=gr.Progress(track_tqdm=True),
-        use_compilation=True, max_new_tokens=400, max_cache_len=600,  # Affects the T3 speed, hence important
+
+    if seed_num == 0:
+        seed_num = torch.randint(0, 2**31 - 1, (1,)).item()
+    set_seed(seed_num)
+
+    return tts_decorated(
+        model_state=model_state,
+        text=text,
+        audio_prompt_path=audio_prompt_path,
+        exaggeration=exaggeration,
+        temperature=temperature,
+        seed_num=seed_num,
+        cfgw=cfgw,
+        min_p=min_p,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
+        device=device,
+        dtype=dtype,
+        chunked=chunked,
+        cache_voice=cache_voice,
+        max_cache_len=max_cache_len,
+        max_new_tokens=max_new_tokens,
+        use_compilation=use_compilation,
+        cache_uuid=cache_uuid,
+        do_progress=do_progress,
     )
 
 
@@ -163,19 +180,21 @@ with gr.Blocks() as demo:
             ref_wav = gr.Audio(sources=["upload", "microphone"], type="filepath", label="Reference Audio File",
                                value=None)
             exaggeration = gr.Slider(0.25, 2, step=.05,
-                                     label="Exaggeration (Neutral = 0.5, extreme values can be unstable)", value=.5)
-            cfg_weight = gr.Slider(0.0, 1, step=.05, label="CFG/Pace", value=0.5)
+                                     label="Exaggeration (Neutral = 0.5, extreme values can be unstable)", value=.7)
+            cfg_weight = gr.Slider(0.0, 1, step=.05, label="CFG/Pace", value=0.3)
+            #max_new_tokens = gr.Slider(100, 5000, step=25, label="max_new_tokens", value=500)
+            #max_cache_len = gr.Slider(100, 5000, step=25, label="max_cache_len", value=1000)
 
             with gr.Accordion("More options", open=False):
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")
-                temp = gr.Slider(0.05, 5, step=.05, label="temperature", value=.8)
+                temp = gr.Slider(0.05, 5, step=.05, label="temperature", value=.9)
                 min_p = gr.Slider(0.00, 1.00, step=0.01,
                                   label="min_p || Newer Sampler. Recommend 0.02 > 0.1. Handles Higher Temperatures better. 0.00 Disables",
                                   value=0.05)
                 top_p = gr.Slider(0.00, 1.00, step=0.01,
                                   label="top_p || Original Sampler. 1.0 Disables(recommended). Original 0.8",
                                   value=1.00)
-                repetition_penalty = gr.Slider(1.00, 2.00, step=0.1, label="repetition_penalty", value=1.2)
+                repetition_penalty = gr.Slider(1.00, 2.00, step=0.1, label="repetition_penalty", value=1.9)
 
             run_btn = gr.Button("Generate", variant="primary")
 
@@ -196,6 +215,8 @@ with gr.Blocks() as demo:
            min_p,
            top_p,
            repetition_penalty,
+           #max_cache_len,
+           #max_new_tokens,
        ],
        outputs=audio_output,
     )
@@ -259,24 +280,8 @@ with gr.Blocks() as demo:
     ],
                      outputs=[audio_output, seed_num],
                      )
-    demo.load(fn=load_model, inputs=[], outputs=model_state)
+    #demo.load(fn=load_model, inputs=[], outputs=model_state)
 
-    run_btn.click(
-        fn=generate,
-        inputs=[
-            model_state,
-            text,
-            ref_wav,
-            exaggeration,
-            temp,
-            seed_num,
-            cfg_weight,
-            min_p,
-            top_p,
-            repetition_penalty,
-        ],
-        outputs=audio_output,
-    )
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--share', action='store_true')
@@ -290,14 +295,14 @@ if __name__ == "__main__":
     if "demo" in locals():
         locals()["demo"].close()
 
-    #print("\nWarming up model...\n")
-    #warmup_output = tts_decorated(model_state=model_state,device="cuda",dtype=DTYPE,text="Warm up", speaker_audio=Path(script_directory).joinpath("assets","dlc1seranavoice.wav"),use_compilation=True)
+    print("\nWarming up model...\n")
+    warmup_output = generate_audio(speaker_audio=Path(script_directory).joinpath("assets","fishaudio_horror.wav"))
 
     gr.set_static_paths(paths=[Path.cwd().absolute()/"assets"])
     gr.cache_examples=True
     demo.queue(
         max_size=50,
-        default_concurrency_limit=5,
+        default_concurrency_limit=1,
     ).launch(
         server_name=args.server,
         server_port=args.port,

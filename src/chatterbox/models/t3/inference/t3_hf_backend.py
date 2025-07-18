@@ -1,10 +1,8 @@
-from typing import Optional
-
 import torch
-from torch import nn as nn
-from .custom_llama.modeling_llama import LlamaConfig, LlamaModel, LlamaPreTrainedModel, GenerationMixin
 from transformers.cache_utils import StaticCache
-from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
+
+from .custom_llama.modeling_llama import LlamaConfig, LlamaModel, LlamaPreTrainedModel, GenerationMixin
+
 
 class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
     """

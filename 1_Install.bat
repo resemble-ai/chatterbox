@@ -4,9 +4,11 @@ echo "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 
 echo ""
 echo "Checking for eSpeak NG"
-
 winget install --id=eSpeak-NG.eSpeak-NG  -e --silent --accept-package-agreements --accept-source-agreements
 
+echo ""
+echo "Installing BuildTools"
+winget install --id=Microsoft.VisualStudio.2022.BuildTools  -e
 
 echo "Making venv"
 py -3.12 -m venv --clear --upgrade-deps .venv

@@ -52,3 +52,4 @@ checkpoints/
 /conditionals
 /.env_win
 /.idea
+/cache

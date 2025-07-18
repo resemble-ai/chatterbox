@@ -3,7 +3,6 @@ import logging
 import torch
 from tokenizers import Tokenizer
 
-
 # Special tokens
 SOT = "[START]"
 EOT = "[STOP]"

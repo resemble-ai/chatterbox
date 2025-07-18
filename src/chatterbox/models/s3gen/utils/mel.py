@@ -1,8 +1,7 @@
 """mel-spectrogram extraction in Matcha-TTS"""
-from librosa.filters import mel as librosa_mel_fn
-import torch
 import numpy as np
-
+import torch
+from librosa.filters import mel as librosa_mel_fn
 
 # NOTE: they decalred these global vars
 mel_basis = {}

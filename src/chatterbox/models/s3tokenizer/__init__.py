@@ -1,4 +1,5 @@
 import torch
+
 from .s3tokenizer import (
     S3_SR,
     S3_HOP,
@@ -7,7 +8,6 @@ from .s3tokenizer import (
     SPEECH_VOCAB_SIZE,
     S3Tokenizer,
 )
-
 
 SOS = SPEECH_VOCAB_SIZE
 EOS = SPEECH_VOCAB_SIZE + 1
