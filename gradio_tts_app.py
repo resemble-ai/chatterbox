@@ -16,6 +16,9 @@ from src.api import (tts, get_model, resolve_dtype, resolve_device)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = "bfloat16"
 
+@functools.cache
+def cpp_uuid_to_seed(uuid_64: int) -> int:
+    return (abs(uuid_64) % (2 ** 31 - 1)) + 1
 
 def set_seed(seed: int):
     torch.manual_seed(seed)
@@ -72,21 +75,7 @@ def generate_audio(
     """
 
     # Handle C++ UUID seed format
-    #if randomize_seed or uuid <= 0:
-    #    seed = torch.randint(0, 2**31 - 1, (1,)).item()
-    #else:
-    #    # Convert C++ UUID to usable seed (hash the bits to get consistent seed)
-    #    if uuid > 0:
-    #        # Hash the UUID bits to get a stable 32-bit seed
-    #        seed = hash(uuid) & 0x7FFFFFFF  # Keep positive 32-bit
-    #    else:
-    #        seed = uuid
-    if randomize_seed or uuid <= 0:
-        seed = 0
-    else:
-        seed = uuid #hash(uuid) & 0x7FFFFFFF  # Keep positive 32-bit
-
-
+    seed = 0 if randomize_seed else cpp_uuid_to_seed(uuid)
 
     # Direct return without intermediate variables, now with UUID for caching
     return [generate(
