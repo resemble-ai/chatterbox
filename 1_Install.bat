@@ -34,3 +34,4 @@ echo 2_Start_Zonos.bat
 
 :EOF
 call ".venv\Scripts\deactivate.bat"
+pause
