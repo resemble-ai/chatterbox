@@ -19,6 +19,17 @@ S3_TOKEN_RATE = 25
 SPEECH_VOCAB_SIZE = 6561
 
 
+def drop_invalid_tokens(x: torch.Tensor) -> List[torch.Tensor]:
+    """
+    Filters out invalid tokens from a batch of token sequences.
+    Invalid tokens are those with an ID >= SPEECH_VOCAB_SIZE.
+    Returns a list of tensors, as each sequence may have a different length after filtering.
+    """
+    if x.dim() == 1:
+        x = x.unsqueeze(0)
+    return [row[row < SPEECH_VOCAB_SIZE] for row in x]
+
+
 class S3Tokenizer(S3TokenizerV2):
     """
     s3tokenizer.S3TokenizerV2 with the following changes:

@@ -7,6 +7,7 @@ import perth
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
+from typing import Union, List
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -179,63 +180,102 @@ class ChatterboxTTS:
 
         return cls.from_local(Path(local_path).parent, device)
 
-    def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
-        ## Load reference wav
-        s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
+    def prepare_conditionals(self, wav_fpaths: Union[str, List[str]], exaggeration=0.5):
+        if isinstance(wav_fpaths, str):
+            wav_fpaths = [wav_fpaths]
 
-        ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+        s3gen_ref_wavs, ref_16k_wavs_np = [], []
+        for fpath in wav_fpaths:
+            s3gen_wav, _ = librosa.load(fpath, sr=S3GEN_SR)
+            s3gen_wav_tensor = torch.from_numpy(s3gen_wav[:self.DEC_COND_LEN])
+            s3gen_ref_wavs.append(s3gen_wav_tensor)
 
-        s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
-        s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
+            ref_16k_wav, _ = librosa.load(fpath, sr=S3_SR)
+            ref_16k_wavs_np.append(ref_16k_wav)
+
+        s3gen_ref_batch = torch.nn.utils.rnn.pad_sequence(s3gen_ref_wavs, batch_first=True)
+        s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_batch, S3GEN_SR, device=self.device)
 
         # Speech cond prompt tokens
         if plen := self.t3.hp.speech_cond_prompt_len:
             s3_tokzr = self.s3gen.tokenizer
-            t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav[:self.ENC_COND_LEN]], max_len=plen)
-            t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
+            ref_16k_prompts = [wav[:self.ENC_COND_LEN] for wav in ref_16k_wavs_np]
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward(ref_16k_prompts, max_len=plen)
+            t3_cond_prompt_tokens = t3_cond_prompt_tokens.to(self.device)
+        else:
+            t3_cond_prompt_tokens = None
 
         # Voice-encoder speaker embedding
-        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR))
-        ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
+        ve_embeds = self.ve.embeds_from_wavs(ref_16k_wavs_np, sample_rate=S3_SR)
+        ve_embed = torch.from_numpy(ve_embeds).unsqueeze(1).to(self.device)
 
+        batch_size = len(wav_fpaths)
         t3_cond = T3Cond(
             speaker_emb=ve_embed,
             cond_prompt_speech_tokens=t3_cond_prompt_tokens,
-            emotion_adv=exaggeration * torch.ones(1, 1, 1),
+            emotion_adv=exaggeration * torch.ones(batch_size, 1, 1),
         ).to(device=self.device)
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
 
     def generate(
         self,
-        text,
+        text: Union[str, List[str]],
         repetition_penalty=1.2,
         min_p=0.05,
         top_p=1.0,
-        audio_prompt_path=None,
+        audio_prompt_path: Union[str, List[str]] = None,
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
-    ):
+    ) -> Union[torch.Tensor, List[torch.Tensor]]:
+        is_single_input = isinstance(text, str)
+        if is_single_input:
+            text = [text]
+        batch_size = len(text)
+
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
-        # Update exaggeration if needed
+        # Broadcast conditioning if a single prompt is used for a batch of texts
+        current_cond_bs = self.conds.t3.speaker_emb.size(0)
+        if current_cond_bs == 1 and batch_size > 1:
+            t3c = self.conds.t3
+            t3c.speaker_emb = t3c.speaker_emb.expand(batch_size, -1, -1)
+            if t3c.cond_prompt_speech_tokens is not None:
+                t3c.cond_prompt_speech_tokens = t3c.cond_prompt_speech_tokens.expand(batch_size, -1)
+            if t3c.emotion_adv is not None:
+                t3c.emotion_adv = t3c.emotion_adv.expand(batch_size, -1, -1)
+
+            gend = self.conds.gen
+            for k, v in gend.items():
+                if torch.is_tensor(v):
+                    if k.endswith("_len"):
+                        gend[k] = v.expand(batch_size)
+                    else:
+                        gend[k] = v.expand(batch_size, *v.shape[1:])
+        elif current_cond_bs != batch_size and not (current_cond_bs == 1 and batch_size == 1):
+             raise ValueError(f"Mismatch between number of texts ({batch_size}) and audio prompts ({current_cond_bs})")
+
+        # Update exaggeration if needed (applied to the whole batch)
         if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
-            _cond: T3Cond = self.conds.t3
-            self.conds.t3 = T3Cond(
-                speaker_emb=_cond.speaker_emb,
-                cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
-                emotion_adv=exaggeration * torch.ones(1, 1, 1),
-            ).to(device=self.device)
+            self.conds.t3.emotion_adv = exaggeration * torch.ones(batch_size, 1, 1, device=self.device)
 
         # Norm and tokenize text
-        text = punc_norm(text)
-        text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
+        texts = [punc_norm(t) for t in text]
+        tokenized_texts = [self.tokenizer.text_to_tokens(t).squeeze(0) for t in texts]
+        text_tokens = torch.nn.utils.rnn.pad_sequence(tokenized_texts, batch_first=True, padding_value=0).to(self.device)
 
+        t3_cond_for_inference = self.conds.t3
         if cfg_weight > 0.0:
-            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
+            # Duplicate text tokens and conditioning tensors for CFG
+            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)
+            t3_cond_for_inference = T3Cond(
+                speaker_emb=torch.cat([self.conds.t3.speaker_emb] * 2),
+                cond_prompt_speech_tokens=torch.cat([self.conds.t3.cond_prompt_speech_tokens] * 2) if self.conds.t3.cond_prompt_speech_tokens is not None else None,
+                emotion_adv=torch.cat([self.conds.t3.emotion_adv] * 2) if self.conds.t3.emotion_adv is not None else None,
+            )
 
         sot = self.t3.hp.start_text_token
         eot = self.t3.hp.stop_text_token
@@ -243,29 +283,32 @@ class ChatterboxTTS:
         text_tokens = F.pad(text_tokens, (0, 1), value=eot)
 
         with torch.inference_mode():
-            speech_tokens = self.t3.inference(
-                t3_cond=self.conds.t3,
+            # T3 generates a list of variable-length token sequences
+            speech_tokens_list = self.t3.inference(
+                t3_cond=t3_cond_for_inference,
                 text_tokens=text_tokens,
-                max_new_tokens=1000,  # TODO: use the value in config
+                max_new_tokens=1000,
                 temperature=temperature,
                 cfg_weight=cfg_weight,
                 repetition_penalty=repetition_penalty,
                 min_p=min_p,
                 top_p=top_p,
             )
-            # Extract only the conditional batch.
-            speech_tokens = speech_tokens[0]
 
-            # TODO: output becomes 1D
-            speech_tokens = drop_invalid_tokens(speech_tokens)
-            
-            speech_tokens = speech_tokens[speech_tokens < 6561]
+            # Pad for filtering, filter, and pad again for S3Gen
+            speech_tokens_padded = torch.nn.utils.rnn.pad_sequence(speech_tokens_list, batch_first=True, padding_value=self.t3.hp.stop_speech_token)
+            clean_tokens_list = drop_invalid_tokens(speech_tokens_padded)
+            s3gen_tokens_padded = torch.nn.utils.rnn.pad_sequence(clean_tokens_list, batch_first=True, padding_value=0)
+            s3gen_token_lens = torch.tensor([len(t) for t in clean_tokens_list], device=self.device)
 
-            speech_tokens = speech_tokens.to(self.device)
-
-            wav, _ = self.s3gen.inference(
-                speech_tokens=speech_tokens,
+            wavs, _ = self.s3gen.inference(
+                speech_tokens=s3gen_tokens_padded.to(self.device),
+                speech_token_lens=s3gen_token_lens,
                 ref_dict=self.conds.gen,
             )
-            wav = wav.squeeze(0).detach().cpu().numpy()
-        return torch.from_numpy(wav).unsqueeze(0)
+            output_wavs = [wav.cpu().numpy() for wav in wavs]
+
+        output_tensors = [torch.from_numpy(wav).unsqueeze(0) for wav in output_wavs]
+        if is_single_input:
+            return output_tensors[0]
+        return output_tensors

@@ -46,3 +46,7 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+/.vs
+/.vs
+.vs/slnx.sqlite
+/.vs/chatterbox/CopilotIndices
