@@ -9,6 +9,7 @@ from typing import List, Union
 
 from .models.s3tokenizer import S3_SR
 from .models.s3gen import S3GEN_SR, S3Gen
+from .models.s3gen.const import TOKEN_TO_WAV_RATIO
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -17,6 +18,7 @@ REPO_ID = "ResembleAI/chatterbox"
 class ChatterboxVC:
     ENC_COND_LEN = 6 * S3_SR
     DEC_COND_LEN = 10 * S3GEN_SR
+    TOKEN_TO_WAV_RATIO = 960
 
     def __init__(
         self,
@@ -128,9 +130,12 @@ class ChatterboxVC:
                 speech_token_lens=s3_token_lens,
                 ref_dict=self.ref_dict,
             )
-            output_wavs = [wav.detach().cpu().numpy() for wav in wavs]
+            # Trim padding noise
+            audio_lengths = s3_token_lens * TOKEN_TO_WAV_RATIO
+            output_tensors = []
+            for i, wav in enumerate(wavs):
+                output_tensors.append(wav[:audio_lengths[i]].cpu().unsqueeze(0))
 
-        output_tensors = [torch.from_numpy(wav).unsqueeze(0) for wav in output_wavs]
         if is_single_input:
             return output_tensors[0]
         return output_tensors

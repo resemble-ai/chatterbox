@@ -12,6 +12,7 @@ from typing import Union, List
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
 from .models.s3gen import S3GEN_SR, S3Gen
+from .models.s3gen.const import TOKEN_TO_WAV_RATIO
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
@@ -306,9 +307,12 @@ class ChatterboxTTS:
                 speech_token_lens=s3gen_token_lens,
                 ref_dict=self.conds.gen,
             )
-            output_wavs = [wav.cpu().numpy() for wav in wavs]
+            # Trim padding noise
+            audio_lengths = s3gen_token_lens * TOKEN_TO_WAV_RATIO
+            output_tensors = []
+            for i, wav in enumerate(wavs):
+                output_tensors.append(wav[:audio_lengths[i]].cpu().unsqueeze(0))
 
-        output_tensors = [torch.from_numpy(wav).unsqueeze(0) for wav in output_wavs]
         if is_single_input:
             return output_tensors[0]
         return output_tensors
