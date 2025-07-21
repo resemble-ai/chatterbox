@@ -290,8 +290,13 @@ class T3(nn.Module):
         len_initial_speech = initial_speech_tokens.size(1)
 
         # for CFG, we only need to track the conditional part for repetition penalty and output
-        generated_ids_cond = generated_ids[0:B_orig]
+        # Pre-allocate tensor to avoid memory leak from torch.cat
+        max_len = len_initial_speech + max_new_tokens
+        generated_ids_cond = torch.full((B_orig, max_len), 0, dtype=torch.long, device=device)
+        generated_ids_cond[:, :len_initial_speech] = generated_ids[0:B_orig]
+        
         is_finished = torch.zeros(B_orig, dtype=torch.bool, device=device)
+        current_token_idx = len_initial_speech
 
         for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
             if is_finished.all():
@@ -310,7 +315,8 @@ class T3(nn.Module):
                 logits = logits / temperature
 
             # Apply repetition penalty and top‑p filtering.
-            logits = repetition_penalty_processor(generated_ids_cond, logits)
+            # Pass only the generated part to the repetition penalty processor
+            logits = repetition_penalty_processor(generated_ids_cond[:, :current_token_idx], logits)
             logits = min_p_warper(None, logits)
             logits = top_p_warper(None, logits)
             
@@ -322,7 +328,9 @@ class T3(nn.Module):
             probs = torch.softmax(logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)  # shape: (B, 1)
 
-            generated_ids_cond = torch.cat([generated_ids_cond, next_token], dim=1)
+            # Update the pre-allocated tensor in-place
+            generated_ids_cond[:, current_token_idx] = next_token.squeeze(-1)
+            current_token_idx += 1
 
             # Check for EOS token.
             is_finished |= (next_token.view(-1) == self.hp.stop_speech_token)
