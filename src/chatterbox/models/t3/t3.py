@@ -204,9 +204,9 @@ class T3(nn.Module):
         *,
         t3_cond: T3Cond,
         text_tokens: Tensor,
-        initial_speech_tokens: Optional[Tensor] = None,
+        initial_speech_tokens: Optional[Tensor]=None,
         # misc conditioning
-        prepend_prompt_speech_tokens: Optional[Tensor] = None,
+        prepend_prompt_speech_tokens: Optional[Tensor]=None,
         # HF generate args
         num_return_sequences=1,
         max_new_tokens=None,
@@ -225,7 +225,6 @@ class T3(nn.Module):
         """
         # Validate / sanitize inputs
         assert prepend_prompt_speech_tokens is None, "not implemented"
-        assert num_return_sequences == 1, "num_return_sequences > 1 not implemented"
         _ensure_BOT_EOT(text_tokens, self.hp)
         text_tokens = torch.atleast_2d(text_tokens).to(dtype=torch.long, device=self.device)
         B_orig = text_tokens.size(0)

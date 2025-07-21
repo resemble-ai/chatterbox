@@ -184,7 +184,8 @@ class ChatterboxTTS:
     def prepare_conditionals(self, wav_fpaths: Union[str, List[str]], exaggeration=0.5):
         if isinstance(wav_fpaths, str):
             wav_fpaths = [wav_fpaths]
-
+        
+        ## Load reference wav
         s3gen_ref_wavs, ref_16k_wavs_np = [], []
         for fpath in wav_fpaths:
             s3gen_wav, _ = librosa.load(fpath, sr=S3GEN_SR)
@@ -228,7 +229,8 @@ class ChatterboxTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
-    ) -> Union[torch.Tensor, List[torch.Tensor]]:
+        num_return_sequences=1,
+    ) -> Union[torch.Tensor, List[torch.Tensor], List[List[torch.Tensor]]]:
         is_single_input = isinstance(text, str)
         if is_single_input:
             text = [text]
@@ -268,15 +270,22 @@ class ChatterboxTTS:
         tokenized_texts = [self.tokenizer.text_to_tokens(t).squeeze(0) for t in texts]
         text_tokens = torch.nn.utils.rnn.pad_sequence(tokenized_texts, batch_first=True, padding_value=0).to(self.device)
 
-        t3_cond_for_inference = self.conds.t3
+        # --- Start: Logic for num_return_sequences and CFG ---
+        t3_cond = self.conds.t3
+        gen_cond = self.conds.gen
+
+        # Expand inputs for num_return_sequences
+        if num_return_sequences > 1:
+            text_tokens = text_tokens.repeat_interleave(num_return_sequences, dim=0)
+            t3_cond = T3Cond(**{k: v.repeat_interleave(num_return_sequences, dim=0) if torch.is_tensor(v) else v for k, v in t3_cond.__dict__.items()})
+            gen_cond = {k: v.repeat_interleave(num_return_sequences, dim=0) if torch.is_tensor(v) else v for k, v in gen_cond.items()}
+
         if cfg_weight > 0.0:
             # Duplicate text tokens and conditioning tensors for CFG
             text_tokens = torch.cat([text_tokens, text_tokens], dim=0)
-            t3_cond_for_inference = T3Cond(
-                speaker_emb=torch.cat([self.conds.t3.speaker_emb] * 2),
-                cond_prompt_speech_tokens=torch.cat([self.conds.t3.cond_prompt_speech_tokens] * 2) if self.conds.t3.cond_prompt_speech_tokens is not None else None,
-                emotion_adv=torch.cat([self.conds.t3.emotion_adv] * 2) if self.conds.t3.emotion_adv is not None else None,
-            )
+            t3_cond = T3Cond(**{k: torch.cat([v, v], dim=0) if torch.is_tensor(v) else v for k, v in t3_cond.__dict__.items()})
+        # --- End: Logic for num_return_sequences and CFG ---
+
 
         sot = self.t3.hp.start_text_token
         eot = self.t3.hp.stop_text_token
@@ -286,7 +295,7 @@ class ChatterboxTTS:
         with torch.inference_mode():
             # T3 generates a list of variable-length token sequences
             speech_tokens_list = self.t3.inference(
-                t3_cond=t3_cond_for_inference,
+                t3_cond=t3_cond,
                 text_tokens=text_tokens,
                 max_new_tokens=1000,
                 temperature=temperature,
@@ -305,13 +314,21 @@ class ChatterboxTTS:
             wavs, _ = self.s3gen.inference(
                 speech_tokens=s3gen_tokens_padded.to(self.device),
                 speech_token_lens=s3gen_token_lens,
-                ref_dict=self.conds.gen,
+                ref_dict=gen_cond,
             )
+
             # Trim padding noise
             audio_lengths = s3gen_token_lens * TOKEN_TO_WAV_RATIO
             output_tensors = []
             for i, wav in enumerate(wavs):
                 output_tensors.append(wav[:audio_lengths[i]].cpu().unsqueeze(0))
+
+        if num_return_sequences > 1:
+            # Group the flat list of outputs into a list of lists
+            grouped_outputs = [output_tensors[i:i + num_return_sequences] for i in range(0, len(output_tensors), num_return_sequences)]
+            if is_single_input:
+                return grouped_outputs[0]
+            return grouped_outputs
 
         if is_single_input:
             return output_tensors[0]
