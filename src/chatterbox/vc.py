@@ -134,7 +134,9 @@ class ChatterboxVC:
             audio_lengths = s3_token_lens * TOKEN_TO_WAV_RATIO
             output_tensors = []
             for i, wav in enumerate(wavs):
-                output_tensors.append(wav[:audio_lengths[i]].cpu().unsqueeze(0))
+                trimmed_wav = wav[:audio_lengths[i]].cpu().numpy()
+                watermarked_wav = self.watermarker.apply_watermark(trimmed_wav, sample_rate=self.sr)
+                output_tensors.append(torch.from_numpy(watermarked_wav).unsqueeze(0))
 
         if is_single_input:
             return output_tensors[0]

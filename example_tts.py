@@ -31,7 +31,7 @@ texts_batch = [ "This is the first sentence to be synthesized in a batch.",
 
 wavs_batch = model.generate(texts_batch, audio_prompt_path=AUDIO_PROMPT_PATH)
 for i, wav in enumerate(wavs_batch):
-    ta.save(f"test-batch-output-{i+1}.wav", wav, model.sr)
+    ta.save(f"test-batch-{i+1}.wav", wav, model.sr)
 
 
 # Batching - Use num_return_sequences to generate multiple variations for each text.
@@ -42,4 +42,4 @@ num_variations = 3
 wavs_batch_multi = model.generate(texts_batch, audio_prompt_path=AUDIO_PROMPT_PATH, num_return_sequences=num_variations)
 for i, group in enumerate(wavs_batch_multi):
     for j, wav in enumerate(group):
-        ta.save(f"test-batch-{i+1}-multi-output-{j+1}.wav", wav, model.sr)
+        ta.save(f"test-batch-{i+1}-variant-{j+1}.wav", wav, model.sr)
