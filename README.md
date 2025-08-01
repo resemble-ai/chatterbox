@@ -113,5 +113,16 @@ print(f"Extracted watermark: {watermark}")
 
 👋 Join us on [Discord](https://discord.gg/rJq9cRJBJ6) and let's build something awesome together!
 
+# Citation
+If you find this model useful, please consider citing.
+```
+@misc{chatterboxtts2025,
+  author       = {{Resemble AI}},
+  title        = {{Chatterbox-TTS}},
+  year         = {2025},
+  howpublished = {\url{https://github.com/resemble-ai/chatterbox}},
+  note         = {GitHub repository}
+}
+```
 # Disclaimer
 Don't use this model to do bad things. Prompts are sourced from freely available data on the internet.
