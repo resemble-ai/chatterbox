@@ -1,0 +1,4 @@
+# Core dependencies
+runpod>=1.7.7
+nltk>=3.9.1
+chatterbox-tts==0.1.1

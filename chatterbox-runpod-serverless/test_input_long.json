@@ -1,0 +1,11 @@
+{
+    "input": {
+        "text": "This is a longer test to demonstrate the chunking capability of the ChatterboxTTS system. It will split this text into multiple chunks and process each one individually. The system handles long text gracefully by breaking it into manageable pieces. Each chunk is processed separately and then concatenated together with optional silence between chunks. This approach ensures consistent quality and prevents memory issues with very long texts.",
+        "temperature": 0.7,
+        "cfg_weight": 0.6,
+        "exaggeration": 0.4,
+        "max_chars_per_chunk": 150,
+        "inter_chunk_silence_ms": 500,
+        "output_format": "wav"
+    }
+}
