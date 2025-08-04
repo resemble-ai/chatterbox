@@ -50,7 +50,7 @@ git clone https://github.com/resemble-ai/chatterbox.git
 cd chatterbox
 pip install -e .
 ```
-We developed and tested Chatterbox on Python 3.11 on Debain 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
+We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
 
 # Usage
@@ -72,7 +72,7 @@ ta.save("test-2.wav", wav, model.sr)
 See `example_tts.py` and `example_vc.py` for more examples.
 
 # Supported Lanugage
-Currenlty only English.
+Currently only English.
 
 # Acknowledgements
 - [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)
