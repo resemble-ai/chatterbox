@@ -1,8 +1,7 @@
 .vscode
-
+.venv
 # Pylance
 pyrightconfig.json
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -46,3 +45,4 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+my_samples_prompts.json
