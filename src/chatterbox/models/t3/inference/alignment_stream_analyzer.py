@@ -162,6 +162,10 @@ class AlignmentStreamAnalyzer:
             repeated_token = self.generated_tokens[-1]
             logger.warning(f"🚨 Detected 3x repetition of token {repeated_token}")
             
+        # Suppress EoS to prevent early termination
+        if cur_text_posn < S - 3 and S > 5:  # Only suppress if text is longer than 5 tokens
+            logits[..., self.eos_idx] = -2**15
+
         # If a bad ending is detected, force emit EOS by modifying logits
         # NOTE: this means logits may be inconsistent with latents!
         if long_tail or alignment_repetition or token_repetition:
