@@ -14,6 +14,8 @@
 import logging
 import random
 from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -94,7 +96,7 @@ class MaskedDiffWithXvec(torch.nn.Module):
 
         # concat text and prompt_text
         mask = (~make_pad_mask(token_len)).float().unsqueeze(-1).to(device)
-        token = self.input_embedding(torch.clamp(token, min=0)) * mask
+        token = self.input_embedding(torch.clamp(token, min=0, max=self.input_embedding.num_embeddings-1)) * mask
 
         # text encode
         h, h_lengths = self.encoder(token, token_len)
@@ -144,7 +146,13 @@ class MaskedDiffWithXvec(torch.nn.Module):
         token_len1, token_len2 = prompt_token.shape[1], token.shape[1]
         token, token_len = torch.concat([prompt_token, token], dim=1), prompt_token_len + token_len
         mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
-        token = self.input_embedding(torch.clamp(token, min=0)) * mask
+        
+        # Check for out-of-bounds token IDs
+        vocab_size = self.input_embedding.num_embeddings
+        if token.max() >= vocab_size or token.min() < 0:
+            logging.warning(f"S3Gen: Token IDs out of bounds: min={token.min().item()}, max={token.max().item()}, vocab_size={vocab_size}")
+        
+        token = self.input_embedding(torch.clamp(token, min=0, max=vocab_size-1)) * mask
 
         # text encode
         h, h_lengths = self.encoder(token, token_len)
@@ -255,7 +263,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         # concat text and prompt_text
         token, token_len = torch.concat([prompt_token, token], dim=1), prompt_token_len + token_len
         mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
-        token = self.input_embedding(torch.clamp(token, min=0)) * mask
+        token = self.input_embedding(torch.clamp(token, min=0, max=self.input_embedding.num_embeddings-1)) * mask
 
         # text encode
         h, h_lengths = self.encoder(token, token_len)

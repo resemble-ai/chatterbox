@@ -18,7 +18,9 @@ dependencies = [
     "diffusers==0.29.0",
     "resemble-perth==1.0.1",
     "conformer==0.3.2",
-    "safetensors==0.5.3"
+    "safetensors==0.5.3",
+    "pkuseg ==0.0.25",
+    "pykakasi==2.3.0"
 ]
 
 [project.urls]
