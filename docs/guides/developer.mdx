@@ -1,0 +1,84 @@
+---
+title: 'Developer Guide'
+description: 'Technical documentation for developers'
+icon: 'code'
+---
+
+# Developer Guide
+
+Welcome to the developer guide for chatterbox. This guide focuses on code implementation, APIs, and technical setup.
+
+## Development Workflow
+
+### Local Development Setup
+
+1. **Clone and Install**
+   ```bash
+   git clone https://github.com/yogyam/chatterbox.git
+   cd chatterbox
+   npm install  # or pip install -r requirements.txt
+   ```
+
+2. **Environment Configuration**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
+
+3. **Start Development Server**
+   ```bash
+   npm run dev  # or python main.py
+   ```
+
+### Code Architecture
+
+
+
+#### Project Structure
+```
+├── src/             # Source code
+├── tests/           # Test files
+├── docs/            # Documentation
+└── README.md        # Project overview
+```
+
+### Testing
+
+```bash
+# Run tests
+npm test  # or pytest
+
+# Run with coverage
+npm run test:coverage  # or pytest --cov
+```
+
+### Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Commit changes: `git commit -m 'Add amazing feature'`
+4. Push to branch: `git push origin feature/amazing-feature`
+5. Open a Pull Request
+
+## Quick Links
+
+<CardGroup cols={2}>
+  <Card
+    title="Getting Started"
+    icon="play"
+    href="/getting-started"
+  >
+    Initial setup and installation
+  </Card>
+  <Card
+    title="API Reference"
+    icon="code"
+    href="/api/overview"
+  >
+    Complete API documentation
+  </Card>
+</CardGroup>
+
+---
+
+*For questions specific to developer workflows, please refer to our [community discussions](https://github.com/yogyam/chatterbox/discussions) or open an issue.*
