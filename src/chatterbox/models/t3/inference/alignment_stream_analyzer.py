@@ -161,18 +161,10 @@ class AlignmentStreamAnalyzer:
         if token_repetition:
             repeated_token = self.generated_tokens[-1]
             logger.warning(f"🚨 Detected 3x repetition of token {repeated_token}")
-        
-        # Determine if we should force EOS due to any bad ending condition
-        should_force_eos = long_tail or alignment_repetition or token_repetition
-        
-        # Suppress EOS when still at early tokens to prevent premature termination
-        # (but not when we're forcing EOS due to detected issues)
-        if S > 3 and cur_text_posn < S - 3 and not should_force_eos:
-            logits[..., self.eos_idx] = -2**15
             
         # If a bad ending is detected, force emit EOS by modifying logits
         # NOTE: this means logits may be inconsistent with latents!
-        if should_force_eos:
+        if long_tail or alignment_repetition or token_repetition:
             logger.warning(f"forcing EOS token, {long_tail=}, {alignment_repetition=}, {token_repetition=}")
             # (±2**15 is safe for all dtypes >= 16bit)
             logits = -(2**15) * torch.ones_like(logits)

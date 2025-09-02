@@ -91,12 +91,12 @@ def hiragana_normalize(text: str) -> str:
 
             # Any kanji in the phrase
             if any([is_kanji(c) for c in inp]):
-                if hira[0] in ["は", "へ"]:
+                if hira and hira[0] in ["は", "へ"]:  # Safety check for empty hira
                     hira = " " + hira
                 out.append(hira)
 
             # All katakana
-            elif all([is_katakana(c) for c in inp]):
+            elif all([is_katakana(c) for c in inp]) if inp else False:  # Safety check for empty inp
                 out.append(r['orig'])
 
             else:
