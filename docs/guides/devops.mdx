@@ -1,0 +1,70 @@
+---
+title: 'DevOps Guide'
+description: 'Deployment and infrastructure documentation'
+icon: 'server'
+---
+
+# DevOps Guide
+
+Welcome to the devops guide for chatterbox. This guide focuses on deployment, monitoring, and infrastructure management.
+
+## Deployment & Infrastructure
+
+### Production Deployment
+
+#### Docker Deployment
+```bash
+# Build image
+docker build -t chatterbox .
+
+# Run container
+docker run -p 3000:3000 chatterbox
+```
+
+#### Environment Variables
+```bash
+# Required environment variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `PORT` | Application port | No (default: 3000) |
+| `NODE_ENV` | Environment mode | No (default: development) |
+| `DATABASE_URL` | Database connection | Yes |
+| `JWT_SECRET` | Authentication secret | Yes |
+
+```
+
+### Monitoring & Logging
+
+#### Health Checks
+- **Endpoint**: `/health`
+- **Monitoring**: Set up alerts for response time > 2s
+- **Logs**: Application logs available in `/logs` directory
+
+#### Performance Metrics
+- Response time targets: < 200ms (95th percentile)
+- Uptime target: 99.9%
+- Error rate target: < 0.1%
+
+## Quick Links
+
+<CardGroup cols={2}>
+  <Card
+    title="Getting Started"
+    icon="play"
+    href="/getting-started"
+  >
+    Initial setup and installation
+  </Card>
+  <Card
+    title="API Reference"
+    icon="code"
+    href="/api/overview"
+  >
+    Complete API documentation
+  </Card>
+</CardGroup>
+
+---
+
+*For questions specific to devops workflows, please refer to our [community discussions](https://github.com/yogyam/chatterbox/discussions) or open an issue.*
