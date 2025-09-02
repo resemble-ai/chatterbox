@@ -56,7 +56,7 @@ class EnTokenizer:
 
 
 # Model repository
-REPO_ID = "ResembleAI/chatterbox-multilingual23"
+REPO_ID = "ResembleAI/chatterbox-multilingual"
 
 # Global instances for optional dependencies
 _kakasi = None
