@@ -1,0 +1,122 @@
+---
+title: 'Getting Started'
+description: 'Learn how to set up and run chatterbox'
+---
+
+# Getting Started with chatterbox
+
+This guide will help you get chatterbox up and running on your local machine.
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+
+
+- **Git** for version control
+
+## Installation
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/yogyam/chatterbox.git
+cd chatterbox
+```
+
+### 2. Install Dependencies
+
+
+
+
+
+### 3. Environment Setup
+
+Create a `.env` file in the project root:
+
+```bash
+# Copy from example
+cp .env.example .env
+
+# Edit with your configuration
+nano .env
+```
+
+### 4. Run the Application
+
+
+
+
+
+
+
+## Project Structure
+
+```
+chatterbox/
+├── ├── src/             # Source code
+├── tests/           # Test files
+├── docs/            # Documentation
+└── README.md        # Project overview
+```
+
+## Configuration
+
+### Environment Variables
+
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `PORT` | Application port | No (default: 3000) |
+| `NODE_ENV` | Environment mode | No (default: development) |
+| `DATABASE_URL` | Database connection | Yes |
+| `JWT_SECRET` | Authentication secret | Yes |
+
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="API Documentation"
+    icon="code"
+    href="/api/overview"
+  >
+    Explore the available API endpoints
+  </Card>
+  <Card
+    title="Developer Guide"
+    icon="wrench"
+    href="/guides/developer"
+  >
+    Learn about the development workflow
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Installation Issues">
+    If you encounter installation problems:
+    - Ensure you have the correct Node.js/Python version
+    - Clear npm/pip cache: `npm cache clean --force` or `pip cache purge`
+    - Delete node_modules and reinstall: `rm -rf node_modules && npm install`
+  </Accordion>
+
+  <Accordion title="Port Conflicts">
+    If the default port is in use:
+    - Check what's running: `lsof -i :3000`
+    - Use a different port: `PORT=3001 npm start`
+    - Stop conflicting processes
+  </Accordion>
+
+  <Accordion title="Environment Issues">
+    If environment variables aren't loading:
+    - Verify `.env` file exists and has correct format
+    - Check file permissions: `chmod 644 .env`
+    - Restart the application after changes
+  </Accordion>
+</AccordionGroup>
+
+---
+
+Need help? Check our [Developer Guide](/guides/developer) or open an issue on [GitHub](https://github.com/yogyam/chatterbox/issues).
