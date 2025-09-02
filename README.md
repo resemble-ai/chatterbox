@@ -27,14 +27,13 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
 - Easy voice conversion script
 - [Outperforms ElevenLabs](https://podonos.com/resembleai/chatterbox)
 
-# Supported Languages
-**Arabic, Chinese, Danish, German, Greek, English, Spanish, Finnish, French, Hebrew, Hindi, Italian, Japanese, Korean, Malay, Dutch, Norwegian, Polish, Portuguese, Russian, Swedish, Swahili, Turkish**
-
+# Supported Languages 
+Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • Spanish (es) • Finnish (fi) • French (fr) • Hebrew (he) • Hindi (hi) • Italian (it) • Japanese (ja) • Korean (ko) • Malay (ms) • Dutch (nl) • Norwegian (no) • Polish (pl) • Portuguese (pt) • Russian (ru) • Swedish (sv) • Swahili (sw) • Turkish (tr) • Chinese (zh)
 # Tips
 - **General Use (TTS and Voice Agents):**
+  - Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip’s language. To mitigate this, set `cfg_weight` to 0.
   - The default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts across all languages.
   - If the reference speaker has a fast speaking style, lowering `cfg_weight` to around `0.3` can improve pacing.
-  - Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip’s language. To mitigate this, set `cfg_weight` to 0.
 
 - **Expressive or Dramatic Speech:**
   - Try lower `cfg_weight` values (e.g. `~0.3`) and increase `exaggeration` to around `0.7` or higher.
