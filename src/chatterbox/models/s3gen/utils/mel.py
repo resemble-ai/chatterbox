@@ -1,7 +1,10 @@
 """mel-spectrogram extraction in Matcha-TTS"""
+import logging
 from librosa.filters import mel as librosa_mel_fn
 import torch
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 # NOTE: they decalred these global vars
@@ -42,10 +45,11 @@ def mel_spectrogram(y, n_fft=1920, num_mels=80, sampling_rate=24000, hop_size=48
     if len(y.shape) == 1:
         y = y[None, ]
 
-    if torch.min(y) < -1.0:
-        print("min value is ", torch.min(y))
-    if torch.max(y) > 1.0:
-        print("max value is ", torch.max(y))
+    # Debug: Check for audio clipping (values outside [-1.0, 1.0] range)
+    min_val = torch.min(y)
+    max_val = torch.max(y)
+    if min_val < -1.0 or max_val > 1.0:
+        logger.warning(f"Audio values outside normalized range: min={min_val.item():.4f}, max={max_val.item():.4f}")
 
     global mel_basis, hann_window  # pylint: disable=global-statement,global-variable-not-assigned
     if f"{str(fmax)}_{str(y.device)}" not in mel_basis:
