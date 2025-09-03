@@ -257,14 +257,17 @@ class T3(nn.Module):
         # TODO? synchronize the expensive compile function
         # with self.compile_lock:
         if not self.compiled:
-            alignment_stream_analyzer = AlignmentStreamAnalyzer(
-                self.tfmr,
-                None,
-                text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
-                alignment_layer_idx=9, # TODO: hparam or something?
-                eos_idx=self.hp.stop_speech_token,
-            )
-            assert alignment_stream_analyzer.eos_idx == self.hp.stop_speech_token
+            # Default to None for English models, only create for multilingual
+            alignment_stream_analyzer = None
+            if self.hp.is_multilingual:
+                alignment_stream_analyzer = AlignmentStreamAnalyzer(
+                    self.tfmr,
+                    None,
+                    text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
+                    alignment_layer_idx=9, # TODO: hparam or something?
+                    eos_idx=self.hp.stop_speech_token,
+                )
+                assert alignment_stream_analyzer.eos_idx == self.hp.stop_speech_token
 
             patched_model = T3HuggingfaceBackend(
                 config=self.cfg,
