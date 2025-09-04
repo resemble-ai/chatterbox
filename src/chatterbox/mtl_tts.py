@@ -23,6 +23,7 @@ from .shared_utils import (
     validate_audio_file,
     load_and_preprocess_audio,
     drop_bad_tokens,
+    prepare_text_tokens,
     punc_norm,
     validate_exaggeration,
     validate_text_input,
@@ -315,13 +316,13 @@ class ChatterboxMultilingualTTS:
         except Exception as e:
             raise RuntimeError(f"Failed to tokenize text for language '{language_id}': {e}")
 
-        if cfg_weight > 0.0:
-            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
-
-        sot = self.t3.hp.start_text_token
-        eot = self.t3.hp.stop_text_token
-        text_tokens = F.pad(text_tokens, (1, 0), value=sot)
-        text_tokens = F.pad(text_tokens, (0, 1), value=eot)
+        # Use shared text token preparation
+        text_tokens = prepare_text_tokens(
+            text_tokens, 
+            self.t3.hp.start_text_token, 
+            self.t3.hp.stop_text_token, 
+            cfg_weight
+        )
 
         try:
             with torch.inference_mode():
