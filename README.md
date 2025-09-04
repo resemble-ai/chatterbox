@@ -61,7 +61,7 @@ We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions 
 ```python
 import torchaudio as ta
 from chatterbox.tts import ChatterboxTTS
-
+from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
 # English example
 model = ChatterboxTTS.from_pretrained(device="cuda")
