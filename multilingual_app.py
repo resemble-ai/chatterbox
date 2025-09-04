@@ -3,7 +3,6 @@ import numpy as np
 import torch
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
 import gradio as gr
-import spaces
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"🚀 Running on device: {DEVICE}")
@@ -176,7 +175,6 @@ def resolve_audio_prompt(language_id: str, provided_path: str | None) -> str | N
     return LANGUAGE_CONFIG.get(language_id, {}).get("audio")
 
 
-@spaces.GPU
 def generate_tts_audio(
     text_input: str,
     language_id: str,
