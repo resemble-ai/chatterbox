@@ -1,6 +1,5 @@
 
-<img width="1200" alt="Chatterbox Multilingual" src="https://github.com/user-attachments/assets/53b411b4-d7b8-4b18-87f3-335145837684" />
-
+<img width="1200" height="600" alt="Chatterbox-Multilingual" src="https://www.resemble.ai/wp-content/uploads/2025/09/Chatterbox-Multilingual-1.png" />
 
 # Chatterbox TTS
 
