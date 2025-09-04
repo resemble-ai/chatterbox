@@ -25,3 +25,10 @@ class T3Config:
     @property
     def n_channels(self):
         return LLAMA_CONFIGS[self.llama_config_name]["hidden_size"]
+
+    @classmethod
+    def multilingual(cls):
+        """Create a configuration for the multilingual T3 model."""
+        config = cls()
+        config.text_tokens_dict_size = 1024  # Increased for multilingual support
+        return config
