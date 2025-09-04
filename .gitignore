@@ -50,3 +50,4 @@ checkpoints/
 /profile_logs
 /.idea
 /cache
+memory.json
