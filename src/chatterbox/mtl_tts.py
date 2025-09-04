@@ -18,7 +18,7 @@ from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 
 
-REPO_ID = "ResembleAI/chatterbox-multilingual"
+REPO_ID = "ResembleAI/chatterbox"
 
 # Supported languages for the multilingual model
 SUPPORTED_LANGUAGES = {
