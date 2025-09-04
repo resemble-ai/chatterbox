@@ -1,12 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 import os
-import warnings
 
 import torch
-import torch.nn.functional as F
-import torchaudio
-import torchaudio.functional as taF
 from safetensors.torch import load_file
 from huggingface_hub import snapshot_download
 
@@ -26,6 +22,7 @@ from .shared_utils import (
     prepare_text_tokens,
     punc_norm,
     validate_exaggeration,
+    check_exaggeration_update_needed,
     validate_text_input,
     validate_language_id,
     validate_float_parameter,
@@ -190,62 +187,36 @@ class ChatterboxMultilingualTTS:
         Args:
             wav_fpath: Path to the reference audio file
             exaggeration: Float between 0.0 and 2.0 for emotion control
-            
-        Raises:
-            FileNotFoundError: If the audio file doesn't exist
-            ValueError: If the audio file is invalid or parameters are out of range
-            RuntimeError: If audio processing fails
         """
         # Use shared validation utilities
         validate_audio_file(wav_fpath)
         exaggeration = validate_exaggeration(exaggeration)
         
-        try:
-            # Use shared audio preprocessing
-            s3gen_ref_wav, ref_16k_wav_tensor = load_and_preprocess_audio(wav_fpath, self.device)
+        # Use shared audio preprocessing
+        s3gen_ref_wav, ref_16k_wav_tensor = load_and_preprocess_audio(wav_fpath, self.device)
 
-            # Slice as tensor
-            s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
-            
-            try:
-                s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
-            except Exception as e:
-                raise RuntimeError(f"Failed to generate S3Gen reference embeddings: {e}")
-            
-            # Speech cond prompt tokens
-            t3_cond_prompt_tokens = None
-            plen = getattr(self.t3.hp, 'speech_cond_prompt_len', 30)
-            if plen:
-                try:
-                    s3_tokzr = self.s3gen.tokenizer
-                    t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav_tensor[:self.ENC_COND_LEN]], max_len=plen)
-                    t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
-                except Exception as e:
-                    raise RuntimeError(f"Failed to generate speech conditioning tokens: {e}")
+        # Slice as tensor
+        s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
+        s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
+        
+        # Speech cond prompt tokens
+        t3_cond_prompt_tokens = None
+        plen = getattr(self.t3.hp, 'speech_cond_prompt_len', 30)
+        if plen:
+            s3_tokzr = self.s3gen.tokenizer
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav_tensor[:self.ENC_COND_LEN]], max_len=plen)
+            t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
 
-            # Voice-encoder speaker embedding - use tensor-native method, keep on device
-            try:
-                ve_embed = self.ve.embeds_from_wavs_tensor([ref_16k_wav_tensor], sample_rate=S3_SR)
-                ve_embed = ve_embed.mean(dim=0, keepdim=True).to(self.device)
-            except Exception as e:
-                raise RuntimeError(f"Failed to generate voice encoder embeddings: {e}")
+        # Voice-encoder speaker embedding - use tensor-native method, keep on device
+        ve_embed = self.ve.embeds_from_wavs_tensor([ref_16k_wav_tensor], sample_rate=S3_SR)
+        ve_embed = ve_embed.mean(dim=0, keepdim=True).to(self.device)
 
-            try:
-                t3_cond = T3Cond(
-                    speaker_emb=ve_embed,
-                    cond_prompt_speech_tokens=t3_cond_prompt_tokens,
-                    emotion_adv=exaggeration * torch.ones(1, 1, 1),
-                ).to(device=self.device)
-                self.conds = Conditionals(t3_cond, s3gen_ref_dict)
-            except Exception as e:
-                raise RuntimeError(f"Failed to create conditioning objects: {e}")
-                
-        except Exception as e:
-            # Re-raise our custom exceptions as-is, wrap others in RuntimeError
-            if isinstance(e, (FileNotFoundError, ValueError, RuntimeError)):
-                raise
-            else:
-                raise RuntimeError(f"Unexpected error in prepare_conditionals: {e}")
+        t3_cond = T3Cond(
+            speaker_emb=ve_embed,
+            cond_prompt_speech_tokens=t3_cond_prompt_tokens,
+            emotion_adv=exaggeration * torch.ones(1, 1, 1),
+        ).to(device=self.device)
+        self.conds = Conditionals(t3_cond, s3gen_ref_dict)
 
     def set_conditionals(self, conds: Conditionals):
         """Set conditionals for the TTS model."""
@@ -280,41 +251,29 @@ class ChatterboxMultilingualTTS:
         top_p = validate_float_parameter(top_p, "top_p", 0.0, 1.0)
         repetition_penalty = validate_float_parameter(repetition_penalty, "repetition_penalty", allow_zero=False)
         
-        # Handle audio prompt path with better error messages
+        # Handle audio prompt path
         if audio_prompt_path:
             validate_audio_prompt_path(audio_prompt_path)
-            try:
-                self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
-            except Exception as e:
-                raise RuntimeError(f"Failed to prepare conditionals from audio file: {e}")
+            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
             if self.conds is None:
                 raise ValueError("Please `prepare_conditionals` first or specify `audio_prompt_path`")
 
-        # Update exaggeration if needed
-        try:
-            # Check exaggeration without CPU sync - use tensor comparison with matching dtype
-            current_exag_tensor = exaggeration * torch.ones(1, 1, 1, device=self.device, dtype=self.conds.t3.emotion_adv.dtype)
-            if not torch.allclose(self.conds.t3.emotion_adv, current_exag_tensor, atol=1e-6):
-                _cond: T3Cond = self.conds.t3
-                self.conds.t3 = T3Cond(
-                    speaker_emb=_cond.speaker_emb,
-                    cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
-                    emotion_adv=current_exag_tensor,
-                ).to(device=self.device, dtype=self.conds.t3.speaker_emb.dtype)
-        except Exception as e:
-            raise RuntimeError(f"Failed to update exaggeration: {e}")
+        # Update exaggeration if needed using shared utility
+        needs_update, new_emotion_tensor = check_exaggeration_update_needed(
+            self.conds.t3.emotion_adv, exaggeration, self.device
+        )
+        if needs_update:
+            _cond: T3Cond = self.conds.t3
+            self.conds.t3 = T3Cond(
+                speaker_emb=_cond.speaker_emb,
+                cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
+                emotion_adv=new_emotion_tensor,
+            ).to(device=self.device, dtype=self.conds.t3.speaker_emb.dtype)
 
-        # Normalize and tokenize text with enhanced error handling
-        try:
-            text = punc_norm(text, multilingual=True)
-        except Exception as e:
-            raise RuntimeError(f"Failed to normalize text: {e}")
-        
-        try:
-            text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id).to(self.device)
-        except Exception as e:
-            raise RuntimeError(f"Failed to tokenize text for language '{language_id}': {e}")
+        # Normalize and tokenize text
+        text = punc_norm(text, multilingual=True)
+        text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id).to(self.device)
 
         # Use shared text token preparation
         text_tokens = prepare_text_tokens(
@@ -324,32 +283,25 @@ class ChatterboxMultilingualTTS:
             cfg_weight
         )
 
-        try:
-            with torch.inference_mode():
-                speech_tokens = self.t3.inference(
-                    t3_cond=self.conds.t3,
-                    text_tokens=text_tokens,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    cfg_weight=cfg_weight,
-                    max_cache_len=max_cache_len,
-                    repetition_penalty=repetition_penalty,
-                    min_p=min_p,
-                    top_p=top_p,
-                    **t3_params,
-                )
-        except Exception as e:
-            raise RuntimeError(f"T3 inference failed: {e}")
-        
-        try:
+        with torch.inference_mode():
+            speech_tokens = self.t3.inference(
+                t3_cond=self.conds.t3,
+                text_tokens=text_tokens,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                cfg_weight=cfg_weight,
+                max_cache_len=max_cache_len,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
+                **t3_params,
+            )
+
             def speech_to_wav(speech_tokens):
                 # Extract only the conditional batch.
                 speech_tokens = speech_tokens[0]
 
-                # TODO: output becomes 1D
                 speech_tokens = drop_invalid_tokens(speech_tokens)
-                
-                # speech_tokens = speech_tokens[speech_tokens < 6561]
                 speech_tokens = drop_bad_tokens(speech_tokens)
                 
                 if len(speech_tokens) == 0:
@@ -360,12 +312,6 @@ class ChatterboxMultilingualTTS:
                     ref_dict=self.conds.gen,
                 )
 
-                # Return tensor without watermarking, ensure 2D shape for torchaudio
-                wav = wav.squeeze(0).detach()
-                if wav.dim() == 1:
-                    wav = wav.unsqueeze(0)  # Add channel dimension
                 return wav
                 
             return speech_to_wav(speech_tokens)
-        except Exception as e:
-            raise RuntimeError(f"Audio generation failed: {e}")

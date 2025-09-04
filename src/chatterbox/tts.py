@@ -1,14 +1,10 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
-import warnings
+
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
 import torch
-import torch.nn.functional as F
-import torchaudio
-import torchaudio.functional as taF
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -163,7 +159,8 @@ class ChatterboxTTS:
         
         # Speech cond prompt tokens
         t3_cond_prompt_tokens = None
-        if plen := self.t3.hp.speech_cond_prompt_len:
+        plen = getattr(self.t3.hp, 'speech_cond_prompt_len', 30)
+        if plen:
             s3_tokzr = self.s3gen.tokenizer
             t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav_tensor[:self.ENC_COND_LEN]], max_len=plen)
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
@@ -261,7 +258,6 @@ class ChatterboxTTS:
                 # Extract only the conditional batch.
                 speech_tokens = speech_tokens[0]
 
-                # Use shared drop_invalid_tokens and drop_bad_tokens
                 speech_tokens = drop_invalid_tokens(speech_tokens)
                 speech_tokens = drop_bad_tokens(speech_tokens)
                 
