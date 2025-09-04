@@ -1,13 +1,14 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
-
-import librosa
-import torch
-import perth
-import torch.nn.functional as F
+import warnings
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
+
+import torch
+import torch.nn.functional as F
+import torchaudio
+import torchaudio.functional as taF
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -85,8 +86,7 @@ class Conditionals:
     def to(self, device):
         self.t3 = self.t3.to(device=device)
         for k, v in self.gen.items():
-            if torch.is_tensor(v):
-                self.gen[k] = v.to(device=device)
+            self.gen[k] = v.to(device) if torch.is_tensor(v) else v
         return self
 
     def save(self, fpath: Path):
@@ -98,10 +98,9 @@ class Conditionals:
 
     @classmethod
     def load(cls, fpath, map_location="cpu"):
-        if isinstance(map_location, str):
-            map_location = torch.device(map_location)
-        kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
-        return cls(T3Cond(**kwargs['t3']), kwargs['gen'])
+        states = torch.load(fpath, map_location=map_location)
+        t3 = T3Cond(**states["t3"])  # type: ignore[arg-type]
+        return cls(t3=t3, gen=states["gen"])  # type: ignore[arg-type]
 
 
 class ChatterboxTTS:
@@ -124,7 +123,6 @@ class ChatterboxTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
-        self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
@@ -145,7 +143,7 @@ class ChatterboxTTS:
         t3 = T3()
         t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
         if "model" in t3_state.keys():
-            t3_state = t3_state["model"][0]
+            t3_state = t3_state["model"]
         t3.load_state_dict(t3_state)
         t3.to(device).eval()
 
@@ -161,7 +159,7 @@ class ChatterboxTTS:
 
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
+            conds = Conditionals.load(builtin_voice, map_location=map_location)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
@@ -179,25 +177,45 @@ class ChatterboxTTS:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 
         return cls.from_local(Path(local_path).parent, device)
+    
+    def set_conditionals(self, conds: Conditionals):
+        """
+        Set the conditionals for T3 and S3Gen.
+        """
+        if conds is not None:
+            self.conds = conds.to(self.device)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
-        s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            s3gen_ref_wav, _sr = torchaudio.load(wav_fpath)
+        if _sr != S3GEN_SR:
+            s3gen_ref_wav = taF.resample(s3gen_ref_wav, _sr, S3GEN_SR)
+        
+        # Ensure we have mono audio (1D tensor)
+        if s3gen_ref_wav.dim() > 1:
+            s3gen_ref_wav = s3gen_ref_wav.mean(dim=0)  # Convert to mono by averaging channels
+        
+        # Move to device early to avoid unnecessary transfers
+        s3gen_ref_wav = s3gen_ref_wav.to(self.device)
+        
+        # Resample to 16kHz directly from tensor
+        ref_16k_wav_tensor = taF.resample(s3gen_ref_wav.unsqueeze(0), S3GEN_SR, S3_SR).squeeze(0)
 
-        ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
-
+        # Slice as tensor
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
-
+        
         # Speech cond prompt tokens
         if plen := self.t3.hp.speech_cond_prompt_len:
             s3_tokzr = self.s3gen.tokenizer
-            t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav[:self.ENC_COND_LEN]], max_len=plen)
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav_tensor[:self.ENC_COND_LEN]], max_len=plen)
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
 
-        # Voice-encoder speaker embedding
-        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR))
-        ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
+        # Voice-encoder speaker embedding - use tensor-native method, keep on device
+        ve_embed = self.ve.embeds_from_wavs_tensor([ref_16k_wav_tensor], sample_rate=S3_SR)
+        ve_embed = ve_embed.mean(dim=0, keepdim=True).to(self.device)
 
         t3_cond = T3Cond(
             speaker_emb=ve_embed,
@@ -219,8 +237,8 @@ class ChatterboxTTS:
         remove_milliseconds_start=None,
         chunk_overlap_method=None,
         # cache optimization params
-        max_new_tokens=1000, 
-        max_cache_len=1500, # Affects the T3 speed, hence important
+        max_new_tokens=750, 
+        max_cache_len=1050, # Affects the T3 speed, hence important
         # t3 sampling params
         repetition_penalty=1.2,
         min_p=0.05,
@@ -242,7 +260,6 @@ class ChatterboxTTS:
                 speaker_emb=_cond.speaker_emb,
                 cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
-                # TODO - check if dtype is correct here
             ).to(device=self.device, dtype=self.conds.t3.speaker_emb.dtype)
 
         # Norm and tokenize text
@@ -296,9 +313,7 @@ class ChatterboxTTS:
                     speech_tokens=speech_tokens,
                     ref_dict=self.conds.gen,
                 )
-                wav = wav.squeeze(0).detach().cpu().numpy()
-                watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-                return torch.from_numpy(watermarked_wav).unsqueeze(0)
 
+                return wav
             return speech_to_wav(speech_tokens)
 

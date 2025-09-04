@@ -4,8 +4,8 @@ from typing import List, Union, Optional
 
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
-import librosa
 import torch
+import torchaudio.functional as taF
 import torch.nn.functional as F
 from torch import nn, Tensor
 
@@ -164,7 +164,7 @@ class VoiceEncoder(nn.Module):
         Computes the embeddings of a batch of full utterances with gradients.
 
         :param mels: (B, T, M) unscaled mels
-        :return: (B, E) embeddings on CPU
+        :return: (B, E) embeddings as tensor
         """
         mel_lens = mel_lens.tolist() if torch.is_tensor(mel_lens) else mel_lens
 
@@ -188,10 +188,10 @@ class VoiceEncoder(nn.Module):
 
         # Forward the partials
         n_chunks = int(np.ceil(len(partials) / (batch_size or len(partials))))
-        partial_embeds = torch.cat([self(batch) for batch in partials.chunk(n_chunks)], dim=0).cpu()
+        partial_embeds = torch.cat([self(batch) for batch in partials.chunk(n_chunks)], dim=0)
 
         # Reduce the partial embeds into full embeds and L2-normalize them
-        slices = np.concatenate(([0], np.cumsum(n_partials)))
+        slices = torch.tensor([0] + list(np.cumsum(n_partials)), device=partial_embeds.device)
         raw_embeds = [torch.mean(partial_embeds[start:end], dim=0) for start, end in zip(slices[:-1], slices[1:])]
         raw_embeds = torch.stack(raw_embeds)
         embeds = raw_embeds / torch.linalg.norm(raw_embeds, dim=1, keepdim=True)
@@ -232,20 +232,47 @@ class VoiceEncoder(nn.Module):
         """
         # Load mels in memory and pack them
         if isinstance(mels, List):
-            mels = [np.asarray(mel) for mel in mels]
+            # Convert list of tensors or numpy to tensors
+            mels = [torch.from_numpy(mel) if not torch.is_tensor(mel) else mel for mel in mels]
             assert all(m.shape[1] == mels[0].shape[1] for m in mels), "Mels aren't in (B, T, M) format"
             mel_lens = [mel.shape[0] for mel in mels]
             mels = pack(mels)
 
         # Embed them
         with torch.inference_mode():
-            utt_embeds = self.inference(mels.to(self.device), mel_lens, batch_size=batch_size, **kwargs).numpy()
+            utt_embeds = self.inference(mels.to(self.device), mel_lens, batch_size=batch_size, **kwargs)
 
-        return self.utt_to_spk_embed(utt_embeds) if as_spk else utt_embeds
+        # Convert to numpy for output compatibility
+        utt_embeds_np = utt_embeds.cpu().numpy()
+        return self.utt_to_spk_embed(utt_embeds_np) if as_spk else utt_embeds_np
+
+    @staticmethod
+    def _trim_silence(wav: np.ndarray, top_db: float, ref: float=None):
+        # Simple amplitude-based trimming similar to librosa.effects.trim
+        ref_amp = np.max(np.abs(wav)) if ref is None else ref
+        if ref_amp <= 0:
+            return wav
+        thr = ref_amp * (10 ** (-top_db / 20.0))
+        idx = np.where(np.abs(wav) > thr)[0]
+        if idx.size == 0:
+            return wav
+        return wav[idx[0]: idx[-1] + 1]
+
+    @staticmethod
+    def _trim_silence_tensor(wav: torch.Tensor, top_db: float, ref: Optional[float] = None):
+        # Tensor-based version of _trim_silence
+        ref_amp = torch.max(torch.abs(wav)) if ref is None else ref
+        if ref_amp <= 0:
+            return wav
+        thr = ref_amp * (10 ** (-top_db / 20.0))
+        idx = torch.where(torch.abs(wav) > thr)[0]
+        if idx.numel() == 0:
+            return wav
+        return wav[idx[0]: idx[-1] + 1]
 
     def embeds_from_wavs(
         self,
-        wavs: List[np.ndarray],
+        wavs: List[np.ndarray] | List[torch.Tensor],
         sample_rate,
         as_spk=False,
         batch_size=32,
@@ -257,18 +284,78 @@ class VoiceEncoder(nn.Module):
 
         :param trim_top_db: this argument was only added for the sake of compatibility with metavoice's implementation
         """
+        # Convert to tensors early to avoid repeated conversions
+        wav_tensors = [torch.from_numpy(wav) if isinstance(wav, np.ndarray) else wav for wav in wavs]
+
         if sample_rate != self.hp.sample_rate:
-            wavs = [
-                librosa.resample(wav, orig_sr=sample_rate, target_sr=self.hp.sample_rate, res_type="kaiser_fast")
-                for wav in wavs
+            wav_tensors = [
+                taF.resample(wav.unsqueeze(0), sample_rate, self.hp.sample_rate).squeeze(0)
+                for wav in wav_tensors
             ]
 
         if trim_top_db:
-            wavs = [librosa.effects.trim(wav, top_db=trim_top_db)[0] for wav in wavs]
+            wav_tensors = [self._trim_silence_tensor(wav, top_db=trim_top_db) for wav in wav_tensors]
 
         if "rate" not in kwargs:
             kwargs["rate"] = 1.3  # Resemble's default value.
 
-        mels = [melspectrogram(w, self.hp).T for w in wavs]
+        # melspectrogram now outputs tensors
+        mels = [melspectrogram(wav, self.hp).t() for wav in wav_tensors]  # Use .t() for tensor transpose
 
         return self.embeds_from_mels(mels, as_spk=as_spk, batch_size=batch_size, **kwargs)
+
+    def embeds_from_wavs_tensor(
+        self,
+        wavs: List[np.ndarray] | List[torch.Tensor],
+        sample_rate,
+        as_spk=False,
+        batch_size=32,
+        trim_top_db: Optional[float]=20,
+        **kwargs
+    ):
+        """
+        Tensor-native version of embeds_from_wavs that returns tensors directly.
+        Same as embeds_from_wavs but skips the final numpy conversion.
+        """
+        # Convert to tensors early to avoid repeated conversions
+        wav_tensors = [torch.from_numpy(wav) if isinstance(wav, np.ndarray) else wav for wav in wavs]
+
+        if sample_rate != self.hp.sample_rate:
+            wav_tensors = [
+                taF.resample(wav.unsqueeze(0), sample_rate, self.hp.sample_rate).squeeze(0)
+                for wav in wav_tensors
+            ]
+
+        if trim_top_db:
+            wav_tensors = [self._trim_silence_tensor(wav, top_db=trim_top_db) for wav in wav_tensors]
+
+        if "rate" not in kwargs:
+            kwargs["rate"] = 1.3  # Resemble's default value.
+
+        # melspectrogram now outputs tensors
+        mels = [melspectrogram(wav, self.hp).t() for wav in wav_tensors]  # Use .t() for tensor transpose
+
+        # Load mels in memory and pack them
+        if isinstance(mels, List):
+            # Convert list of tensors or numpy to tensors
+            mels = [torch.from_numpy(mel) if not torch.is_tensor(mel) else mel for mel in mels]
+            assert all(m.shape[1] == mels[0].shape[1] for m in mels), "Mels aren't in (B, T, M) format"
+            mel_lens = [mel.shape[0] for mel in mels]
+            mels = pack(mels)
+
+        # Embed them - return tensor directly without numpy conversion
+        with torch.inference_mode():
+            utt_embeds = self.inference(mels.to(self.device), mel_lens, batch_size=batch_size, **kwargs)
+
+        return self.utt_to_spk_embed_tensor(utt_embeds) if as_spk else utt_embeds
+
+    @staticmethod
+    def utt_to_spk_embed_tensor(utt_embeds: torch.Tensor):
+        """
+        Tensor version of utt_to_spk_embed.
+        Takes a tensor of L2-normalized utterance embeddings, computes the mean embedding and L2-normalize it to get a
+        speaker embedding.
+        """
+        assert utt_embeds.dim() == 2
+        utt_embeds = torch.mean(utt_embeds, dim=0)
+        return utt_embeds / torch.linalg.norm(utt_embeds, dim=0)

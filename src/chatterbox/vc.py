@@ -1,8 +1,7 @@
 from pathlib import Path
 
-import librosa
 import torch
-import perth
+import torchaudio
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
@@ -26,7 +25,6 @@ class ChatterboxVC:
         self.sr = S3GEN_SR
         self.s3gen = s3gen
         self.device = device
-        self.watermarker = perth.PerthImplicitWatermarker()
         if ref_dict is None:
             self.ref_dict = None
         else:
@@ -75,9 +73,11 @@ class ChatterboxVC:
 
     def set_target_voice(self, wav_fpath):
         ## Load reference wav
-        s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
+        s3gen_ref_wav, _sr = torchaudio.load(wav_fpath)
+        if _sr != S3GEN_SR:
+            s3gen_ref_wav = torchaudio.functional.resample(s3gen_ref_wav, _sr, S3GEN_SR)
 
-        s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
+        s3gen_ref_wav = s3gen_ref_wav.squeeze(0)[:self.DEC_COND_LEN]
         self.ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
 
     def generate(
@@ -91,14 +91,14 @@ class ChatterboxVC:
             assert self.ref_dict is not None, "Please `prepare_conditionals` first or specify `target_voice_path`"
 
         with torch.inference_mode():
-            audio_16, _ = librosa.load(audio, sr=S3_SR)
-            audio_16 = torch.from_numpy(audio_16).float().to(self.device)[None, ]
+            audio_16, sr = torchaudio.load(audio)
+            if sr != S3_SR:
+                audio_16 = torchaudio.functional.resample(audio_16, sr, S3_SR)
+            audio_16 = audio_16.to(self.device).float()[0:1, ...]
 
             s3_tokens, _ = self.s3gen.tokenizer(audio_16)
             wav, _ = self.s3gen.inference(
                 speech_tokens=s3_tokens,
                 ref_dict=self.ref_dict,
             )
-            wav = wav.squeeze(0).detach().cpu().numpy()
-            watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-        return torch.from_numpy(watermarked_wav).unsqueeze(0)
+        return wav.unsqueeze(0)

@@ -46,3 +46,7 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+/.venv
+/profile_logs
+/.idea
+/cache
