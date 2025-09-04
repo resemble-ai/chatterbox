@@ -151,9 +151,7 @@ def korean_normalize(text: str) -> str:
         return initial + medial + final
     
     # Decompose syllables and normalize punctuation
-    result = ''.join(decompose_hangul(char) for char in text)
-    result = re.sub(r'[…~？！，：；（）「」『』]', '.', result)  # Korean punctuation
-    
+    result = ''.join(decompose_hangul(char) for char in text)    
     return result.strip()
 
 
@@ -201,81 +199,39 @@ class ChineseCangjieConverter:
     
     def _cangjie_encode(self, glyph: str):
         """Encode a single Chinese glyph to Cangjie code."""
-        code = self.word2cj.get(glyph, None)
-        if code is None:
+        normed_glyph = glyph
+        code = self.word2cj.get(normed_glyph, None)
+        if code is None:  # e.g. Japanese hiragana
             return None
-        
-        index = self.cj2word[code].index(glyph)
-        index_suffix = str(index) if index > 0 else ""
-        return code + index_suffix
+        index = self.cj2word[code].index(normed_glyph)
+        index = str(index) if index > 0 else ""
+        return code + str(index)
     
-    def _normalize_numbers(self, text: str) -> str:
-        """Convert Arabic numerals (1-99) to Chinese characters."""
-        digit_map = {'0': '零', '1': '一', '2': '二', '3': '三', '4': '四',
-                     '5': '五', '6': '六', '7': '七', '8': '八', '9': '九'}
-        
-        pattern = re.compile(r'(?<!\d)(\d{1,2})(?!\d)')
-        
-        def convert_number(match):
-            num = int(match.group(1))
-            
-            if num == 0:
-                return '零'
-            elif 1 <= num <= 9:
-                return digit_map[str(num)]
-            elif num == 10:
-                return '十'
-            elif 11 <= num <= 19:
-                return '十' + digit_map[str(num % 10)]
-            elif 20 <= num <= 99:
-                tens, ones = divmod(num, 10)
-                if ones == 0:
-                    return digit_map[str(tens)] + '十'
-                else:
-                    return digit_map[str(tens)] + '十' + digit_map[str(ones)]
-            else:
-                return match.group(1)
-        
-        return pattern.sub(convert_number, text)
+
     
-    def convert_chinese_text(self, text: str) -> str:
+    def __call__(self, text):
         """Convert Chinese characters in text to Cangjie tokens."""
-        text = re.sub('[、，：；〜－（）｟｠]', ',', text)
-        text = re.sub('(。|…)', '.', text)
-        text = self._normalize_numbers(text)
-        
-        # Skip segmentation for simple sequences (numbers, punctuation, short phrases)
-        if self.segmenter is not None:
-            # This avoids over-segmenting number sequences like "一, 二, 三"
-            is_simple_sequence = (
-                len([c for c in text if category(c) == "Lo"]) <= 15 and  # Max 15 Chinese chars
-                text.count(',') >= 2  # Contains multiple commas (likely enumeration)
-            )
-            
-            # Only segment complex Chinese text (longer sentences without enumeration patterns)
-            if not is_simple_sequence and len(text) > 10:
-                chinese_chars = sum(1 for c in text if category(c) == "Lo")
-                total_chars = len([c for c in text if c.strip()])
-                
-                if chinese_chars > 5 and chinese_chars / total_chars > 0.7:
-                    segmented_words = self.segmenter.cut(text)
-                    text = " ".join(segmented_words)
-        
         output = []
-        for char in text:
-            if category(char) == "Lo":  # Chinese character
-                cangjie = self._cangjie_encode(char)
-                if cangjie is None:
-                    output.append(char)
-                    continue
-                
-                code_tokens = [f"[cj_{c}]" for c in cangjie]
-                code_tokens.append("[cj_.]")
-                
-                output.append("".join(code_tokens))
-            else:
-                output.append(char)
+        if self.segmenter is not None:
+            segmented_words = self.segmenter.cut(text)
+            full_text = " ".join(segmented_words)
+        else:
+            full_text = text
         
+        for t in full_text:
+            if category(t) == "Lo":
+                cangjie = self._cangjie_encode(t)
+                if cangjie is None:
+                    output.append(t)
+                    continue
+                code = []
+                for c in cangjie:
+                    code.append(f"[cj_{c}]")
+                code.append("[cj_.]")
+                code = "".join(code)
+                output.append(code)
+            else:
+                output.append(t)
         return "".join(output)
 
 
@@ -299,7 +255,7 @@ class MTLTokenizer:
     def encode(self, txt: str, language_id: str = None):
         # Language-specific text processing
         if language_id == 'zh':
-            txt = self.cangjie_converter.convert_chinese_text(txt)
+            txt = self.cangjie_converter(txt)
         elif language_id == 'ja':
             txt = hiragana_normalize(txt)
         elif language_id == 'he':

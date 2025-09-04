@@ -83,7 +83,7 @@ def punc_norm(text: str) -> str:
 
     # Add full stop if no ending punc
     text = text.rstrip(" ")
-    sentence_enders = {".", "!", "?", "-", ","}
+    sentence_enders = {".", "!", "?", "-", ",","、","，","。","？","！"}
     if not any(text.endswith(p) for p in sentence_enders):
         text += "."
 
