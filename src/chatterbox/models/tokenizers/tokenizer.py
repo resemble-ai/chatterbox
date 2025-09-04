@@ -192,7 +192,7 @@ class ChineseCangjieConverter:
     def _init_segmenter(self):
         """Initialize pkuseg segmenter."""
         try:
-            from pkuseg import pkuseg
+            from spacy_pkuseg import pkuseg
             self.segmenter = pkuseg()
         except ImportError:
             logger.warning("pkuseg not available - Chinese segmentation will be skipped")

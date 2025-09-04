@@ -24,3 +24,8 @@ psutil
 loguru
 gradio
 setuptools<81.0
+
+#For multilingual TTS
+dicta_onnx
+spacy_pkuseg
+pykakasi
