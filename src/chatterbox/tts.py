@@ -16,51 +16,23 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from .shared_utils import (
+    check_mps_availability,
+    get_map_location,
+    validate_audio_file,
+    load_and_preprocess_audio,
+    drop_bad_tokens,
+    prepare_text_tokens,
+    punc_norm,
+    validate_exaggeration,
+    check_exaggeration_update_needed,
+    validate_text_input,
+    validate_float_parameter,
+    validate_audio_prompt_path
+)
 
 
 REPO_ID = "ResembleAI/chatterbox"
-
-
-def punc_norm(text: str) -> str:
-    """
-        Quick cleanup func for punctuation from LLMs or
-        containing chars not seen often in the dataset
-    """
-    if len(text) == 0:
-        return "You need to add some text for me to talk."
-
-    # Capitalise first letter
-    if text[0].islower():
-        text = text[0].upper() + text[1:]
-
-    # Remove multiple space chars
-    text = " ".join(text.split())
-
-    # Replace uncommon/llm punc
-    punc_to_replace = [
-        ("...", ", "),
-        ("…", ", "),
-        (":", ","),
-        (" - ", ", "),
-        (";", ", "),
-        ("—", "-"),
-        ("–", "-"),
-        (" ,", ","),
-        ("“", "\""),
-        ("”", "\""),
-        ("‘", "'"),
-        ("’", "'"),
-    ]
-    for old_char_sequence, new_char in punc_to_replace:
-        text = text.replace(old_char_sequence, new_char)
-
-    # Add full stop if no ending punc
-    text = text.rstrip(" ")
-    sentence_enders = {".", "!", "?", "-", ","}
-    if not any(text.endswith(p) for p in sentence_enders):
-        text += "."
-
-    return text
 
 
 @dataclass
@@ -128,11 +100,8 @@ class ChatterboxTTS:
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
 
-        # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
-        if device in ["cpu", "mps"]:
-            map_location = torch.device('cpu')
-        else:
-            map_location = None
+        # Use shared map_location utility
+        map_location = get_map_location(device)
 
         ve = VoiceEncoder()
         ve.load_state_dict(
@@ -165,13 +134,8 @@ class ChatterboxTTS:
 
     @classmethod
     def from_pretrained(cls, device) -> 'ChatterboxTTS':
-        # Check if MPS is available on macOS
-        if device == "mps" and not torch.backends.mps.is_available():
-            if not torch.backends.mps.is_built():
-                print("MPS not available because the current PyTorch install was not built with MPS enabled.")
-            else:
-                print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
-            device = "cpu"
+        # Use shared MPS checking utility
+        device = check_mps_availability(device)
 
         for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
@@ -186,28 +150,19 @@ class ChatterboxTTS:
             self.conds = conds.to(self.device)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
-        ## Load reference wav
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            s3gen_ref_wav, _sr = torchaudio.load(wav_fpath)
-        if _sr != S3GEN_SR:
-            s3gen_ref_wav = taF.resample(s3gen_ref_wav, _sr, S3GEN_SR)
+        # Validate inputs
+        validate_audio_file(wav_fpath)
+        exaggeration = validate_exaggeration(exaggeration)
         
-        # Ensure we have mono audio (1D tensor)
-        if s3gen_ref_wav.dim() > 1:
-            s3gen_ref_wav = s3gen_ref_wav.mean(dim=0)  # Convert to mono by averaging channels
-        
-        # Move to device early to avoid unnecessary transfers
-        s3gen_ref_wav = s3gen_ref_wav.to(self.device)
-        
-        # Resample to 16kHz directly from tensor
-        ref_16k_wav_tensor = taF.resample(s3gen_ref_wav.unsqueeze(0), S3GEN_SR, S3_SR).squeeze(0)
+        # Use shared audio preprocessing
+        s3gen_ref_wav, ref_16k_wav_tensor = load_and_preprocess_audio(wav_fpath, self.device)
 
         # Slice as tensor
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
         
         # Speech cond prompt tokens
+        t3_cond_prompt_tokens = None
         if plen := self.t3.hp.speech_cond_prompt_len:
             s3_tokzr = self.s3gen.tokenizer
             t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav_tensor[:self.ENC_COND_LEN]], max_len=plen)
@@ -245,34 +200,47 @@ class ChatterboxTTS:
         top_p=1.0,
         t3_params={},
     ):
+        # Validate inputs using shared utilities
+        text = validate_text_input(text)
+        exaggeration = validate_float_parameter(exaggeration, "exaggeration", 0.0, 2.0)
+        cfg_weight = validate_float_parameter(cfg_weight, "cfg_weight", 0.0, 1.0)
+        temperature = validate_float_parameter(temperature, "temperature", allow_zero=False)
+        min_p = validate_float_parameter(min_p, "min_p", 0.0, 1.0)
+        top_p = validate_float_parameter(top_p, "top_p", 0.0, 1.0)
+        repetition_penalty = validate_float_parameter(repetition_penalty, "repetition_penalty", allow_zero=False)
+
         if tokens_per_slice is not None or remove_milliseconds is not None or remove_milliseconds_start is not None or chunk_overlap_method is not None:
             print("Streaming by token slices has been discontinued due to audio clipping. Continuing with full generation.")
 
         if audio_prompt_path:
+            validate_audio_prompt_path(audio_prompt_path)
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
-        # Update exaggeration if needed
-        if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
+        # Update exaggeration if needed using shared utility
+        needs_update, new_emotion_tensor = check_exaggeration_update_needed(
+            self.conds.t3.emotion_adv, exaggeration, self.device
+        )
+        if needs_update:
             _cond: T3Cond = self.conds.t3
             self.conds.t3 = T3Cond(
                 speaker_emb=_cond.speaker_emb,
                 cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
-                emotion_adv=exaggeration * torch.ones(1, 1, 1),
+                emotion_adv=new_emotion_tensor,
             ).to(device=self.device, dtype=self.conds.t3.speaker_emb.dtype)
 
         # Norm and tokenize text
         text = punc_norm(text)
         text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
 
-        if cfg_weight > 0.0:
-            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
-
-        sot = self.t3.hp.start_text_token
-        eot = self.t3.hp.stop_text_token
-        text_tokens = F.pad(text_tokens, (1, 0), value=sot)
-        text_tokens = F.pad(text_tokens, (0, 1), value=eot)
+        # Use shared text token preparation
+        text_tokens = prepare_text_tokens(
+            text_tokens, 
+            self.t3.hp.start_text_token, 
+            self.t3.hp.stop_text_token, 
+            cfg_weight
+        )
 
         with torch.inference_mode():
             speech_tokens = self.t3.inference(
@@ -293,22 +261,10 @@ class ChatterboxTTS:
                 # Extract only the conditional batch.
                 speech_tokens = speech_tokens[0]
 
-                # TODO: output becomes 1D
+                # Use shared drop_invalid_tokens and drop_bad_tokens
                 speech_tokens = drop_invalid_tokens(speech_tokens)
-                
-                def drop_bad_tokens(tokens):
-                    # Use torch.where instead of boolean indexing to avoid sync
-                    mask = tokens < 6561
-                    # Count valid tokens without transferring to CPU
-                    valid_count = torch.sum(mask).item()
-                    # Create output tensor of the right size
-                    result = torch.zeros(valid_count, dtype=tokens.dtype, device=tokens.device)
-                    # Use torch.masked_select which is more CUDA-friendly
-                    result = torch.masked_select(tokens, mask)
-                    return result
-
-                # speech_tokens = speech_tokens[speech_tokens < 6561]
                 speech_tokens = drop_bad_tokens(speech_tokens)
+                
                 wav, _ = self.s3gen.inference(
                     speech_tokens=speech_tokens,
                     ref_dict=self.conds.gen,

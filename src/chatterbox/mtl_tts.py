@@ -17,6 +17,19 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import MTLTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from .shared_utils import (
+    check_mps_availability,
+    get_map_location,
+    validate_audio_file,
+    load_and_preprocess_audio,
+    drop_bad_tokens,
+    punc_norm,
+    validate_exaggeration,
+    validate_text_input,
+    validate_language_id,
+    validate_float_parameter,
+    validate_audio_prompt_path
+)
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -47,48 +60,6 @@ SUPPORTED_LANGUAGES = {
   "tr": "Turkish",
   "zh": "Chinese",
 }
-
-
-def punc_norm(text: str) -> str:
-    """
-        Quick cleanup func for punctuation from LLMs or
-        containing chars not seen often in the dataset
-    """
-    if len(text) == 0:
-        return "You need to add some text for me to talk."
-
-    # Capitalise first letter
-    if text[0].islower():
-        text = text[0].upper() + text[1:]
-
-    # Remove multiple space chars
-    text = " ".join(text.split())
-
-    # Replace uncommon/llm punc
-    punc_to_replace = [
-        ("...", ", "),
-        ("…", ", "),
-        (":", ","),
-        (" - ", ", "),
-        (";", ", "),
-        ("—", "-"),
-        ("–", "-"),
-        (" ,", ","),
-        (""", "\""),
-        (""", "\""),
-        ("'", "'"),
-        ("'", "'"),
-    ]
-    for old_char_sequence, new_char in punc_to_replace:
-        text = text.replace(old_char_sequence, new_char)
-
-    # Add full stop if no ending punc
-    text = text.rstrip(" ")
-    sentence_enders = {".", "!", "?", "-", ","}
-    if not any(text.endswith(p) for p in sentence_enders):
-        text += "."
-
-    return text
 
 
 @dataclass
@@ -163,11 +134,8 @@ class ChatterboxMultilingualTTS:
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(ckpt_dir)
 
-        # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
-        if device in ["cpu", "mps"]:
-            map_location = torch.device('cpu')
-        else:
-            map_location = None
+        # Use shared map_location utility
+        map_location = get_map_location(device)
 
         ve = VoiceEncoder()
         ve.load_state_dict(
@@ -200,13 +168,8 @@ class ChatterboxMultilingualTTS:
 
     @classmethod
     def from_pretrained(cls, device: torch.device) -> 'ChatterboxMultilingualTTS':
-        # Check if MPS is available on macOS
-        if device == "mps" and not torch.backends.mps.is_available():
-            if not torch.backends.mps.is_built():
-                print("MPS not available because the current PyTorch install was not built with MPS enabled.")
-            else:
-                print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
-            device = "cpu"
+        # Use shared MPS checking utility
+        device = check_mps_availability(device)
 
         ckpt_dir = Path(
             snapshot_download(
@@ -232,65 +195,13 @@ class ChatterboxMultilingualTTS:
             ValueError: If the audio file is invalid or parameters are out of range
             RuntimeError: If audio processing fails
         """
-        # Validate inputs
-        if not isinstance(wav_fpath, (str, Path)):
-            raise TypeError("wav_fpath must be a string or Path object")
-        
-        wav_path = Path(wav_fpath)
-        if not wav_path.exists():
-            raise FileNotFoundError(f"Reference audio file not found: {wav_fpath}")
-        
-        if not wav_path.is_file():
-            raise ValueError(f"Reference audio path is not a file: {wav_fpath}")
+        # Use shared validation utilities
+        validate_audio_file(wav_fpath)
+        exaggeration = validate_exaggeration(exaggeration)
         
         try:
-            exaggeration = float(exaggeration)
-            if not (0.0 <= exaggeration <= 2.0):
-                raise ValueError("exaggeration must be between 0.0 and 2.0")
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"Invalid exaggeration value: {e}")
-        
-        try:
-            # Load reference wav with enhanced error handling
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", UserWarning)
-                try:
-                    s3gen_ref_wav, _sr = torchaudio.load(wav_fpath)
-                except Exception as e:
-                    raise RuntimeError(f"Failed to load audio file '{wav_fpath}': {e}")
-            
-            # Validate audio data
-            if s3gen_ref_wav.numel() == 0:
-                raise ValueError("Audio file is empty or contains no valid audio data")
-            
-            if _sr <= 0:
-                raise ValueError(f"Invalid sample rate: {_sr}")
-            
-            # Check audio duration (minimum 0.1 seconds)
-            min_duration = 0.1
-            duration = s3gen_ref_wav.shape[-1] / _sr
-            if duration < min_duration:
-                raise ValueError(f"Audio too short: {duration:.2f}s (minimum {min_duration}s required)")
-            
-            # Resample if necessary
-            if _sr != S3GEN_SR:
-                try:
-                    s3gen_ref_wav = taF.resample(s3gen_ref_wav, _sr, S3GEN_SR)
-                except Exception as e:
-                    raise RuntimeError(f"Failed to resample audio from {_sr}Hz to {S3GEN_SR}Hz: {e}")
-            
-            # Ensure we have mono audio (1D tensor)
-            if s3gen_ref_wav.dim() > 1:
-                s3gen_ref_wav = s3gen_ref_wav.mean(dim=0)  # Convert to mono by averaging channels
-            
-            # Move to device early to avoid unnecessary transfers
-            s3gen_ref_wav = s3gen_ref_wav.to(self.device)
-            
-            # Resample to 16kHz directly from tensor
-            try:
-                ref_16k_wav_tensor = taF.resample(s3gen_ref_wav.unsqueeze(0), S3GEN_SR, S3_SR).squeeze(0)
-            except Exception as e:
-                raise RuntimeError(f"Failed to resample to 16kHz: {e}")
+            # Use shared audio preprocessing
+            s3gen_ref_wav, ref_16k_wav_tensor = load_and_preprocess_audio(wav_fpath, self.device)
 
             # Slice as tensor
             s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
@@ -356,88 +267,21 @@ class ChatterboxMultilingualTTS:
         top_p=1.0,
         t3_params={},
     ):
-        # Enhanced input validation
-        if not text or not isinstance(text, str):
-            raise ValueError("Text must be a non-empty string")
+        # Enhanced input validation using shared utilities
+        text = validate_text_input(text)
+        language_id = validate_language_id(language_id, SUPPORTED_LANGUAGES)
         
-        if text.strip() == "":
-            raise ValueError("Text cannot be empty or whitespace only")
-        
-        # Validate language_id
-        if language_id is None:
-            raise ValueError("language_id is required for multilingual TTS. Use one of: " + ", ".join(SUPPORTED_LANGUAGES.keys()))
-        
-        if not isinstance(language_id, str):
-            raise TypeError(f"language_id must be a string, got {type(language_id)}")
-        
-        if language_id.lower() not in SUPPORTED_LANGUAGES:
-            supported_langs = ", ".join(SUPPORTED_LANGUAGES.keys())
-            raise ValueError(
-                f"Unsupported language_id '{language_id}'. "
-                f"Supported languages: {supported_langs}"
-            )
-        
-        # Validate numerical parameters
-        try:
-            exaggeration = float(exaggeration)
-            if not (0.0 <= exaggeration <= 2.0):
-                raise ValueError("exaggeration must be between 0.0 and 2.0")
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"Invalid exaggeration value: {e}")
-        
-        try:
-            cfg_weight = float(cfg_weight)
-            if not (0.0 <= cfg_weight <= 1.0):
-                raise ValueError("cfg_weight must be between 0.0 and 1.0")
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"Invalid cfg_weight value: {e}")
-        
-        try:
-            temperature = float(temperature)
-            if temperature <= 0.0:
-                raise ValueError("temperature must be positive")
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"Invalid temperature value: {e}")
-        
-        # Validate sampling parameters
-        try:
-            min_p = float(min_p)
-            if not (0.0 <= min_p <= 1.0):
-                raise ValueError("min_p must be between 0.0 and 1.0")
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"Invalid min_p value: {e}")
-        
-        try:
-            top_p = float(top_p)
-            if not (0.0 <= top_p <= 1.0):
-                raise ValueError("top_p must be between 0.0 and 1.0")
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"Invalid top_p value: {e}")
-        
-        try:
-            repetition_penalty = float(repetition_penalty)
-            if repetition_penalty <= 0.0:
-                raise ValueError("repetition_penalty must be positive")
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"Invalid repetition_penalty value: {e}")
+        # Validate numerical parameters using shared validation
+        exaggeration = validate_float_parameter(exaggeration, "exaggeration", 0.0, 2.0)
+        cfg_weight = validate_float_parameter(cfg_weight, "cfg_weight", 0.0, 1.0)
+        temperature = validate_float_parameter(temperature, "temperature", allow_zero=False)
+        min_p = validate_float_parameter(min_p, "min_p", 0.0, 1.0)
+        top_p = validate_float_parameter(top_p, "top_p", 0.0, 1.0)
+        repetition_penalty = validate_float_parameter(repetition_penalty, "repetition_penalty", allow_zero=False)
         
         # Handle audio prompt path with better error messages
         if audio_prompt_path:
-            if not isinstance(audio_prompt_path, (str, Path)):
-                raise TypeError("audio_prompt_path must be a string or Path object")
-            
-            audio_path = Path(audio_prompt_path)
-            if not audio_path.exists():
-                raise FileNotFoundError(f"Audio prompt file not found: {audio_prompt_path}")
-            
-            if not audio_path.is_file():
-                raise ValueError(f"Audio prompt path is not a file: {audio_prompt_path}")
-            
-            # Check file extension
-            valid_extensions = {'.wav', '.mp3', '.flac', '.m4a', '.aac', '.ogg'}
-            if audio_path.suffix.lower() not in valid_extensions:
-                raise ValueError(f"Unsupported audio format: {audio_path.suffix}. Supported: {', '.join(valid_extensions)}")
-            
+            validate_audio_prompt_path(audio_prompt_path)
             try:
                 self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
             except Exception as e:
@@ -462,12 +306,12 @@ class ChatterboxMultilingualTTS:
 
         # Normalize and tokenize text with enhanced error handling
         try:
-            text = punc_norm(text)
+            text = punc_norm(text, multilingual=True)
         except Exception as e:
             raise RuntimeError(f"Failed to normalize text: {e}")
         
         try:
-            text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id.lower()).to(self.device)
+            text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id).to(self.device)
         except Exception as e:
             raise RuntimeError(f"Failed to tokenize text for language '{language_id}': {e}")
 
@@ -504,13 +348,6 @@ class ChatterboxMultilingualTTS:
                 # TODO: output becomes 1D
                 speech_tokens = drop_invalid_tokens(speech_tokens)
                 
-                def drop_bad_tokens(tokens):
-                    # Use torch.masked_select directly - more CUDA-friendly, no CPU sync
-                    mask = tokens < 6561
-                    # torch.masked_select is efficient and stays on device
-                    result = torch.masked_select(tokens, mask)
-                    return result
-
                 # speech_tokens = speech_tokens[speech_tokens < 6561]
                 speech_tokens = drop_bad_tokens(speech_tokens)
                 

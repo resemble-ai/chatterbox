@@ -120,5 +120,6 @@ if __name__ == "__main__":
     test_asset = Path.cwd().joinpath("assets", "fishaudio_horror.wav")
     model = load_model()
     wavfile = generate(model, "你好世界", language_id="zh", audio_prompt_path=test_asset2, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
+    wavfile = generate(model, "你好世界", language_id="zh", audio_prompt_path=test_asset2, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
     print(f"Generated wav file: {wavfile}")
 
