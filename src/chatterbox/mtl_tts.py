@@ -4,7 +4,6 @@ import os
 import warnings
 
 import torch
-import perth
 import torch.nn.functional as F
 import torchaudio
 import torchaudio.functional as taF
@@ -85,7 +84,7 @@ def punc_norm(text: str) -> str:
 
     # Add full stop if no ending punc
     text = text.rstrip(" ")
-    sentence_enders = {".", "!", "?", "-", ",","、","，","。","？","！"}
+    sentence_enders = {".", "!", "?", "-", ","}
     if not any(text.endswith(p) for p in sentence_enders):
         text += "."
 
@@ -154,7 +153,6 @@ class ChatterboxMultilingualTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
-        self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
     def get_supported_languages(cls):
@@ -304,7 +302,8 @@ class ChatterboxMultilingualTTS:
             
             # Speech cond prompt tokens
             t3_cond_prompt_tokens = None
-            if plen := self.t3.hp.speech_cond_prompt_len:
+            plen = getattr(self.t3.hp, 'speech_cond_prompt_len', 30)
+            if plen:
                 try:
                     s3_tokzr = self.s3gen.tokenizer
                     t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav_tensor[:self.ENC_COND_LEN]], max_len=plen)
@@ -335,6 +334,10 @@ class ChatterboxMultilingualTTS:
                 raise
             else:
                 raise RuntimeError(f"Unexpected error in prepare_conditionals: {e}")
+
+    def set_conditionals(self, conds: Conditionals):
+        """Set conditionals for the TTS model."""
+        self.conds = conds
 
     def generate(
         self,
@@ -445,12 +448,14 @@ class ChatterboxMultilingualTTS:
 
         # Update exaggeration if needed
         try:
-            if float(exaggeration) != float(self.conds.t3.emotion_adv[0, 0, 0].item()):
+            # Check exaggeration without CPU sync - use tensor comparison with matching dtype
+            current_exag_tensor = exaggeration * torch.ones(1, 1, 1, device=self.device, dtype=self.conds.t3.emotion_adv.dtype)
+            if not torch.allclose(self.conds.t3.emotion_adv, current_exag_tensor, atol=1e-6):
                 _cond: T3Cond = self.conds.t3
                 self.conds.t3 = T3Cond(
                     speaker_emb=_cond.speaker_emb,
                     cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
-                    emotion_adv=exaggeration * torch.ones(1, 1, 1),
+                    emotion_adv=current_exag_tensor,
                 ).to(device=self.device, dtype=self.conds.t3.speaker_emb.dtype)
         except Exception as e:
             raise RuntimeError(f"Failed to update exaggeration: {e}")
@@ -500,13 +505,9 @@ class ChatterboxMultilingualTTS:
                 speech_tokens = drop_invalid_tokens(speech_tokens)
                 
                 def drop_bad_tokens(tokens):
-                    # Use torch.where instead of boolean indexing to avoid sync
+                    # Use torch.masked_select directly - more CUDA-friendly, no CPU sync
                     mask = tokens < 6561
-                    # Count valid tokens without transferring to CPU
-                    valid_count = torch.sum(mask).item()
-                    # Create output tensor of the right size
-                    result = torch.zeros(valid_count, dtype=tokens.dtype, device=tokens.device)
-                    # Use torch.masked_select which is more CUDA-friendly
+                    # torch.masked_select is efficient and stays on device
                     result = torch.masked_select(tokens, mask)
                     return result
 
@@ -521,10 +522,11 @@ class ChatterboxMultilingualTTS:
                     ref_dict=self.conds.gen,
                 )
 
-                # Apply watermarking
-                wav = wav.squeeze(0).detach().cpu().numpy()
-                watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-                return torch.from_numpy(watermarked_wav).unsqueeze(0)
+                # Return tensor without watermarking, ensure 2D shape for torchaudio
+                wav = wav.squeeze(0).detach()
+                if wav.dim() == 1:
+                    wav = wav.unsqueeze(0)  # Add channel dimension
+                return wav
                 
             return speech_to_wav(speech_tokens)
         except Exception as e:

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import torch
 from loguru import logger
-from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+from src.chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
@@ -33,7 +33,9 @@ def set_seed(seed: int):
 def load_model():
     model = ChatterboxMultilingualTTS.from_pretrained(DEVICE)
     model.t3.to(dtype=DTYPE)
-    model.conds.t3.to(dtype=DTYPE)
+    # Only set conditionals dtype if they exist
+    if model.conds is not None:
+        model.conds.t3.to(dtype=DTYPE)
     torch.cuda.empty_cache()
     return model
 

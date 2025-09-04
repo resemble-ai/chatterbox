@@ -44,7 +44,8 @@ class EnTokenizer:
 
     def decode(self, seq):
         if isinstance(seq, torch.Tensor):
-            seq = seq.cpu().numpy()
+            # Keep tensor operations on device - no CPU transfer needed
+            seq = seq.tolist()
 
         txt: str = self.tokenizer.decode(seq,
         skip_special_tokens=False)
@@ -272,7 +273,8 @@ class MTLTokenizer:
 
     def decode(self, seq):
         if isinstance(seq, torch.Tensor):
-            seq = seq.cpu().numpy()
+            # Keep tensor operations on device - no CPU transfer needed
+            seq = seq.tolist()
 
         txt = self.tokenizer.decode(seq, skip_special_tokens=False)
         txt = txt.replace(' ', '').replace(SPACE, ' ').replace(EOT, '').replace(UNK, '')

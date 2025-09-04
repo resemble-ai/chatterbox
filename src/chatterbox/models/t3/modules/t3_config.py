@@ -30,5 +30,5 @@ class T3Config:
     def multilingual(cls):
         """Create a configuration for the multilingual T3 model."""
         config = cls()
-        config.text_tokens_dict_size = 1024  # Increased for multilingual support
+        config.text_tokens_dict_size = 2352  # Multilingual model vocab size
         return config
