@@ -51,7 +51,8 @@ SUPPORTED_LANGUAGES = {
 
 ---
 
-<img width="1200" alt="cb-big2" src="https://github.com/user-attachments/assets/bd8c5f03-e91d-4ee5-b680-57355da204d1" />
+
+<img width="1200" height="600" alt="Chatterbox-Multilingual" src="https://www.resemble.ai/wp-content/uploads/2025/09/Chatterbox-Multilingual-1.png" />
 
 # Chatterbox TTS
 
@@ -62,14 +63,15 @@ SUPPORTED_LANGUAGES = {
 
 _Made with ♥️ by <a href="https://resemble.ai" target="_blank"><img width="100" alt="resemble-logo-horizontal" src="https://github.com/user-attachments/assets/35cf756b-3506-4943-9c72-c05ddfa4e525" /></a>
 
-We're excited to introduce Chatterbox, [Resemble AI's](https://resemble.ai) first production-grade open source TTS model. Licensed under MIT, Chatterbox has been benchmarked against leading closed-source systems like ElevenLabs, and is consistently preferred in side-by-side evaluations.
+We're excited to introduce **Chatterbox Multilingual**, [Resemble AI's](https://resemble.ai) first production-grade open source TTS model supporting **23 languages** out of the box. Licensed under MIT, Chatterbox has been benchmarked against leading closed-source systems like ElevenLabs, and is consistently preferred in side-by-side evaluations.
 
-Whether you're working on memes, videos, games, or AI agents, Chatterbox brings your content to life. It's also the first open source TTS model to support **emotion exaggeration control**, a powerful feature that makes your voices stand out. Try it now on our [Hugging Face Gradio app.](https://huggingface.co/spaces/ResembleAI/Chatterbox)
+Whether you're working on memes, videos, games, or AI agents, Chatterbox brings your content to life across languages. It's also the first open source TTS model to support **emotion exaggeration control** with robust **multilingual zero-shot voice cloning**. Try the english only version now on our [English Hugging Face Gradio app.](https://huggingface.co/spaces/ResembleAI/Chatterbox). Or try the multilingual version on our [Multilingual Hugging Face Gradio app.](https://huggingface.co/spaces/ResembleAI/Chatterbox-Multilingual-TTS).
 
 If you like the model but need to scale or tune it for higher accuracy, check out our competitively priced TTS service (<a href="https://resemble.ai">link</a>). It delivers reliable performance with ultra-low latency of sub 200ms—ideal for production use in agents, applications, or interactive media.
 
 # Key Details
-- SoTA zeroshot TTS
+- Multilingual, zero-shot TTS supporting 23 languages
+- SoTA zeroshot English TTS
 - 0.5B Llama backbone
 - Unique exaggeration/intensity control
 - Ultra-stable with alignment-informed inference
@@ -78,9 +80,12 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
 - Easy voice conversion script
 - [Outperforms ElevenLabs](https://podonos.com/resembleai/chatterbox)
 
+# Supported Languages 
+Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • Spanish (es) • Finnish (fi) • French (fr) • Hebrew (he) • Hindi (hi) • Italian (it) • Japanese (ja) • Korean (ko) • Malay (ms) • Dutch (nl) • Norwegian (no) • Polish (pl) • Portuguese (pt) • Russian (ru) • Swedish (sv) • Swahili (sw) • Turkish (tr) • Chinese (zh)
 # Tips
 - **General Use (TTS and Voice Agents):**
-  - The default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts.
+  - Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip’s language. To mitigate this, set `cfg_weight` to `0`.
+  - The default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts across all languages.
   - If the reference speaker has a fast speaking style, lowering `cfg_weight` to around `0.3` can improve pacing.
 
 - **Expressive or Dramatic Speech:**
@@ -89,21 +94,44 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
 
 
 # Installation
-```
+```shell
 pip install chatterbox-tts
 ```
 
+Alternatively, you can install from source:
+```shell
+# conda create -yn chatterbox python=3.11
+# conda activate chatterbox
+
+git clone https://github.com/resemble-ai/chatterbox.git
+cd chatterbox
+pip install -e .
+```
+We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
 # Usage
 ```python
 import torchaudio as ta
 from chatterbox.tts import ChatterboxTTS
+from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
+# English example
 model = ChatterboxTTS.from_pretrained(device="cuda")
 
 text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill."
 wav = model.generate(text)
-ta.save("test-1.wav", wav, model.sr)
+ta.save("test-english.wav", wav, model.sr)
+
+# Multilingual examples
+multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+
+french_text = "Bonjour, comment ça va? Ceci est le modèle de synthèse vocale multilingue Chatterbox, il prend en charge 23 langues."
+wav_french = multilingual_model.generate(spanish_text, language_id="fr")
+ta.save("test-french.wav", wav_french, model.sr)
+
+chinese_text = "你好，今天天气真不错，希望你有一个愉快的周末。"
+wav_chinese = multilingual_model.generate(chinese_text, language_id="zh")
+ta.save("test-chinese.wav", wav_chinese, model.sr)
 
 # If you want to synthesize with a different voice, specify the audio prompt
 AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
@@ -151,5 +179,16 @@ print(f"Extracted watermark: {watermark}")
 
 👋 Join us on [Discord](https://discord.gg/rJq9cRJBJ6) and let's build something awesome together!
 
+# Citation
+If you find this model useful, please consider citing.
+```
+@misc{chatterboxtts2025,
+  author       = {{Resemble AI}},
+  title        = {{Chatterbox-TTS}},
+  year         = {2025},
+  howpublished = {\url{https://github.com/resemble-ai/chatterbox}},
+  note         = {GitHub repository}
+}
+```
 # Disclaimer
 Don't use this model to do bad things. Prompts are sourced from freely available data on the internet.
