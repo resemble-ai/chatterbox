@@ -39,6 +39,8 @@ def _save_conditionals_to_disk(cache_key, cond_cls):
 
 def save_conditionals_cache(cache_key, cond_cls, enable_memory_cache=True, enable_disk_cache=True):
     """Save prepared conditionals to disk (non-blocking) and memory"""
+    global _current_loaded_cache_key  # Add this line
+    
     if cache_key is None:
         return
 
@@ -59,6 +61,9 @@ def save_conditionals_cache(cache_key, cond_cls, enable_memory_cache=True, enabl
                 args=(cache_key, cond_cls),
                 daemon=True
             ).start()
+
+        # Update tracking to reflect the currently active conditionals
+        _current_loaded_cache_key = cache_key  # Add this line
 
     except Exception as e:
         print(f"Failed to prepare conditionals cache: {e}")
