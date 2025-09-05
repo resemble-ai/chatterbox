@@ -17,7 +17,7 @@ from pathlib import Path
 
 import torch
 from loguru import logger
-from chatterbox.tts import ChatterboxTTS
+from src.chatterbox.tts import ChatterboxTTS
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
@@ -87,12 +87,12 @@ def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num
             #"initial_forward_pass_backend": "eager", # slower - default
             #"initial_forward_pass_backend": "cudagraphs", # speeds up set up
             "generate_token_backend": "cudagraphs-manual", # fastest - default
-            # "generate_token_backend": "cudagraphs",
+            #"generate_token_backend": "cudagraphs",
             # "generate_token_backend": "eager",
             # "generate_token_backend": "inductor",
             # "generate_token_backend": "inductor-strided",
             #"generate_token_backend": "cudagraphs-strided",
-            "stride_length": 4, # "strided" options compile <1-2-3-4> iteration steps together, which improves performance by reducing memory copying issues in torch.compile
+            #"stride_length": 4, # "strided" options compile <1-2-3-4> iteration steps together, which improves performance by reducing memory copying issues in torch.compile
             "skip_when_1": True, # skips Top P when it's set to 1.0
             #"benchmark_t3": True, # Synchronizes CUDA to get the real it/s 
         }
@@ -106,7 +106,7 @@ def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num
 
     logger.info(f"Generated audio length: {wav_length:.2f} seconds {model.sr}. Speed: {wav_length / total_duration_s:.2f}x")
     wave_file = str(save_torchaudio_wav(wav ,model.sr, audio_path=audio_prompt_path, uuid=cache_uuid))
-    return wave_file
+    return None #wave_file
     #return (model.sr, wav.squeeze(0).cpu().numpy())
 
 
@@ -114,12 +114,12 @@ if __name__ == "__main__":
     shutil.rmtree(Path("cache").joinpath("conditionals"), ignore_errors=True)
     test_text= "Now let's make my mum's favourite. So three mars bars into the pan. Then we add the tuna and just stir for a bit, just let the chocolate and fish infuse. A sprinkle of olive oil and some tomato ketchup. Now smell that. Oh boy this is going to be incredible."
     test_asset2=Path.cwd().joinpath("assets", "dlc1seranavoice.wav")
-    test_asset = Path.cwd().joinpath("assets", "fishaudio_horror.wav")
+    #test_asset = Path.cwd().joinpath("assets", "fishaudio_horror.wav")
     model = load_model()
     #wavfile = generate(model, test_text, None, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
-    wavfile = generate(model, test_text, test_asset, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
-    wavfile = generate(model, test_text, test_asset, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
+    #wavfile = generate(model, test_text, test_asset, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
+    #wavfile = generate(model, test_text, test_asset, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
     wavfile = generate(model, test_text, test_asset2, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
     wavfile = generate(model, test_text, test_asset2, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
-    print(f"Generated wav file: {wavfile}")
+    #print(f"Generated wav file: {wavfile}")
 
