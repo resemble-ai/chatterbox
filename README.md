@@ -1,4 +1,56 @@
 
+
+
+Windows setup meant for use with SkyrimNet either locally (or local secondary PC) install of Zonos 
+- should support Blackwell cards but not Ampere or below
+- cache files in `cache` folder
+- output files saved in `output_temp` folder under process timestamp folders
+
+Assumes that [Python 3.12]([https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe) is already installed. 
+
+To install other needed files:
+
+`1_Install.bat` 
+
+To run:
+
+`2_Start.bat` 
+
+This should start in a high priority process window.
+
+`2_Start_ML.bat` will start a multilingual version of Chaterbox.
+
+Be sure to set the Language section in the SkyrimNet Zonos tab to match the language you want.
+
+SUPPORTED_LANGUAGES = {
+  "ar": "Arabic",
+  "da": "Danish",
+  "de": "German",
+  "el": "Greek",
+  "en": "English",
+  "es": "Spanish",
+  "fi": "Finnish",
+  "fr": "French",
+  "he": "Hebrew",
+  "hi": "Hindi",
+  "it": "Italian",
+  "ja": "Japanese",
+  "ko": "Korean",
+  "ms": "Malay",
+  "nl": "Dutch",
+  "no": "Norwegian",
+  "pl": "Polish",
+  "pt": "Portuguese",
+  "ru": "Russian",
+  "sv": "Swedish",
+  "sw": "Swahili",
+  "tr": "Turkish",
+  "zh": "Chinese",
+}
+
+
+---
+
 <img width="1200" alt="cb-big2" src="https://github.com/user-attachments/assets/bd8c5f03-e91d-4ee5-b680-57355da204d1" />
 
 # Chatterbox TTS

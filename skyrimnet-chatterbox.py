@@ -1,3 +1,4 @@
+from argparse import ArgumentParser
 import functools
 from pathlib import Path
 import random
@@ -15,13 +16,13 @@ from src.cache_utils import (
 )
 
 from loguru import logger
-from chatterbox.tts import ChatterboxTTS
 import warnings
 warnings.filterwarnings("ignore", message=" UserWarning: In 2.9, this function's implementation will be changed to use torchaudio.save_with_torchcodec` under the hood.")
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
 MODEL = None
+MULTILINGUAL = False
 
 def set_seed(seed: int):
     torch.manual_seed(seed)
@@ -32,16 +33,22 @@ def set_seed(seed: int):
 
 
 def load_model():
-    global MODEL
+    global MODEL, MULTILINGUAL
     if MODEL is None:
-        MODEL = ChatterboxTTS.from_pretrained(DEVICE)
+        if MULTILINGUAL:
+            logger.info("Loading Multilingual Model")
+            from src.chatterbox.mtl_tts import ChatterboxMultilingualTTS as Chatterbox
+        else:
+            logger.info("Loading English Model")
+            from src.chatterbox.tts import ChatterboxTTS as Chatterbox
+        MODEL = Chatterbox.from_pretrained(DEVICE)
         MODEL.t3.to(dtype=DTYPE)
         MODEL.conds.t3.to(dtype=DTYPE)
         torch.cuda.empty_cache()
     return MODEL
 
 
-def generate(model, text, audio_prompt_path=None, exaggeration=0.5, temperature=0.8, seed_num=0, cfgw=0, cache_uuid=0):
+def generate(model, text, audio_prompt_path=None, exaggeration=0.5, temperature=0.8, seed_num=0, cfgw=0, cache_uuid=0, language_id="en"):
     enable_memory_cache = True
     enable_disk_cache = True
     cache_voice = True
@@ -152,7 +159,7 @@ def generate_audio(
 
     #seed_num = 0 if randomize_seed else cpp_uuid_to_seed(uuid)
     seed_num = cpp_uuid_to_seed(uuid)
-    return generate(model=MODEL, text=text, audio_prompt_path=speaker_audio, seed_num=seed_num, cache_uuid=uuid,
+    return generate(model=MODEL, text=text, language_id=language, audio_prompt_path=speaker_audio, seed_num=seed_num, cache_uuid=uuid,
                     exaggeration=0.55,
                     temperature=0.8,
                     cfgw=0
@@ -169,13 +176,37 @@ with gr.Blocks() as demo:
                 max_lines=5
             )
             ref_wav = gr.Audio(sources=["upload", "microphone"], type="filepath", label="Reference Audio File", value=None)
+
             exaggeration = gr.Slider(0.25, 2, step=.05, label="Exaggeration (Neutral = 0.5, extreme values can be unstable)", value=.5)
             cfg_weight = gr.Slider(0.0, 1, step=.05, label="CFG/Pace", value=0.5)
 
             with gr.Accordion("More options", open=False):
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")
                 temp = gr.Slider(0.05, 5, step=.05, label="temperature", value=.8)
-
+            language_id = gr.Dropdown([
+                "ar",
+                "da",
+                "de",
+                "el",
+                "en",
+                "es",
+                "fi",
+                "fr",
+                "he",
+                "hi",
+                "it",
+                "ja",
+                "ko",
+                "ms",
+                "nl",
+                "no",
+                "pl",
+                "pt",
+                "ru",
+                "sv",
+                "sw",
+                "tr",
+                "zh"], value="en", multiselect=False, label="Language", info="Language only for multilanguage model")
             run_btn = gr.Button("Generate", variant="primary")
 
         with gr.Column():
@@ -188,6 +219,7 @@ with gr.Blocks() as demo:
         inputs=[
             model_state,
             text,
+            language_id,
             ref_wav,
             exaggeration,
             temp,
@@ -257,10 +289,26 @@ with gr.Blocks() as demo:
     ],
                      outputs=[audio_output, seed_num],
                      )
+    
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = ArgumentParser()
+    parser.add_argument('--share', action='store_true')
+    parser.add_argument("--server", type=str, default='0.0.0.0')
+    parser.add_argument("--port", type=int, required=False)
+    parser.add_argument("--inbrowser", action='store_true')
+    parser.add_argument("--multilingual", action='store_true', default=False)
+    return parser.parse_args()
 
 if __name__ == "__main__":
-    #generate(MODEL, "warmup", None)
+    args = parse_arguments()
+    MULTILINGUAL = args.multilingual
     demo.queue(
         max_size=50,
         default_concurrency_limit=1,
-    ).launch(share=False)
+    ).launch(
+        server_name=args.server, 
+        server_port=args.port, 
+        share=args.share, 
+        inbrowser=args.inbrowser
+    )

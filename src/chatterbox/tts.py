@@ -179,6 +179,7 @@ class ChatterboxTTS:
     def generate(
         self,
         text,
+        language_id=None,
         audio_prompt_path=None,
         exaggeration=0.5,
         cfg_weight=0.5,
