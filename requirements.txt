@@ -1,0 +1,48 @@
+# Chatterbox Audiobook Studio - Complete Requirements
+# This file contains all dependencies for the enhanced audiobook edition
+
+# Core PyTorch with CUDA support (auto-detects CUDA availability)
+torch>=2.4.0
+torchaudio>=2.4.0
+torchvision>=0.19.0
+
+# Core TTS dependencies
+numpy>=1.24.0,<1.27.0
+librosa>=0.10.0
+resampy>=0.4.3
+s3tokenizer
+transformers>=4.46.0
+diffusers>=0.29.0
+resemble-perth>=1.0.1
+conformer>=0.3.2
+safetensors>=0.5.0
+
+# Audio processing
+soundfile>=0.12.0
+scipy>=1.10.0
+
+# Web interface
+gradio>=5.44.0
+
+# Text processing
+pykakasi>=2.3.0
+pkuseg>=0.0.25
+
+# Configuration and utilities
+omegaconf>=2.3.0
+pydantic>=2.0.0
+
+# Optional advanced NLP (commented out for basic installation)
+# spacy>=3.4.0
+# spacy[en_core_web_sm]>=3.4.0
+
+# Development and debugging
+tqdm>=4.65.0
+requests>=2.28.0
+pathlib2>=2.3.0
+
+# Windows-specific dependencies
+pywin32>=306; sys_platform == "win32"
+
+# Model download utilities
+huggingface-hub>=0.16.0

@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatterbox Audiobook Studio - Interface Preview</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 700;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 1.2em;
+        }
+        .tabs {
+            display: flex;
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .tab {
+            flex: 1;
+            padding: 15px 20px;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        .tab:hover {
+            background: #e2e8f0;
+        }
+        .tab.active {
+            background: white;
+            border-bottom: 3px solid #4f46e5;
+            font-weight: 600;
+        }
+        .content {
+            padding: 30px;
+        }
+        .section {
+            display: none;
+        }
+        .section.active {
+            display: block;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #374151;
+        }
+        textarea, input, select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+        textarea:focus, input:focus, select:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+        .btn {
+            background: #4f46e5;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background-color 0.3s ease;
+        }
+        .btn:hover {
+            background: #3730a3;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+        .card {
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+        .feature-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .feature-list li:last-child {
+            border-bottom: none;
+        }
+        .icon {
+            margin-right: 8px;
+        }
+        .preview-box {
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎧 Chatterbox Audiobook Studio</h1>
+            <p>Professional audiobook creation with voice cloning & multi-character support</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('basic')">🎤 Basic TTS</button>
+            <button class="tab" onclick="showTab('audiobook')">📚 Audiobook Creation</button>
+            <button class="tab" onclick="showTab('voice')">📚 Voice Library</button>
+            <button class="tab" onclick="showTab('multi')">🎭 Multi-Voice</button>
+        </div>
+
+        <div class="content">
+            <!-- Basic TTS Tab -->
+            <div id="basic" class="section active">
+                <h2>🎤 Basic Text-to-Speech</h2>
+                <div class="grid">
+                    <div>
+                        <div class="form-group">
+                            <label>Text to synthesize:</label>
+                            <textarea rows="4" placeholder="Enter your text here...">Welcome to Chatterbox Audiobook Studio! This is a sample text to demonstrate the interface.</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Language:</label>
+                            <select>
+                                <option>English</option>
+                                <option>Spanish</option>
+                                <option>French</option>
+                                <option>German</option>
+                                <option>Chinese</option>
+                                <option>Japanese</option>
+                                <option>Korean</option>
+                                <option>Bangla</option>
+                                <option>Arabic</option>
+                                <option>Hindi</option>
+                                <option>Portuguese</option>
+                                <option>Russian</option>
+                                <option>Italian</option>
+                                <option>Dutch</option>
+                                <option>Swedish</option>
+                                <option>Turkish</option>
+                                <option>Hebrew</option>
+                                <option>Polish</option>
+                                <option>Finnish</option>
+                                <option>Malay</option>
+                                <option>Norwegian</option>
+                                <option>Swahili</option>
+                                <option>Greek</option>
+                                <option>Danish</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Voice Profile:</label>
+                            <select>
+                                <option>None (Default)</option>
+                                <option>Example Narrator</option>
+                                <option>Professional Voice</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="card">
+                            <h4>🎛️ Parameters</h4>
+                            <div class="form-group">
+                                <label>Exaggeration: 0.5</label>
+                                <input type="range" min="0" max="2" value="0.5" step="0.1">
+                            </div>
+                            <div class="form-group">
+                                <label>CFG Weight: 0.5</label>
+                                <input type="range" min="0.1" max="1" value="0.5" step="0.1">
+                            </div>
+                            <div class="form-group">
+                                <label>Temperature: 0.8</label>
+                                <input type="range" min="0.1" max="2" value="0.8" step="0.1">
+                            </div>
+                        </div>
+                        <button class="btn">🎵 Generate Speech</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audiobook Creation Tab -->
+            <div id="audiobook" class="section">
+                <h2>📚 Audiobook Creation</h2>
+                <div class="grid">
+                    <div>
+                        <div class="form-group">
+                            <label>Text Content:</label>
+                            <textarea rows="6" placeholder="Paste your book content here...">Chapter 1: The Beginning
+
+It was a dark and stormy night. The wind howled through the trees, creating an eerie atmosphere that made everyone uneasy.
+
+The old house stood at the top of the hill, its windows dark and foreboding against the stormy sky.</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Or upload text file:</label>
+                            <input type="file" accept=".txt,.md">
+                        </div>
+                        <div class="form-group">
+                            <label>Project Name:</label>
+                            <input type="text" placeholder="My Audiobook" value="Sample Audiobook">
+                        </div>
+                    </div>
+                    <div>
+                        <div class="card">
+                            <h4>⚙️ Settings</h4>
+                            <div class="form-group">
+                                <label>Voice Profile:</label>
+                                <select>
+                                    <option>Example Narrator</option>
+                                    <option>Professional Voice</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Language:</label>
+                                <select>
+                                    <option>English</option>
+                                    <option>Spanish</option>
+                                    <option>French</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" checked> Enable Text Chunking</label>
+                            </div>
+                        </div>
+                        <button class="btn">📖 Create Audiobook</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Voice Library Tab -->
+            <div id="voice" class="section">
+                <h2>📚 Voice Library Management</h2>
+                <div class="grid">
+                    <div>
+                        <h4>🆕 Create New Voice</h4>
+                        <div class="form-group">
+                            <label>Voice Name:</label>
+                            <input type="text" placeholder="my_character_voice">
+                        </div>
+                        <div class="form-group">
+                            <label>Display Name:</label>
+                            <input type="text" placeholder="My Character Voice">
+                        </div>
+                        <div class="form-group">
+                            <label>Description:</label>
+                            <textarea rows="2" placeholder="Character notes and usage guidelines..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Reference Audio:</label>
+                            <input type="file" accept="audio/*">
+                        </div>
+                        <button class="btn">💾 Save Voice Profile</button>
+                    </div>
+                    <div>
+                        <div class="card">
+                            <h4>🎭 Existing Voices</h4>
+                            <select size="4" style="width: 100%; height: 120px;">
+                                <option>Example Narrator</option>
+                                <option>Professional Voice</option>
+                                <option>Deep Voice</option>
+                            </select>
+                            <div style="margin-top: 10px;">
+                                <button class="btn" style="width: 48%; font-size: 12px;">📥 Load</button>
+                                <button class="btn" style="width: 48%; font-size: 12px; background: #ef4444;">🗑️ Delete</button>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h4>🎛️ Voice Settings</h4>
+                            <div class="form-group">
+                                <label>Exaggeration: 0.5</label>
+                                <input type="range" min="0" max="2" value="0.5" step="0.1">
+                            </div>
+                            <div class="form-group">
+                                <label>CFG Weight: 0.5</label>
+                                <input type="range" min="0.1" max="1" value="0.5" step="0.1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Multi-Voice Tab -->
+            <div id="multi" class="section">
+                <h2>🎭 Multi-Voice Audiobook Creation</h2>
+                <div class="preview-box">
+                    <strong>Text Format Example:</strong><br>
+                    [Narrator] The detective entered the room cautiously.<br><br>
+                    [Detective] "Something doesn't feel right about this case."<br><br>
+                    [Suspect] "I told you everything I know!"<br><br>
+                    [Narrator] The tension was palpable as they stared at each other.
+                </div>
+                
+                <div class="grid">
+                    <div>
+                        <div class="form-group">
+                            <label>Multi-Voice Text:</label>
+                            <textarea rows="8" placeholder="[Character1] Hello there!
+
+[Character2] How are you doing today?
+
+[Narrator] They smiled at each other warmly."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Project Name:</label>
+                            <input type="text" placeholder="My Multi-Voice Story" value="Dialogue Sample">
+                        </div>
+                    </div>
+                    <div>
+                        <div class="card">
+                            <h4>🎭 Character Voice Mapping</h4>
+                            <table style="width: 100%; font-size: 12px;">
+                                <tr>
+                                    <td><strong>Character</strong></td>
+                                    <td><strong>Voice Profile</strong></td>
+                                </tr>
+                                <tr>
+                                    <td>Narrator</td>
+                                    <td><select><option>Example Narrator</option></select></td>
+                                </tr>
+                                <tr>
+                                    <td>Character1</td>
+                                    <td><select><option>Professional Voice</option></select></td>
+                                </tr>
+                                <tr>
+                                    <td>Character2</td>
+                                    <td><select><option>Deep Voice</option></select></td>
+                                </tr>
+                            </table>
+                        </div>
+                        <button class="btn">🎭 Create Multi-Voice Audiobook</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showTab(tabName) {
+            // Hide all sections
+            const sections = document.querySelectorAll('.section');
+            sections.forEach(section => section.classList.remove('active'));
+            
+            // Remove active class from all tabs
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach(tab => tab.classList.remove('active'));
+            
+            // Show selected section
+            document.getElementById(tabName).classList.add('active');
+            
+            // Add active class to clicked tab
+            event.target.classList.add('active');
+        }
+    </script>
+</body>
+</html>
