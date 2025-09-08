@@ -1,0 +1,18 @@
+[build]
+  command = "echo 'No build step required for Python app'"
+  publish = "."
+
+[build.environment]
+  PYTHON_VERSION = "3.11"
+
+[[redirects]]
+  from = "/*"
+  to = "/gradio_audiobook_app.py"
+  status = 200
+
+[functions]
+  directory = "netlify/functions"
+
+[dev]
+  command = "python gradio_audiobook_app.py"
+  port = 7860
