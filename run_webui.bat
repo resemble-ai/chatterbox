@@ -14,7 +14,7 @@ echo  ██║     ██╔══██║██╔══██║   ██║
 echo  ╚██████╗██║  ██║██║  ██║   ██║   ██║  ██║██████╔╝███████╗███████╗
 echo   ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═════╝ ╚══════╝╚══════╝
 echo.
-echo  🎧 Enhanced Audiobook Creation with Voice Library & Multi-Voice Support
+echo  🎧 Enhanced Audiobook Creation with Voice Library ^& Multi-Voice Support
 
 :: Set variables
 set "PROJECT_DIR=%~dp0"
