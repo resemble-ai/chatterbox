@@ -56,6 +56,37 @@ pip install -e .
 ```
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
+## Windows start scripts and Torch / RTX 5080 notes
+
+This repository includes helper Windows batch scripts in the project root to simplify installation and launching on Windows. The scripts are written to detect and (when necessary) make `conda` available, create or activate a `chatterbox` environment, and install a compatible PyTorch build for your GPU.
+
+- `Install.bat`: First-time setup helper that attempts to locate `conda`, create the `chatterbox` environment (Python 3.11), install the package in editable mode, and install basic Python dependencies. Run this once when setting up a new Windows machine.
+- `StartMenu.bat`: A simple menu wrapper that lets you choose to run the installer or launch the app for either RTX 5080 (nightly cu128) or classic Nvidia GPUs (conda cu121). It also opens the Anaconda download page if `conda` is not found.
+- `Start_5080.bat`: Targeted for Nvidia RTX 5080 (CUDA 12.8 / cu128). This script checks for an existing `torch` installation with a compatible CUDA tag and installs the nightly `torch` + CUDA 12.8 wheels via pip when needed. Use this script if you have an RTX 5080 or other GPUs that require the cu128 wheel.
+- `Start_Classic.bat`: Targeted for other Nvidia GPUs and installs PyTorch + `pytorch-cuda=12.1` via `conda` to provide a stable, compatible runtime. `Start_Classic.bat` will intentionally block on RTX 50xx GPUs and instruct users to use `Start_5080.bat` instead.
+
+Notes and manual commands
+
+- The `Start_5080.bat` script uses the following commands when it needs to install the cu128 nightly wheels:
+
+```shell
+pip uninstall -y torch torchvision torchaudio
+pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+```
+
+- The `Start_Classic.bat` script uses the conda package for CUDA 12.1 via:
+
+```shell
+pip uninstall -y torch torchvision torchaudio
+conda install -y pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+```
+
+- Both scripts perform a runtime check using Python to verify `torch.cuda.is_available()` and whether the installed `torch` matches the expected CUDA build tag before attempting to install. Ensure your Nvidia drivers and CUDA runtime are compatible with the target wheel you install.
+
+- These scripts assume Anaconda or Miniconda is present on the system. If `conda` is not available, `StartMenu.bat` will open the Anaconda download page and exit with instructions.
+
+If you prefer manual control, you can run the commands above yourself in an activated `chatterbox` conda environment.
+
 # Usage
 ```python
 import torchaudio as ta
