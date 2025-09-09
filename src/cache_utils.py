@@ -124,7 +124,7 @@ class ConditionalsCacheManager:
         return False
     
     
-    def _try_load_from_disk(self, cache_key, model, device, dtype, enable_memory_cache):
+    def _try_load_from_disk(self, cache_key, model, device, dtype, enable_memory_cache, quiet=False):
         """Try to load conditionals from disk cache"""
         cache_dir = get_cache_dir()
         cache_file = cache_dir.joinpath(cache_key + ".pt")
@@ -138,7 +138,8 @@ class ConditionalsCacheManager:
             kwargs = torch.load(cache_file, map_location=map_location, weights_only=True)
             cond_cls = Conditionals(T3Cond(**kwargs['t3']), kwargs['gen'])
         
-        logger.info(f"Loaded conditionals from disk cache: {cache_key}")
+        if not quiet:
+            logger.info(f"Loaded conditionals from disk cache: {cache_key}")
 
         # Move to target device and ensure correct dtype
         cond_cls = cond_cls.to(device)
@@ -151,12 +152,26 @@ class ConditionalsCacheManager:
         if enable_memory_cache:
             with self._cache_lock:
                 self._memory_cache[cache_key] = cond_cls
-                logger.info(f"Cached conditionals in memory: {cache_key}")
-        
+                if not quiet:
+                    logger.info(f"Cached conditionals in memory: {cache_key}")
+
         with self._cache_lock:
             self._current_loaded_cache_key = cache_key
 
         return True
+    
+
+    def get_cache_stats(self):
+        """Get cache statistics"""
+        with self._cache_lock:
+            memory_keys = list(self._memory_cache.keys())
+            
+            return {
+                'memory_cache_size': len(self._memory_cache),
+                'current_loaded_key': self._current_loaded_cache_key,
+                'pending_disk_saves': len(self._disk_save_queue),
+                'memory_cache_keys': memory_keys
+            }
 
 
 # Global cache manager instance
@@ -236,3 +251,17 @@ def save_torchaudio_wav(wav_tensor, sr, audio_path, uuid):
         warnings.simplefilter("ignore")
         torchaudio.save(path, wav_tensor.cpu(), sr, encoding="PCM_S")
     return path.resolve()
+
+def init_conditional_memory_cache(model, device, dtype) -> None:
+    """Initialize latent cache from disk for all supported languages."""
+    latent_dir = get_cache_dir()
+    for filename in latent_dir.glob("*.pt"):
+        filestem = filename.stem
+        if len(filestem.split("_")) < 3:
+            continue
+        _cache_manager._try_load_from_disk(filestem, model, device, dtype, enable_memory_cache=True, quiet=True)
+
+    stats = _cache_manager.get_cache_stats()
+
+    logger.info(
+        f"Loaded conditionals from disk with {stats['memory_cache_size']} entries")

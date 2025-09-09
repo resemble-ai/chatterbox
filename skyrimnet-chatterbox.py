@@ -1,18 +1,19 @@
-from argparse import ArgumentParser
 import functools
-from pathlib import Path
-import random
-from xml.parsers.expat import model
-import numpy as np
-import torch
 import gradio as gr
-from sys import (stdout)
+import numpy as np
+import random
+import torch
+
+from argparse import ArgumentParser
+from pathlib import Path
+from xml.parsers.expat import model
 from time import  perf_counter_ns
 from src.cache_utils import (
     load_conditionals_cache,
-   save_conditionals_cache,
-   get_cache_key,
-   save_torchaudio_wav
+    save_conditionals_cache,
+    get_cache_key,
+    save_torchaudio_wav,
+    init_conditional_memory_cache
 )
 
 from loguru import logger
@@ -308,6 +309,8 @@ def parse_arguments():
 if __name__ == "__main__":
     args = parse_arguments()
     MULTILINGUAL = args.multilingual
+    model = load_model()
+    init_conditional_memory_cache(model, DEVICE, DTYPE)
     demo.queue(
         max_size=50,
         default_concurrency_limit=1,
