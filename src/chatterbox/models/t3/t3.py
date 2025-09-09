@@ -450,7 +450,7 @@ class T3(nn.Module):
             "Cannot process large input when cache already has content"
 
         length_guesstimate = text_tokens.shape[1] * 2
-        print(f"Estimated token count: {length_guesstimate}")
+        #print(f"Estimated token count: {length_guesstimate}")
 
         # ---- Pad input_embeds to fixed length for compilation stability ----
         # This ensures that input_embeds always has the same shape for torch.compile
@@ -464,7 +464,7 @@ class T3(nn.Module):
 
             return inputs_embeds
         
-        print(f"Input embeds shape before padding: {inputs_embeds.shape}")
+        #print(f"Input embeds shape before padding: {inputs_embeds.shape}")
 
         inputs_embeds = pad_to_fixed_length(inputs_embeds, TOKEN_LIMIT)
 
@@ -499,7 +499,7 @@ class T3(nn.Module):
             start = time.time()
             torch.cuda.synchronize() # For benchmarking to have correct it/s
         stride_length = stride_length if "stride" in generate_token_backend else 1
-        for i in tqdm(range(max_new_tokens // stride_length), desc="Sampling", dynamic_ncols=True): 
+        for i in tqdm(range(max_new_tokens // stride_length), desc="Sampling", dynamic_ncols=True, disable=not benchmark_t3):
             i_tensor = indices[i * stride_length]
             # Check for EOS token.
             if i * stride_length > length_guesstimate and i % (20 // stride_length) == 0:

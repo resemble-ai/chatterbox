@@ -47,8 +47,10 @@ def load_model():
         torch.cuda.empty_cache()
     return MODEL
 
+def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration=0.5, temperature=0.8, seed_num=0, cfgw=0, cache_uuid=0):
 
-def generate(model, text, audio_prompt_path=None, exaggeration=0.5, temperature=0.8, seed_num=0, cfgw=0, cache_uuid=0, language_id="en"):
+    logger.info(f"generate called for: \"{text}\", {Path(audio_prompt_path).stem if audio_prompt_path else "No ref audio"}, uuid: {cache_uuid}, exaggeration: {exaggeration}")  
+
     enable_memory_cache = True
     enable_disk_cache = True
     cache_voice = True
@@ -84,8 +86,8 @@ def generate(model, text, audio_prompt_path=None, exaggeration=0.5, temperature=
         if cache_voice:
             model._cached_prompt_path = audio_prompt_path
     conditional_start_time = perf_counter_ns()
-    logger.info(f"Conditionals prepared. Time: {(conditional_start_time - func_start_time) / 1_000_000_000:.2f}s")
-    generate_start_time = perf_counter_ns()
+    logger.info(f"Conditionals prepared. Time: {(conditional_start_time - func_start_time) / 1_000_000:.4f}ms")
+    #generate_start_time = perf_counter_ns()
     wav = model.generate(
         text,
         #audio_prompt_path=audio_prompt_path,
@@ -106,16 +108,19 @@ def generate(model, text, audio_prompt_path=None, exaggeration=0.5, temperature=
             #"benchmark_t3": True, # Synchronizes CUDA to get the real it/s 
         }
     )
-    logger.info(f"Generation completed. Time: {(perf_counter_ns() - generate_start_time) / 1_000_000_000:.2f}s")
+    #logger.info(f"Generation completed. Time: {(perf_counter_ns() - generate_start_time) / 1_000_000_000:.2f}s")
     # Log execution time
     func_end_time = perf_counter_ns()
 
     total_duration_s = (func_end_time - func_start_time)  / 1_000_000_000  # Convert nanoseconds to seconds
     wav_length = wav.shape[-1]   / model.sr
 
-    logger.info(f"Generated audio length: {wav_length:.2f} seconds {model.sr}. Speed: {wav_length / total_duration_s:.2f}x")
-    wave_file = str(save_torchaudio_wav(wav ,model.sr, audio_path=audio_prompt_path, uuid=cache_uuid))
+    logger.info(f"Generated audio: {wav_length:.2f}s {model.sr/1000:.2f}kHz in {total_duration_s:.2f}s. Speed: {wav_length / total_duration_s:.2f}x")
+    wave_file = str(save_torchaudio_wav(wav.cpu(), model.sr, audio_path=audio_prompt_path, uuid=cache_uuid))
+    del wav
+    torch.cuda.empty_cache()
     return wave_file
+
     #return (model.sr, wav.squeeze(0).cpu().numpy())
 
 ### SkyrimNet Zonos Emulated
@@ -155,13 +160,13 @@ def generate_audio(
     unconditional_keys: list = None,
     chunked=False,
 ):
-    logger.info(f"generate_audio called for: {Path(speaker_audio).stem } with {text}")  
+    #logger.info(f"generate_audio called for: {Path(speaker_audio).stem } with {text}, uuid: {uuid}, exaggeration: {0.55}")  
 
     #seed_num = 0 if randomize_seed else cpp_uuid_to_seed(uuid)
     seed_num = cpp_uuid_to_seed(uuid)
     return generate(model=MODEL, text=text, language_id=language, audio_prompt_path=speaker_audio, seed_num=seed_num, cache_uuid=uuid,
                     exaggeration=0.55,
-                    temperature=0.8,
+                    temperature=0.9,
                     cfgw=0
                     ), uuid
 

@@ -2,146 +2,187 @@ import threading
 import torch
 import datetime
 import functools
-import hashlib
 import os
-import time
 import warnings
 from pathlib import Path
 
 import psutil
 import torchaudio
+from loguru import logger
 from torch.serialization import safe_globals
 
 from src.chatterbox.models.t3.modules.cond_enc import T3Cond
 from src.chatterbox.tts import Conditionals
 
-# Global in-memory cache for conditionals
-_conditionals_memory_cache = {}
-_cache_lock = threading.Lock()
-_current_loaded_cache_key = None  # Track currently loaded conditionals
 
-
-def _save_conditionals_to_disk(cache_key, cond_cls):
-    """Non-blocking worker function to save conditionals to disk"""
-    try:
+class ConditionalsCacheManager:
+    """Thread-safe cache manager for conditionals with memory and disk storage"""
+    
+    def __init__(self):
+        self._memory_cache = {}
+        self._cache_lock = threading.RLock()  # RLock allows re-entrant locking
+        self._current_loaded_cache_key = None
+        self._disk_save_queue = []  # Track pending disk saves
+        
+    def get_current_cache_key(self):
+        """Get the currently loaded cache key"""
+        with self._cache_lock:
+            return self._current_loaded_cache_key
+    
+    def is_cache_key_loaded(self, cache_key):
+        """Check if the given cache key is currently loaded"""
+        with self._cache_lock:
+            return self._current_loaded_cache_key == cache_key
+    
+    def _save_to_disk_worker(self, cache_key, cond_cls):
+        """Non-blocking worker function to save conditionals to disk"""
+        try:
+            cache_dir = get_cache_dir()
+            cache_file = cache_dir.joinpath(cache_key + ".pt")
+            arg_dict = dict(
+                t3=cond_cls.t3.__dict__,
+                gen=cond_cls.gen
+            )
+            torch.save(arg_dict, cache_file)
+            logger.info(f"Saved conditionals to disk cache: {cache_key}")
+            
+            # Remove from pending queue
+            with self._cache_lock:
+                if cache_key in self._disk_save_queue:
+                    self._disk_save_queue.remove(cache_key)
+                    
+        except Exception as e:
+            logger.error(f"Failed to save conditionals to disk cache: {e}")
+            with self._cache_lock:
+                if cache_key in self._disk_save_queue:
+                    self._disk_save_queue.remove(cache_key)
+    
+    def save(self, cache_key, cond_cls, enable_memory_cache=True, enable_disk_cache=True):
+        """Save prepared conditionals to memory and/or disk cache"""
+        if cache_key is None:
+            return False
+        
+        try:
+            with self._cache_lock:
+                if enable_memory_cache:
+                    self._memory_cache[cache_key] = cond_cls.clone()
+                    logger.info(f"Saved conditionals object to memory cache: {cache_key}")
+                
+                self._current_loaded_cache_key = cache_key
+                
+                # Queue disk save (non-blocking)
+                if enable_disk_cache and cache_key not in self._disk_save_queue:
+                    self._disk_save_queue.append(cache_key)
+                    threading.Thread(
+                        target=self._save_to_disk_worker,
+                        args=(cache_key, cond_cls),
+                        daemon=True,
+                        name=f"DiskCacheSave-{cache_key}"
+                    ).start()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save conditionals cache: {e}")
+            return False
+    
+    def load(self, cache_key, model, device, dtype, enable_memory_cache=True, enable_disk_cache=True):
+        """Load prepared conditionals from memory or disk cache"""
+        if cache_key is None:
+            logger.info("No cache key provided, cannot load conditionals")
+            return False
+        
+        if self.is_cache_key_loaded(cache_key):
+            logger.info(f"Conditionals already loaded for cache key: {cache_key}")
+            return True
+        
+        try:
+            if enable_memory_cache and self._try_load_from_memory(cache_key, model, device, dtype):
+                return True
+            
+            if enable_disk_cache and self._try_load_from_disk(cache_key, model, device, dtype, enable_memory_cache):
+                return True
+            logger.info(f"No cached conditionals found for key: {cache_key}")    
+            return False
+            
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc())
+            logger.error(f"Failed to load conditionals cache: {e}")
+            return False
+    
+    def _try_load_from_memory(self, cache_key, model, device, dtype):
+        """Try to load conditionals from memory cache with simplified single-device optimization"""
+        with self._cache_lock:
+            if cache_key in self._memory_cache:
+                cached_conditionals = self._memory_cache[cache_key]
+                
+                model.set_conditionals(cached_conditionals)
+                logger.info(f"Loaded conditionals from memory cache: {cache_key}")
+                self._current_loaded_cache_key = cache_key
+                return True
+        return False
+    
+    
+    def _try_load_from_disk(self, cache_key, model, device, dtype, enable_memory_cache):
+        """Try to load conditionals from disk cache"""
         cache_dir = get_cache_dir()
         cache_file = cache_dir.joinpath(cache_key + ".pt")
-        arg_dict = dict(
-            t3=cond_cls.t3.__dict__,
-            gen=cond_cls.gen
-        )
-        torch.save(arg_dict, cache_file)
+        
+        if not cache_file.exists():
+            logger.info(f"No disk cache file found for key: {cache_key} in {cache_file}")
+            return False
+        
+        with safe_globals([T3Cond]):
+            map_location = torch.device("cuda")
+            kwargs = torch.load(cache_file, map_location=map_location, weights_only=True)
+            cond_cls = Conditionals(T3Cond(**kwargs['t3']), kwargs['gen'])
+        
+        logger.info(f"Loaded conditionals from disk cache: {cache_key}")
 
-        print(f"Saved conditionals cache: {cache_key}")
+        # Move to target device and ensure correct dtype
+        cond_cls = cond_cls.to(device)
+        if hasattr(cond_cls.t3, 'speaker_emb') and cond_cls.t3.speaker_emb is not None:
+            cond_cls.t3.speaker_emb = cond_cls.t3.speaker_emb.to(dtype=dtype)
 
-    except Exception as e:
-        print(f"Failed to save conditionals cache: {e}")
+        if hasattr(cond_cls, 't3'):
+            model.set_conditionals(cond_cls)
+
+        if enable_memory_cache:
+            with self._cache_lock:
+                self._memory_cache[cache_key] = cond_cls
+                logger.info(f"Cached conditionals in memory: {cache_key}")
+        
+        with self._cache_lock:
+            self._current_loaded_cache_key = cache_key
+
+        return True
+
+
+# Global cache manager instance
+_cache_manager = ConditionalsCacheManager()
+
 
 def save_conditionals_cache(cache_key, cond_cls, enable_memory_cache=True, enable_disk_cache=True):
     """Save prepared conditionals to disk (non-blocking) and memory"""
-    global _current_loaded_cache_key  # Add this line
-    
-    if cache_key is None:
-        return
-
-    try:
-        # Save to memory cache (blocking, but fast)
-        if enable_memory_cache:
-            with _cache_lock:
-                _conditionals_memory_cache[cache_key] = {
-                    't3_dict': cond_cls.t3.__dict__.copy(),
-                    'gen': cond_cls.gen
-                }
-                print(f"Saved conditionals to memory cache: {cache_key}")
-
-        # Save to disk (non-blocking)
-        if enable_disk_cache:
-            threading.Thread(
-                target=_save_conditionals_to_disk,
-                args=(cache_key, cond_cls),
-                daemon=True
-            ).start()
-
-        # Update tracking to reflect the currently active conditionals
-        _current_loaded_cache_key = cache_key  # Add this line
-
-    except Exception as e:
-        print(f"Failed to prepare conditionals cache: {e}")
+    return _cache_manager.save(cache_key, cond_cls, enable_memory_cache, enable_disk_cache)
 
 
 def load_conditionals_cache(cache_key, model, device, dtype, enable_memory_cache=True, enable_disk_cache=True):
     """Load prepared conditionals from memory or disk, but only if they've changed"""
-    global _current_loaded_cache_key
+    return _cache_manager.load(cache_key, model, device, dtype, enable_memory_cache, enable_disk_cache)
 
-    if cache_key is None:
-        return None
 
-    # Check if we already have the right conditionals loaded
-    if _current_loaded_cache_key == cache_key:
-        print(f"Conditionals already loaded for cache key: {cache_key}")
-        return True
+def get_current_cache_key():
+    """Get the currently loaded cache key"""
+    return _cache_manager.get_current_cache_key()
 
-    try:
-        # Try memory cache first (fastest)
-        if enable_memory_cache:
-            with _cache_lock:
-                if cache_key in _conditionals_memory_cache:
-                    cache_data = _conditionals_memory_cache[cache_key]
 
-                    # Restore conditionals from dict
-                    if 't3_dict' in cache_data and 'gen' in cache_data:
-                        # Recreate T3Cond from dict
-                        t3_cond = T3Cond(**cache_data['t3_dict'])
-                        t3_cond = t3_cond.to(device=device, dtype=dtype)
-
-                        # Create new Conditionals object
-                        conditionals = Conditionals(t3_cond, cache_data['gen'])
-                        model.set_conditionals(conditionals)
-
-                    print(f"Loaded conditionals from memory cache: {cache_key}")
-                    _current_loaded_cache_key = cache_key  # Update tracking
-                    return True
-
-        # Try disk cache if memory cache missed or is disabled
-        if enable_disk_cache:
-            cache_dir = get_cache_dir()
-            cache_file = cache_dir.joinpath(cache_key + ".pt")
-
-            if not cache_file.exists():
-                return None
-
-            with safe_globals([T3Cond]):
-                #cond_cls = Conditionals.load(cls=Conditionals,fpath=cache_file)
-                map_location = torch.device("cuda")
-                kwargs = torch.load(cache_file, map_location=map_location, weights_only=True)
-                cond_cls =  Conditionals(T3Cond(**kwargs['t3']), kwargs['gen'])
-            print(f"loaded cond {cond_cls.__sizeof__()}")
-            # Restore conditionals to model
-            if hasattr(cond_cls, 't3'):
-               model.set_conditionals(cond_cls)
-               print(f"set conditionals")
-
-            # Store in memory cache for next time (if memory cache is enabled)
-            if enable_memory_cache:
-                cache_dict = dict(
-                    t3=cond_cls.__dict__,
-                    gen=cond_cls.gen
-                )
-                with _cache_lock:
-                    _conditionals_memory_cache[cache_key] = cache_dict
-
-            print(f"Loaded conditionals cache: {cache_key}")
-            _current_loaded_cache_key = cache_key  # Update tracking
-            return True
-
-        return None
-
-    except Exception as e:
-        import traceback
-        print(traceback.format_exc())
-        print(f"Failed to load conditionals cache: {e}")
-        return None
+def is_cache_key_loaded(cache_key):
+    """Check if the given cache key is currently loaded"""
+    return _cache_manager.is_cache_key_loaded(cache_key)
     
+
 @functools.cache
 def get_process_creation_time():
     """Get the process creation time as a datetime object"""
@@ -157,18 +198,12 @@ def get_cache_dir():
     return cache_dir
 
 @functools.cache
-def get_cache_key(audio_path, uuid, exaggeration=None):
+def get_cache_key(audio_path, uuid, exaggeration: float = None):
     """Generate a cache key based on audio file, UUID, and exaggeration"""
     if audio_path is None:
         return None
 
-    # Extract just the filename without extension as prefix
-    try:
-        filename = Path(audio_path).stem  # Gets filename without extension
-        # Remove any temp directory prefixes, just keep the actual filename
-        cache_prefix = filename
-    except Exception:
-        cache_prefix = "unknown"
+    cache_prefix = Path(audio_path).stem
 
     # Convert UUID to hex string for readability
     try:
@@ -176,16 +211,10 @@ def get_cache_key(audio_path, uuid, exaggeration=None):
     except (TypeError, ValueError):
         uuid_hex = str(uuid)
 
-    # Create cache key: prefix_uuid_exaggeration
     if exaggeration is None:
         cache_key = f"{cache_prefix}_{uuid_hex}"
     else:
         cache_key = f"{cache_prefix}_{uuid_hex}_{exaggeration:.2f}"
-
-    # Use MD5 hash if the key gets too long (over 100 chars)
-    if len(cache_key) > 100:
-        cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
-        return f"{cache_prefix}_{cache_hash}"
 
     return cache_key
 
@@ -199,11 +228,11 @@ def get_wavout_dir():
 def save_torchaudio_wav(wav_tensor, sr, audio_path, uuid):
     """Save a tensor as a WAV file using torchaudio"""
 
-    formatted_now_time = datetime.datetime.fromtimestamp(time.time()).strftime("%Y%m%d_%H%M%S")
+    formatted_now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     filename = f"{formatted_now_time}_{get_cache_key(audio_path, uuid)}"
     path = get_wavout_dir() / f"{filename}.wav"
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        torchaudio.save(path, wav_tensor.to("cpu"), sr, encoding="PCM_S", bits_per_sample=16)
+        warnings.simplefilter("ignore")
+        torchaudio.save(path, wav_tensor.cpu(), sr, encoding="PCM_S")
     return path.resolve()

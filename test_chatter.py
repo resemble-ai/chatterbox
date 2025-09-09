@@ -75,7 +75,7 @@ def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num
         if cache_voice:
             model._cached_prompt_path = audio_prompt_path
     conditional_start_time = perf_counter_ns()
-    logger.info(f"Conditionals prepared. Time: {(conditional_start_time - func_start_time) / 1_000_000_000:.2f}s")
+    logger.info(f"Conditionals prepared. Time: {(conditional_start_time - func_start_time) / 1_000_000:.4f}ms")
     generate_start_time = perf_counter_ns()
     wav = model.generate(
         text,
@@ -97,29 +97,33 @@ def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num
             #"benchmark_t3": True, # Synchronizes CUDA to get the real it/s 
         }
     )
-    logger.info(f"Generation completed. Time: {(perf_counter_ns() - generate_start_time) / 1_000_000_000:.2f}s")
+    #logger.info(f"Generation completed. Time: {(perf_counter_ns() - generate_start_time) / 1_000_000_000:.2f}s")
     # Log execution time
     func_end_time = perf_counter_ns()
 
     total_duration_s = (func_end_time - func_start_time)  / 1_000_000_000  # Convert nanoseconds to seconds
     wav_length = wav.shape[-1]   / model.sr
 
-    logger.info(f"Generated audio length: {wav_length:.2f} seconds {model.sr}. Speed: {wav_length / total_duration_s:.2f}x")
-    wave_file = str(save_torchaudio_wav(wav ,model.sr, audio_path=audio_prompt_path, uuid=cache_uuid))
+    logger.info(f"Generated audio: {wav_length:.2f}s {model.sr/1000:.2f}kHz in {total_duration_s:.2f}s. Speed: {wav_length / total_duration_s:.2f}x")
+    wave_file = str(save_torchaudio_wav(wav.cpu(), model.sr, audio_path=audio_prompt_path, uuid=cache_uuid))
+    del wav
+    torch.cuda.empty_cache()
     return None #wave_file
     #return (model.sr, wav.squeeze(0).cpu().numpy())
 
 
 if __name__ == "__main__":
-    shutil.rmtree(Path("cache").joinpath("conditionals"), ignore_errors=True)
-    test_text= "Now let's make my mum's favourite. So three mars bars into the pan. Then we add the tuna and just stir for a bit, just let the chocolate and fish infuse. A sprinkle of olive oil and some tomato ketchup. Now smell that. Oh boy this is going to be incredible."
+    #shutil.rmtree(Path("cache").joinpath("conditionals"), ignore_errors=True)
+    #test_text= "Now let's make my mum's favourite. So three mars bars into the pan. Then we add the tuna and just stir for a bit, just let the chocolate and fish infuse. A sprinkle of olive oil and some tomato ketchup. Now smell that. Oh boy this is going to be incredible."
+    test_text= "Now let's make my mum's favourite. Oh boy this is going to be incredible."
     test_asset2=Path.cwd().joinpath("assets", "dlc1seranavoice.wav")
-    #test_asset = Path.cwd().joinpath("assets", "fishaudio_horror.wav")
+    test_asset = Path.cwd().joinpath("assets", "fishaudio_horror.wav")
     model = load_model()
     #wavfile = generate(model, test_text, None, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
-    #wavfile = generate(model, test_text, test_asset, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
-    #wavfile = generate(model, test_text, test_asset, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
-    wavfile = generate(model, test_text, test_asset2, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
-    wavfile = generate(model, test_text, test_asset2, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
+    wavfile = generate(model, test_text, test_asset, exaggeration=0.65, temperature=0.9, seed_num=420, cfgw=0)
+    wavfile = generate(model, test_text, test_asset2, exaggeration=0.65, temperature=0.9, seed_num=420, cfgw=0)
+    wavfile = generate(model, test_text, test_asset, exaggeration=0.65, temperature=0.9, seed_num=420, cfgw=0)
+    wavfile = generate(model, test_text, test_asset, exaggeration=0.65, temperature=0.9, seed_num=420, cfgw=0)
+    wavfile = generate(model, test_text, test_asset2, exaggeration=0.65, temperature=0.9, seed_num=420, cfgw=0)
     #print(f"Generated wav file: {wavfile}")
 
