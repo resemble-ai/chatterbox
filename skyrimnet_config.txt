@@ -11,6 +11,7 @@
 # TEMPERATURE: Controls how creative/random the voice sounds
 # Lower = more predictable, Higher = more varied/expressive
 # Range: 0.00 to 2.00, Recommended: 0.8
+# Note: This uses the "linear" slider in SkyrimNet UI when set to "api"
 temperature = default
 
 # MIN_P: Modern way to control speech quality (newer method)  

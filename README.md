@@ -61,23 +61,27 @@ Currently these values are hardcoded.
 
 Edit `skyrimnet_config.txt` if you would like to use the controls from the SkyrimNet UI.
 
+Be sure to change the values in SkyrimNet UI before loading your save, errors will occur with some values.
+Randomize Seed should usually be Disabled.
 
-- TEMPERATURE: Controls how creative/random the voice sounds
+All other Audio fields are ignored.
+
 
 - MIN_P: Modern way to control speech quality (newer method)  
 
 - TOP_P: Classic way to control speech variety (older method)
+
+- TEMPERATURE: Controls how creative/random the voice sounds
+ *Note: This uses the "linear" slider in SkyrimNet UI when set to "api"
 
 - REPETITION_PENALTY: Stops the voice from repeating words too much
   * Note: This uses the 'confidence' slider in SkyrimNet UI when set to "api"
 
 - CFG_WEIGHT: Controls speech pacing and guidance strength
   * Note: This uses the "cfg_scale" slider in SkyrimNet UI when set to "api"
-cfg_weight = default
 
 - EXAGGERATION: Controls emotion intensity and expression
   *  Note: This uses the "quadratic" slider in SkyrimNet UI when set to "api"
-exaggeration = default
 
 
 ---
