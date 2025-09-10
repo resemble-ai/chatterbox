@@ -48,6 +48,37 @@ SUPPORTED_LANGUAGES = {
   "zh": "Chinese",
 }
 
+# Note on values used for voice generation:
+
+Currently these values are hardcoded.
+
+- temperature = 0.9
+- min_p = 0.03
+- top_p = 0.8
+- repetition_penalty = 2.0
+- cfg_weight = 0.0
+- exaggeration = 0.7
+
+Edit `skyrimnet_config.txt` if you would like to use the controls from the SkyrimNet UI.
+
+
+- TEMPERATURE: Controls how creative/random the voice sounds
+
+- MIN_P: Modern way to control speech quality (newer method)  
+
+- TOP_P: Classic way to control speech variety (older method)
+
+- REPETITION_PENALTY: Stops the voice from repeating words too much
+  * Note: This uses the 'confidence' slider in SkyrimNet UI when set to "api"
+
+- CFG_WEIGHT: Controls speech pacing and guidance strength
+  * Note: This uses the "cfg_scale" slider in SkyrimNet UI when set to "api"
+cfg_weight = default
+
+- EXAGGERATION: Controls emotion intensity and expression
+  *  Note: This uses the "quadratic" slider in SkyrimNet UI when set to "api"
+exaggeration = default
+
 
 ---
 

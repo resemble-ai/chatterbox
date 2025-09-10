@@ -17,13 +17,100 @@ from src.cache_utils import (
 )
 
 from loguru import logger
-import warnings
-warnings.filterwarnings("ignore", message=" UserWarning: In 2.9, this function's implementation will be changed to use torchaudio.save_with_torchcodec` under the hood.")
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
 MODEL = None
 MULTILINGUAL = False
+
+# Configuration cache
+_CONFIG_CACHE = None
+_CONFIG_FILE_PATH = "skyrimnet_config.txt"
+
+def load_skyrimnet_config():
+    """Load configuration from skyrimnet_config.txt with error handling"""
+    global _CONFIG_CACHE
+    
+    if _CONFIG_CACHE is not None:
+        return _CONFIG_CACHE
+    
+    # Default configuration
+    default_config = {
+        'temperature': 0.8,
+        'min_p': 0.05, 
+        'top_p': 1.0,
+        'repetition_penalty': 2.0,
+        'cfg_weight': 0.0,  # Speed optimized default
+        'exaggeration': 0.55
+    }
+    
+    config_mode = {
+        'temperature': 'default',
+        'min_p': 'default',
+        'top_p': 'default', 
+        'repetition_penalty': 'default',
+        'cfg_weight': 'default',
+        'exaggeration': 'default'
+    }
+    
+    try:
+        config_path = Path(_CONFIG_FILE_PATH)
+        if not config_path.exists():
+            logger.warning(f"Config file {_CONFIG_FILE_PATH} not found, using hardcoded defaults")
+            _CONFIG_CACHE = (default_config, config_mode)
+            return _CONFIG_CACHE
+            
+        with open(config_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            
+        for line in lines:
+            line = line.strip()
+            # Skip comments and empty lines
+            if not line or line.startswith('#'):
+                continue
+                
+            if '=' in line:
+                key, value = line.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+                
+                if key in config_mode:
+                    if value.lower() == 'default':
+                        config_mode[key] = 'default'
+                    elif value.lower() == 'api':
+                        config_mode[key] = 'api'
+                    else:
+                        try:
+                            custom_value = float(value)
+                            config_mode[key] = 'custom'
+                            default_config[key] = custom_value
+                            logger.info(f"Using custom {key} value: {custom_value}")
+                        except ValueError:
+                            logger.warning(f"Invalid value '{value}' for {key}, using default")
+                            
+        logger.info(f"Loaded config: {config_mode}")
+        _CONFIG_CACHE = (default_config, config_mode)
+        return _CONFIG_CACHE
+        
+    except Exception as e:
+        logger.error(f"Error reading config file {_CONFIG_FILE_PATH}: {e}, using hardcoded defaults")
+        _CONFIG_CACHE = (default_config, config_mode)
+        return _CONFIG_CACHE
+
+def get_config_value(param_name, api_value, defaults, modes):
+    """Get the appropriate value based on configuration mode"""
+    mode = modes.get(param_name, 'default')
+    
+    if mode == 'api':
+        return api_value if api_value is not None else defaults[param_name]
+    else:  # 'default' or 'custom'
+        return defaults[param_name]
+
+def reload_config():
+    """Force reload of configuration file"""
+    global _CONFIG_CACHE
+    _CONFIG_CACHE = None
+    return load_skyrimnet_config()
 
 def set_seed(seed: int):
     torch.manual_seed(seed)
@@ -48,7 +135,7 @@ def load_model():
         torch.cuda.empty_cache()
     return MODEL
 
-def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration=0.5, temperature=0.8, seed_num=0, cfgw=0, cache_uuid=0):
+def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration=0.5, temperature=0.8, seed_num=0, cfgw=0, cache_uuid=0, min_p=0.05, top_p=1.0, repetition_penalty=1.2):
 
     logger.info(f"generate called for: \"{text}\", {Path(audio_prompt_path).stem if audio_prompt_path else "No ref audio"}, uuid: {cache_uuid}, exaggeration: {exaggeration}")  
 
@@ -95,6 +182,9 @@ def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration
         exaggeration=exaggeration,
         temperature=temperature,
         cfg_weight=cfgw,
+        min_p=min_p,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
         t3_params={
             #"initial_forward_pass_backend": "eager", # slower - default
             #"initial_forward_pass_backend": "cudagraphs", # speeds up set up
@@ -161,15 +251,46 @@ def generate_audio(
     unconditional_keys: list = None,
     chunked=False,
 ):
-    #logger.info(f"generate_audio called for: {Path(speaker_audio).stem } with {text}, uuid: {uuid}, exaggeration: {0.55}")  
-
-    #seed_num = 0 if randomize_seed else cpp_uuid_to_seed(uuid)
+    """Generate audio using configurable parameter system"""
+    
+    # Load configuration
+    default_config, config_modes = load_skyrimnet_config()
+    
+    # Map API parameters to our config system
+    # Note: confidence maps to repetition_penalty in SkyrimNet UI
+    api_temperature = linear if linear is not None else None
+    api_min_p = min_p if min_p is not None else None
+    api_top_p = top_p if top_p is not None else None  
+    api_repetition_penalty = confidence if confidence is not None else None
+    api_cfg_weight = cfg_scale if cfg_scale is not None else None
+    api_exaggeration = quadratic if quadratic is not None else None
+    
+    # Get final values based on configuration
+    final_temperature = get_config_value('temperature', api_temperature, default_config, config_modes)
+    final_min_p = get_config_value('min_p', api_min_p, default_config, config_modes)
+    final_top_p = get_config_value('top_p', api_top_p, default_config, config_modes)
+    final_repetition_penalty = get_config_value('repetition_penalty', api_repetition_penalty, default_config, config_modes)
+    final_cfg_weight = get_config_value('cfg_weight', api_cfg_weight, default_config, config_modes)
+    final_exaggeration = get_config_value('exaggeration', api_exaggeration, default_config, config_modes)
+    
+    # Log the final values for debugging
+    logger.debug(f"Final parameters - temp: {final_temperature}, min_p: {final_min_p}, top_p: {final_top_p}, rep_penalty: {final_repetition_penalty}, cfg_weight: {final_cfg_weight}, exaggeration: {final_exaggeration}")
+    
     seed_num = cpp_uuid_to_seed(uuid)
-    return generate(model=MODEL, text=text, language_id=language, audio_prompt_path=speaker_audio, seed_num=seed_num, cache_uuid=uuid,
-                    exaggeration=0.55,
-                    temperature=0.9,
-                    cfgw=0
-                    ), uuid
+    return generate(
+        model=MODEL, 
+        text=text, 
+        language_id=language, 
+        audio_prompt_path=speaker_audio, 
+        seed_num=seed_num, 
+        cache_uuid=uuid,
+        exaggeration=final_exaggeration,
+        temperature=final_temperature,
+        cfgw=final_cfg_weight,
+        min_p=final_min_p,
+        top_p=final_top_p,
+        repetition_penalty=final_repetition_penalty
+    ), uuid
 
 with gr.Blocks() as demo:
     model_state = gr.State(None)  # Loaded once per session/user
@@ -189,6 +310,9 @@ with gr.Blocks() as demo:
             with gr.Accordion("More options", open=False):
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")
                 temp = gr.Slider(0.05, 5, step=.05, label="temperature", value=.8)
+                min_p = gr.Slider(0.00, 1.00, step=0.01, label="min_p || Newer Sampler. Recommend 0.02 > 0.1. Handles Higher Temperatures better. 0.00 Disables", value=0.05)
+                top_p = gr.Slider(0.00, 1.00, step=0.01, label="top_p || Original Sampler. 1.0 Disables(recommended). Original 0.8", value=1.00)
+                repetition_penalty = gr.Slider(1.00, 2.00, step=0.1, label="repetition_penalty", value=1.2)
             language_id = gr.Dropdown([
                 "ar",
                 "da",
@@ -231,6 +355,9 @@ with gr.Blocks() as demo:
             temp,
             seed_num,
             cfg_weight,
+            min_p,
+            top_p,
+            repetition_penalty,
         ],
         outputs=audio_output,
     )
@@ -309,6 +436,11 @@ def parse_arguments():
 if __name__ == "__main__":
     args = parse_arguments()
     MULTILINGUAL = args.multilingual
+    
+    # Load configuration at startup
+    logger.info("Loading SkyrimNet configuration...")
+    load_skyrimnet_config()
+    
     model = load_model()
     init_conditional_memory_cache(model, DEVICE, DTYPE)
     demo.queue(
