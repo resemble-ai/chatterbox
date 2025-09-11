@@ -479,21 +479,20 @@ class T3(nn.Module):
         ).clone()  # Clone to avoid in-place modification issues
 
 
-        indices = torch.arange(1, max_new_tokens + 1, device='cuda')
+        indices = torch.arange(1, max_new_tokens + 1, device=generated_ids.device)
         batch_idx = torch.zeros(1, dtype=torch.long, device=generated_ids.device)
-        if not hasattr(self, "cudagraph_wrapper"):
-            self.cudagraph_wrapper = T3StepCUDAGraphWrapper(
-                generate_t3_token,
-                self.patched_model,
-                kv_cache,
-                self.repetition_penalty_processor,
-                self.min_p_warper,
-                self.top_p_warper,
-            )
-
-        self.cudagraph_wrapper.guard()
-
-        _generate_token_variants["cudagraphs-manual"] = self.cudagraph_wrapper
+        if generate_token_backend == "cudagraphs-manual":
+            if not hasattr(self, "cudagraph_wrapper"):
+                self.cudagraph_wrapper = T3StepCUDAGraphWrapper(
+                    generate_t3_token,
+                    self.patched_model,
+                    kv_cache,
+                    self.repetition_penalty_processor,
+                    self.min_p_warper,
+                    self.top_p_warper,
+                )
+            self.cudagraph_wrapper.guard()
+            _generate_token_variants["cudagraphs-manual"] = self.cudagraph_wrapper
         generate_token = _generate_token_variants.get(generate_token_backend, _generate_token_variants["eager"])
         if benchmark_t3:
             start = time.time()

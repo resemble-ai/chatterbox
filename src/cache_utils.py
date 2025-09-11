@@ -14,6 +14,7 @@ from torch.serialization import safe_globals
 from src.chatterbox.models.t3.modules.cond_enc import T3Cond
 from src.chatterbox.tts import Conditionals
 
+WAV_OUTPUT_DIR = Path("output_temp")
 
 class ConditionalsCacheManager:
     """Thread-safe cache manager for conditionals with memory and disk storage"""
@@ -236,7 +237,7 @@ def get_cache_key(audio_path, uuid, exaggeration: float = None):
 @functools.cache
 def get_wavout_dir():
     formatted_start_time = get_process_creation_time().strftime("%Y%m%d_%H%M%S")
-    wavout_dir = Path("output_temp").joinpath(formatted_start_time)
+    wavout_dir = WAV_OUTPUT_DIR.joinpath(formatted_start_time)
     wavout_dir.mkdir(parents=True, exist_ok=True)
     return wavout_dir
 
@@ -265,3 +266,54 @@ def init_conditional_memory_cache(model, device, dtype) -> None:
 
     logger.info(
         f"Loaded conditionals from disk with {stats['memory_cache_size']} entries")
+
+def clear_output_directories():
+    """Remove all folders in WAV_OUTPUT_DIR"""
+    if not WAV_OUTPUT_DIR.exists():
+        logger.info(f"Output directory {WAV_OUTPUT_DIR} does not exist, nothing to clear")
+        return 0
+    
+    removed_count = 0
+    try:
+        for item in WAV_OUTPUT_DIR.iterdir():
+            if item.is_dir():
+                import shutil
+                shutil.rmtree(item)
+                logger.info(f"Removed output directory: {item}")
+                removed_count += 1
+        
+        logger.info(f"Cleared {removed_count} output directories from {WAV_OUTPUT_DIR}")
+        return removed_count
+        
+    except Exception as e:
+        logger.error(f"Failed to clear output directories: {e}")
+        return 0
+
+def clear_cache_files():
+    """Remove all .pt files in the cache directory"""
+    cache_dir = get_cache_dir()
+    if not cache_dir.exists():
+        logger.info(f"Cache directory {cache_dir} does not exist, nothing to clear")
+        return 0
+    
+    removed_count = 0
+    try:
+        for pt_file in cache_dir.glob("*.pt"):
+            pt_file.unlink()
+            logger.info(f"Removed cache file: {pt_file}")
+            removed_count += 1
+        
+        # Clear memory cache as well since disk files are gone
+        global _cache_manager
+        with _cache_manager._cache_lock:
+            _cache_manager._memory_cache.clear()
+            _cache_manager._current_loaded_cache_key = None
+            _cache_manager._disk_save_queue.clear()
+        
+        logger.info(f"Cleared {removed_count} cache files from {cache_dir}")
+        logger.info("Cleared memory cache as well")
+        return removed_count
+        
+    except Exception as e:
+        logger.error(f"Failed to clear cache files: {e}")
+        return 0

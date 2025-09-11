@@ -6,8 +6,9 @@ and multilingual TTS implementations to reduce code duplication.
 """
 
 import warnings
+import re
 from pathlib import Path
-from typing import Union, Optional
+from typing import Union, Optional, List
 
 import torch
 import torchaudio
@@ -417,3 +418,186 @@ def validate_audio_prompt_path(audio_prompt_path: Union[str, Path]) -> Path:
         raise ValueError(f"Unsupported audio format: {audio_path.suffix}. Supported: {', '.join(valid_extensions)}")
     
     return audio_path
+
+
+def estimate_token_count(text: str, tokenizer, language_id: str = None) -> int:
+    """
+    Estimate the number of tokens for a given text.
+    
+    Args:
+        text: Input text to estimate
+        tokenizer: Tokenizer instance (EnTokenizer or MTLTokenizer)
+        language_id: Language ID for multilingual tokenizer (optional)
+        
+    Returns:
+        Estimated number of tokens
+    """
+    try:
+        if hasattr(tokenizer, 'encode'):
+            # Use encode method for more efficient token counting
+            if language_id:
+                tokens = tokenizer.encode(text, language_id=language_id)
+            else:
+                tokens = tokenizer.encode(text)
+            return len(tokens)
+        else:
+            # Fallback to text_to_tokens
+            if language_id:
+                text_tokens = tokenizer.text_to_tokens(text, language_id=language_id)
+            else:
+                text_tokens = tokenizer.text_to_tokens(text)
+            return text_tokens.shape[-1]  # Last dimension is the token count
+    except Exception:
+        # Fallback estimation: roughly 0.75 tokens per word
+        words = len(text.split())
+        return int(words * 0.75)
+
+
+def smart_text_splitter(text: str, max_tokens: int = 220, tokenizer=None, language_id: str = None) -> List[str]:
+    """
+    Split text into chunks that don't exceed the maximum token count.
+    
+    Args:
+        text: Input text to split
+        max_tokens: Maximum tokens per chunk (default 300, cache-aware)
+        tokenizer: Tokenizer instance for accurate token counting (optional)
+        language_id: Language ID for multilingual tokenizer (optional)
+        
+    Returns:
+        List of text chunks
+    """
+    # First check if text is already under the limit
+    if tokenizer:
+        total_tokens = estimate_token_count(text, tokenizer, language_id)
+        if total_tokens <= max_tokens:
+            return [text]
+    
+    # Define the sentence splitting pattern
+    # This pattern splits on sentence endings (.!?) but avoids splitting on:
+    # - Abbreviations with periods followed by lowercase
+    # - Numbers with periods
+    # - Quoted text
+    # - Exclamation marks in contractions
+    sentence_pattern = r'(?<=[.?!])\s*(?![.\w"\'\d]|[,!]|\*)'
+    
+    # Split into sentences
+    sentences = re.split(sentence_pattern, text.strip())
+    if not sentences:
+        return [text]
+    
+    # Remove empty sentences
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        # Try adding this sentence to the current chunk
+        test_chunk = current_chunk + (" " if current_chunk else "") + sentence
+        
+        # Check if the test chunk would exceed token limit
+        if tokenizer:
+            token_count = estimate_token_count(test_chunk, tokenizer, language_id)
+            would_exceed = token_count > max_tokens
+        else:
+            # Fallback: estimate roughly 0.75 tokens per word
+            word_count = len(test_chunk.split())
+            would_exceed = word_count * 0.75 > max_tokens
+        
+        if would_exceed and current_chunk:
+            # Save current chunk and start new one
+            chunks.append(current_chunk.strip())
+            current_chunk = sentence
+        else:
+            # Add sentence to current chunk
+            current_chunk = test_chunk
+    
+    # Add the final chunk if it has content
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+    
+    # Handle edge case where a single sentence is too long
+    final_chunks = []
+    for chunk in chunks:
+        if tokenizer:
+            token_count = estimate_token_count(chunk, tokenizer, language_id)
+            if token_count > max_tokens:
+                # Split long sentence by words as fallback
+                words = chunk.split()
+                temp_chunk = ""
+                for word in words:
+                    test_temp = temp_chunk + (" " if temp_chunk else "") + word
+                    if tokenizer:
+                        test_tokens = estimate_token_count(test_temp, tokenizer, language_id)
+                        if test_tokens > max_tokens and temp_chunk:
+                            final_chunks.append(temp_chunk.strip())
+                            temp_chunk = word
+                        else:
+                            temp_chunk = test_temp
+                    else:
+                        if len(test_temp.split()) * 0.75 > max_tokens and temp_chunk:
+                            final_chunks.append(temp_chunk.strip())
+                            temp_chunk = word
+                        else:
+                            temp_chunk = test_temp
+                if temp_chunk.strip():
+                    final_chunks.append(temp_chunk.strip())
+            else:
+                final_chunks.append(chunk)
+        else:
+            final_chunks.append(chunk)
+    
+    return final_chunks if final_chunks else [text]
+
+
+def concatenate_audio_tensors(audio_tensors: List[torch.Tensor], silence_duration: float = 0.1, sample_rate: int = S3GEN_SR) -> torch.Tensor:
+    """
+    Concatenate multiple audio tensors with optional silence padding.
+    
+    Args:
+        audio_tensors: List of audio tensors to concatenate
+        silence_duration: Duration of silence to add between chunks (in seconds)
+        sample_rate: Sample rate of the audio tensors
+        
+    Returns:
+        Concatenated audio tensor
+    """
+    if not audio_tensors:
+        raise ValueError("No audio tensors provided")
+    
+    if len(audio_tensors) == 1:
+        return audio_tensors[0]
+    
+    # Ensure all tensors have the same dimensionality
+    processed_tensors = []
+    for i, audio in enumerate(audio_tensors):
+        if audio.dim() == 0:
+            # Scalar tensor - convert to 1D
+            audio = audio.unsqueeze(0)
+        elif audio.dim() > 1:
+            # Multi-dimensional - squeeze out batch dimensions to get 1D audio
+            audio = audio.squeeze()
+            # If still multi-dimensional after squeeze, flatten
+            if audio.dim() > 1:
+                audio = audio.flatten()
+        processed_tensors.append(audio)
+    
+    # Create silence tensor matching the first audio tensor's properties
+    silence_samples = int(silence_duration * sample_rate)
+    device = processed_tensors[0].device
+    dtype = processed_tensors[0].dtype
+    silence = torch.zeros(silence_samples, device=device, dtype=dtype)
+    
+    # Concatenate with silence between chunks
+    result_tensors = [processed_tensors[0]]
+    for audio in processed_tensors[1:]:
+        result_tensors.extend([silence, audio])
+    
+    concatenated = torch.cat(result_tensors, dim=0)
+    
+    # Return with the same dimensionality as the original audio tensors
+    if audio_tensors[0].dim() > 1:
+        # If original was 2D, return as 2D with batch dimension
+        return concatenated.unsqueeze(0)
+    else:
+        return concatenated

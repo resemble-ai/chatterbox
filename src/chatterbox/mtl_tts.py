@@ -26,7 +26,10 @@ from .shared_utils import (
     validate_text_input,
     validate_language_id,
     validate_float_parameter,
-    validate_audio_prompt_path
+    validate_audio_prompt_path,
+    smart_text_splitter,
+    estimate_token_count,
+    concatenate_audio_tensors
 )
 
 
@@ -214,7 +217,7 @@ class ChatterboxMultilingualTTS:
         t3_cond = T3Cond(
             speaker_emb=ve_embed,
             cond_prompt_speech_tokens=t3_cond_prompt_tokens,
-            emotion_adv=exaggeration * torch.ones(1, 1, 1),
+            emotion_adv=exaggeration * torch.ones(1, 1, 1, dtype=ve_embed.dtype),
         ).to(device=self.device)
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
 
@@ -271,8 +274,61 @@ class ChatterboxMultilingualTTS:
                 emotion_adv=new_emotion_tensor,
             ).to(device=self.device, dtype=self.conds.t3.speaker_emb.dtype)
 
-        # Normalize and tokenize text
+        # Normalize and check if text needs chunking
         text = punc_norm(text, multilingual=True)
+        
+        # Check if text needs to be chunked based on token count
+        estimated_tokens = estimate_token_count(text, self.tokenizer, language_id)
+        # Set chunk limit based on cache constraints: max_cache_len - max_new_tokens
+        # This prevents the "max_cache_len too small" warning and ensures optimal performance
+        max_chunk_tokens = max(200, max_cache_len - max_new_tokens - 75)  # 75 token safety margin
+
+        if estimated_tokens <= max_chunk_tokens:
+            # Text is small enough - process normally without chunking
+            return self._generate_single_chunk(
+                text, language_id, cfg_weight, max_new_tokens, temperature,
+                max_cache_len, repetition_penalty, min_p, top_p, t3_params
+            )
+        else:
+            # Text is too large - split into chunks and process separately
+            #print(f"Text too large ({estimated_tokens} tokens), splitting into chunks...")
+            #print(f"Using cache-aware chunk limit: {max_chunk_tokens} tokens (cache_len={max_cache_len}, max_new={max_new_tokens})")
+            text_chunks = smart_text_splitter(text, max_chunk_tokens, self.tokenizer, language_id)
+            #print(f"Split into {len(text_chunks)} chunks")
+            
+            # Store original conditionals for reuse
+            original_conds = self.conds.clone()
+            
+            audio_chunks = []
+            for i, chunk in enumerate(text_chunks):
+                #print(f"Processing chunk {i+1}/{len(text_chunks)}")
+                
+                # Reset conditionals for each chunk to ensure consistency
+                self.conds = original_conds.clone()
+                
+                chunk_audio = self._generate_single_chunk(
+                    chunk, language_id, cfg_weight, max_new_tokens, temperature,
+                    max_cache_len, repetition_penalty, min_p, top_p, t3_params
+                )
+                audio_chunks.append(chunk_audio)
+            
+            # Concatenate all audio chunks with brief silence between them
+            return concatenate_audio_tensors(audio_chunks, silence_duration=0.1, sample_rate=self.sr)
+
+    def _generate_single_chunk(
+        self, 
+        text, 
+        language_id,
+        cfg_weight, 
+        max_new_tokens, 
+        temperature, 
+        max_cache_len, 
+        repetition_penalty, 
+        min_p, 
+        top_p, 
+        t3_params
+    ):
+        """Generate audio for a single text chunk."""
         text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id).to(self.device)
 
         # Use shared text token preparation

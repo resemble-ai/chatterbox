@@ -13,7 +13,9 @@ from src.cache_utils import (
     save_conditionals_cache,
     get_cache_key,
     save_torchaudio_wav,
-    init_conditional_memory_cache
+    init_conditional_memory_cache,
+    clear_output_directories,
+    clear_cache_files
 )
 
 from loguru import logger
@@ -217,7 +219,7 @@ def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration
         #"generate_token_backend": "cudagraphs-strided",
         "stride_length": 4, # "strided" options compile <1-2-3-4> iteration steps together, which improves performance by reducing memory copying issues in torch.compile
         "skip_when_1": True, # skips Top P when it's set to 1.0
-        "benchmark_t3": True, # Synchronizes CUDA to get the real it/s 
+        #"benchmark_t3": True, # Synchronizes CUDA to get the real it/s 
     }
     generate_args={
         "text": text,
@@ -460,15 +462,31 @@ with gr.Blocks() as demo:
 def parse_arguments():
     """Parse command line arguments"""
     parser = ArgumentParser()
-    parser.add_argument('--share', action='store_true')
-    parser.add_argument("--server", type=str, default='0.0.0.0')
-    parser.add_argument("--port", type=int, required=False)
-    parser.add_argument("--inbrowser", action='store_true')
-    parser.add_argument("--multilingual", action='store_true', default=False)
+    parser.add_argument('--share', action='store_true',help="Create a EXTERNAL facing public link using Gradio's servers")
+    parser.add_argument("--server", type=str, default='0.0.0.0', help="Server address to bind to (default: 0.0.0.0)")
+    parser.add_argument("--port", type=int, required=False, default=7860, help="Port to run the server on (default: 7860)")
+    parser.add_argument("--inbrowser", action='store_true', help="Open the UI in a new browser window")
+    parser.add_argument("--multilingual", action='store_true', default=False, help="Use the multilingual model (requires more VRAM)")
+    parser.add_argument("--clearoutput", action='store_true', help="Remove all folders in audio output directory and exit")
+    parser.add_argument("--clearcache", action='store_true', help="Remove all .pt cache files and exit")
     return parser.parse_args()
 
 if __name__ == "__main__":
     args = parse_arguments()
+    
+    # Handle cleanup arguments that exit immediately
+    if args.clearoutput:
+        logger.info("Clearing output directories...")
+        count = clear_output_directories()
+        logger.info(f"Cleared {count} output directories. Exiting.")
+        exit(0)
+    
+    if args.clearcache:
+        logger.info("Clearing cache files...")
+        count = clear_cache_files()
+        logger.info(f"Cleared {count} cache files. Exiting.")
+        exit(0)
+    
     MULTILINGUAL = args.multilingual
     
     # Load configuration at startup
