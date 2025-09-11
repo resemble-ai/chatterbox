@@ -1,6 +1,6 @@
 import torch
 from loguru import logger
-from typing import Optional, Tuple, Callable, Any, Dict
+from typing import Optional, Tuple, Callable, Any, Dict, Union
 
 TOKEN_LIMIT = 1500
 
@@ -48,24 +48,33 @@ class T3StepCUDAGraphWrapper:
         self.top_p_warper = top_p_warper
 
         # Dictionary to store graphs and static tensors for each bucket
-        self._bucket_graphs: Dict[int, torch.cuda.CUDAGraph] = {}
-        self._bucket_static_tensors: Dict[int, dict] = {}
+        self._bucket_graphs: Dict[Tuple[int, int], torch.cuda.CUDAGraph] = {}
+        self._bucket_static_tensors: Dict[Tuple[int, int], dict] = {}
 
         # Track which buckets have been captured
         self._captured_buckets = set()
 
         self.dtype = patched_model.dtype
+        self._current_cfg_mode = None  # Track current CFG mode for validation
 
-    def guard(self):
+    def guard(self, cfg_weight: float = 0.0):
         """
         Validate critical parameters have not changed, such as effective batch size or dtype.
+        Reset all graphs if CFG mode changes since KV cache batch dimensions are incompatible.
         """
         assert self.patched_model.dtype == self.dtype
-        pass
+        
+        current_cfg_mode = 1 if cfg_weight > 0.0 else 0
+        if self._current_cfg_mode is not None and self._current_cfg_mode != current_cfg_mode:
+            logger.debug(f"CFG mode changed from {self._current_cfg_mode} to {current_cfg_mode}, resetting all CUDA graphs")
+            self.reset()
+            self.kv_cache.reset()
+        
+        self._current_cfg_mode = current_cfg_mode
 
     def _capture_graph_for_bucket(
         self,
-        bucket_key: int,
+        bucket_key: Tuple[int, int],
         speech_embedding_cache: torch.Tensor,
         output_logits: torch.Tensor,
         i_tensor: torch.Tensor,
@@ -98,7 +107,7 @@ class T3StepCUDAGraphWrapper:
         static_tensors["cfg_weight"] = cfg_weight
         static_tensors["temperature"] = temperature
         static_tensors["stride_length"] = stride_length
-        static_tensors["max_position"] = bucket_key
+        static_tensors["max_position"] = bucket_key[0]  # Use base bucket (sequence length)
 
         # Capture the graph
         with torch.inference_mode():
@@ -143,8 +152,9 @@ class T3StepCUDAGraphWrapper:
         stride_length: int = 1,
         max_position: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Determine which bucket to use
-        bucket_key = max_position or TOKEN_LIMIT
+        base_bucket = max_position or TOKEN_LIMIT
+        cfg_mode = 1 if cfg_weight > 0.0 else 0
+        bucket_key = (base_bucket, cfg_mode)
 
         # Check if we need to capture a graph for this bucket
         if bucket_key not in self._captured_buckets:
@@ -189,7 +199,7 @@ class T3StepCUDAGraphWrapper:
             static_tensors["generated_ids"],
         )
 
-    def reset(self, bucket_key: Optional[int] = None) -> None:
+    def reset(self, bucket_key: Optional[Union[int, Tuple[int, int]]] = None) -> None:
         if bucket_key is not None:
             # Reset specific bucket
             if bucket_key in self._bucket_graphs:

@@ -482,7 +482,13 @@ class T3(nn.Module):
         indices = torch.arange(1, max_new_tokens + 1, device=generated_ids.device)
         batch_idx = torch.zeros(1, dtype=torch.long, device=generated_ids.device)
         if generate_token_backend == "cudagraphs-manual":
-            if not hasattr(self, "cudagraph_wrapper"):
+            # Track CFG mode and recreate wrapper if it changes (different batch dimensions)
+            current_cfg_mode = 1 if cfg_weight > 0.0 else 0
+            if not hasattr(self, "cudagraph_wrapper") or \
+               not hasattr(self, "_cudagraph_cfg_mode") or \
+               self._cudagraph_cfg_mode != current_cfg_mode:
+                if hasattr(self, "cudagraph_wrapper"):
+                    logger.debug(f"Recreating CUDA graph wrapper due to CFG mode change: {getattr(self, '_cudagraph_cfg_mode', 'None')} -> {current_cfg_mode}")
                 self.cudagraph_wrapper = T3StepCUDAGraphWrapper(
                     generate_t3_token,
                     self.patched_model,
@@ -491,7 +497,8 @@ class T3(nn.Module):
                     self.min_p_warper,
                     self.top_p_warper,
                 )
-            self.cudagraph_wrapper.guard()
+                self._cudagraph_cfg_mode = current_cfg_mode
+            self.cudagraph_wrapper.guard(cfg_weight)
             _generate_token_variants["cudagraphs-manual"] = self.cudagraph_wrapper
         generate_token = _generate_token_variants.get(generate_token_backend, _generate_token_variants["eager"])
         if benchmark_t3:
