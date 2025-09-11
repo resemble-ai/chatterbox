@@ -42,11 +42,11 @@ def load_skyrimnet_config():
     # Default configuration
     default_config = {
         'temperature': 0.8,
-        'min_p': 0.05, 
+        'min_p': 0.07, 
         'top_p': 1.0,
         'repetition_penalty': 2.0,
         'cfg_weight': 0.0,  # Speed optimized default
-        'exaggeration': 0.55
+        'exaggeration': 0.7
     }
     
     global_flags = {

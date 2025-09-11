@@ -53,8 +53,8 @@ SUPPORTED_LANGUAGES = {
 Currently these values are hardcoded.
 
 - temperature = 0.9
-- min_p = 0.03
-- top_p = 0.8
+- min_p = 0.07
+- top_p = 1.0
 - repetition_penalty = 2.0
 - cfg_weight = 0.0
 - exaggeration = 0.7
@@ -69,7 +69,7 @@ All other Audio fields are ignored.
 
 - MIN_P: Modern way to control speech quality (newer method)  
 
-- TOP_P: Classic way to control speech variety (older method)
+- TOP_P: Classic way to control speech variety (older method) Probably want to keep this at 1.0 (disabled)
 
 - TEMPERATURE: Controls how creative/random the voice sounds
  *Note: This uses the "linear" slider in SkyrimNet UI when set to "api"
