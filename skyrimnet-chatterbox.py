@@ -29,6 +29,8 @@ ENABLE_DISK_CACHE = True
 ENABLE_MEMORY_CACHE = True
 _CONFIG_CACHE = None
 _CONFIG_FILE_PATH = "skyrimnet_config.txt"
+# Testing flag - when True, bypasses config loading and uses all API values
+_USE_API_MODE = False
 
 def load_skyrimnet_config():
     """Load configuration from skyrimnet_config.txt with error handling"""
@@ -128,8 +130,20 @@ def load_skyrimnet_config():
         _CONFIG_CACHE = (default_config, config_mode, global_flags)
         return _CONFIG_CACHE
 
-def get_config_value(param_name, api_value, defaults, modes):
+def get_config_value(param_name, api_value, defaults, modes, bypass_config=False):
     """Get the appropriate value based on configuration mode"""
+    if bypass_config:
+        # API mode: use API value with fallback to reasonable defaults
+        fallback_defaults = {
+            'temperature': 0.9,
+            'min_p': 0.05,
+            'top_p': 1.0,
+            'repetition_penalty': 2.0,
+            'cfg_weight': 0.0,
+            'exaggeration': 0.55
+        }
+        return api_value if api_value is not None else fallback_defaults.get(param_name, 0.0)
+    
     mode = modes.get(param_name, 'default')
     
     if mode == 'api':
@@ -145,11 +159,11 @@ def reload_config():
     return load_skyrimnet_config()
 
 def set_seed(seed: int):
+    """
+    Set random seeds for reproducible generation.
+    """
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    random.seed(seed)
-    np.random.seed(seed)
 
 
 def load_model():
@@ -166,6 +180,7 @@ def load_model():
         MODEL.conds.t3.to(dtype=DTYPE)
         torch.cuda.empty_cache()
     return MODEL
+
 
 def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration=0.5, temperature=0.8, seed_num=0, cfgw=0, min_p=0.05, top_p=1.0, repetition_penalty=1.2,cache_uuid=0):
 
@@ -253,11 +268,17 @@ def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration
 
     #return (model.sr, wav.squeeze(0).cpu().numpy())
 
+
 ### SkyrimNet Zonos Emulated
 @functools.cache
 def cpp_uuid_to_seed(uuid_64: int) -> int:
-    return (abs(uuid_64) % (2 ** 31 - 1)) #+ 1
+    """
+    Convert a 64-bit UUID to a valid PyTorch seed (0 to 2^32 - 1).
+    Uses hash() for better distribution across the seed space.
+    """
+    return abs(hash(uuid_64)) % (2**32)
     
+
 def generate_audio(
     model_choice = None,
     text= "On that first day from Saturalia, My missus gave for me, A big bowl of moon sugar!",
@@ -287,12 +308,15 @@ def generate_audio(
     quadratic= None,
     uuid= -1,
     randomize_seed: bool = False,
-    unconditional_keys: list = None,
-    chunked=False,
-):
+    unconditional_keys: list = None
+    ):
     """Generate audio using configurable parameter system"""
     
-    defaults, modes, flags = load_skyrimnet_config()
+    # Load config (or use empty values for API mode)
+    if _USE_API_MODE:
+        defaults, modes = {}, {}
+    else:
+        defaults, modes, flags = load_skyrimnet_config()
     
     # Map API parameters to our config system
     # Note: confidence maps to repetition_penalty in SkyrimNet UI
@@ -303,16 +327,18 @@ def generate_audio(
     api_cfg_weight = cfg_scale if cfg_scale is not None else None
     api_exaggeration = quadratic if quadratic is not None else None
     
-    final_temperature = get_config_value('temperature', api_temperature, defaults, modes)
-    final_min_p = get_config_value('min_p', api_min_p, defaults, modes)
-    final_top_p = get_config_value('top_p', api_top_p, defaults, modes)
-    final_repetition_penalty = get_config_value('repetition_penalty', api_repetition_penalty, defaults, modes)
-    final_cfg_weight = get_config_value('cfg_weight', api_cfg_weight, defaults, modes)
-    final_exaggeration = get_config_value('exaggeration', api_exaggeration, defaults, modes)
+    # Get final values using unified config system
+    final_temperature = get_config_value('temperature', api_temperature, defaults, modes, _USE_API_MODE)
+    final_min_p = get_config_value('min_p', api_min_p, defaults, modes, _USE_API_MODE)
+    final_top_p = get_config_value('top_p', api_top_p, defaults, modes, _USE_API_MODE)
+    final_repetition_penalty = get_config_value('repetition_penalty', api_repetition_penalty, defaults, modes, _USE_API_MODE)
+    final_cfg_weight = get_config_value('cfg_weight', api_cfg_weight, defaults, modes, _USE_API_MODE)
+    final_exaggeration = get_config_value('exaggeration', api_exaggeration, defaults, modes, _USE_API_MODE)
     
     logger.debug(f"Final parameters - temp: {final_temperature}, min_p: {final_min_p}, top_p: {final_top_p}, rep_penalty: {final_repetition_penalty}, cfg_weight: {final_cfg_weight}, exaggeration: {final_exaggeration}")
     
     seed_num = cpp_uuid_to_seed(uuid)
+
     return generate(
         model=MODEL, 
         text=text, 
@@ -459,6 +485,7 @@ with gr.Blocks() as demo:
                      outputs=[audio_output, seed_num],
                      )
     
+
 def parse_arguments():
     """Parse command line arguments"""
     parser = ArgumentParser()
@@ -470,6 +497,7 @@ def parse_arguments():
     parser.add_argument("--clearoutput", action='store_true', help="Remove all folders in audio output directory and exit")
     parser.add_argument("--clearcache", action='store_true', help="Remove all .pt cache files and exit")
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_arguments()

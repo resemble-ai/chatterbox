@@ -154,9 +154,7 @@ def drop_bad_tokens(tokens: torch.Tensor, threshold: int = 6561) -> torch.Tensor
     Returns:
         Filtered token tensor with only valid tokens
     """
-    # Use torch.masked_select directly - more CUDA-friendly, no CPU sync
     mask = tokens < threshold
-    # torch.masked_select is efficient and stays on device
     result = torch.masked_select(tokens, mask)
     return result
 
@@ -218,7 +216,7 @@ def punc_norm(text: str, multilingual: bool = False) -> str:
         (":", ","),
         (" - ", ", "),
         (";", ", "),
-        ("—", "-"),
+        #("—", "-"),
         ("–", "-"),
         (" ,", ","),
         (""", "\""),
@@ -282,7 +280,6 @@ def check_exaggeration_update_needed(
     Returns:
         Tuple of (needs_update, new_emotion_tensor)
     """
-    # Check exaggeration without CPU sync - use tensor comparison with matching dtype
     new_emotion_tensor = new_exaggeration * torch.ones(
         1, 1, 1, 
         device=device, 
@@ -550,6 +547,28 @@ def smart_text_splitter(text: str, max_tokens: int = 220, tokenizer=None, langua
     return final_chunks if final_chunks else [text]
 
 
+_silence_cache = {}
+
+def _get_cached_silence_tensor(silence_samples: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """
+    Get or create a cached silence tensor.
+    
+    Args:
+        silence_samples: Number of silence samples
+        device: Target device
+        dtype: Target dtype
+        
+    Returns:
+        Silence tensor on the specified device and dtype
+    """
+    cache_key = (silence_samples, str(device), str(dtype))
+    
+    if cache_key not in _silence_cache:
+        _silence_cache[cache_key] = torch.zeros(silence_samples, device=device, dtype=dtype)
+    
+    return _silence_cache[cache_key]
+
+
 def concatenate_audio_tensors(audio_tensors: List[torch.Tensor], silence_duration: float = 0.1, sample_rate: int = S3GEN_SR) -> torch.Tensor:
     """
     Concatenate multiple audio tensors with optional silence padding.
@@ -568,8 +587,10 @@ def concatenate_audio_tensors(audio_tensors: List[torch.Tensor], silence_duratio
     if len(audio_tensors) == 1:
         return audio_tensors[0]
     
-    # Ensure all tensors have the same dimensionality
-    processed_tensors = []
+    # Process tensors and build result list with silence in single loop
+    result_tensors = []
+    silence = None
+    
     for i, audio in enumerate(audio_tensors):
         if audio.dim() == 0:
             # Scalar tensor - convert to 1D
@@ -580,23 +601,28 @@ def concatenate_audio_tensors(audio_tensors: List[torch.Tensor], silence_duratio
             # If still multi-dimensional after squeeze, flatten
             if audio.dim() > 1:
                 audio = audio.flatten()
-        processed_tensors.append(audio)
-    
-    # Create silence tensor matching the first audio tensor's properties
-    silence_samples = int(silence_duration * sample_rate)
-    device = processed_tensors[0].device
-    dtype = processed_tensors[0].dtype
-    silence = torch.zeros(silence_samples, device=device, dtype=dtype)
-    
-    # Concatenate with silence between chunks
-    result_tensors = [processed_tensors[0]]
-    for audio in processed_tensors[1:]:
-        result_tensors.extend([silence, audio])
+        
+        # Create cached silence tensor on first iteration using first audio tensor's properties
+        if silence is None:
+            silence_samples = int(silence_duration * sample_rate)
+            silence = _get_cached_silence_tensor(silence_samples, audio.device, audio.dtype)
+        
+        # Add silence before audio (except for first audio)
+        if i > 0:
+            result_tensors.append(silence)
+        result_tensors.append(audio)
     
     concatenated = torch.cat(result_tensors, dim=0)
     
+    # Check dimensionality before cleanup
+    should_unsqueeze = audio_tensors[0].dim() > 1
+    
+    # Clean up intermediate tensors to free memory
+    del audio_tensors
+    del result_tensors
+    
     # Return with the same dimensionality as the original audio tensors
-    if audio_tensors[0].dim() > 1:
+    if should_unsqueeze:
         # If original was 2D, return as 2D with batch dimension
         return concatenated.unsqueeze(0)
     else:
