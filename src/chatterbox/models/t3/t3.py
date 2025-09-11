@@ -433,7 +433,7 @@ class T3(nn.Module):
             max_new_tokens = max_cache_len - seq_len
 
         # using batch size of 1, otherwise use generated_ids[:, i] 
-        assert max_new_tokens < 1500, f"max_new_tokens {max_new_tokens} is too large, maximum is 1500"
+        assert max_new_tokens < TOKEN_LIMIT, f"max_new_tokens {max_new_tokens} is too large, maximum is {TOKEN_LIMIT}"
         generated_ids = torch.full((1, bos_len + TOKEN_LIMIT), PAD_TOKEN_ID, dtype=torch.long, device=device)
         generated_ids[0, :bos_len] = bos_token
 
