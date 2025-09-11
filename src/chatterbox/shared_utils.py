@@ -370,19 +370,19 @@ def validate_float_parameter(value, name: str, min_val: float = None, max_val: f
     # Check minimum value
     if min_val is not None:
         if not allow_zero and value <= min_val:
-            raise ValueError(f"{name} must be greater than {min_val}")
+            raise ValueError(f"{name} of {value} must be greater than {min_val}")
         elif allow_zero and value < min_val:
-            raise ValueError(f"{name} must be >= {min_val}")
-    
+            raise ValueError(f"{name} of {value} must be >= {min_val}")
+
     # Check maximum value
     if max_val is not None:
         if value > max_val:
-            raise ValueError(f"{name} must be <= {max_val}")
+            raise ValueError(f"{name} of {value} must be <= {max_val}")
     
     # Special case for positive-only values
     if min_val is None and not allow_zero and value <= 0.0:
-        raise ValueError(f"{name} must be positive")
-    
+        raise ValueError(f"{name} of {value} must be positive")
+
     return value
 
 
