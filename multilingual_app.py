@@ -314,4 +314,4 @@ with gr.Blocks() as demo:
         outputs=[audio_output],
     )
 
-demo.launch(mcp_server=True)
+demo.launch(mcp_server=True, share=True)
