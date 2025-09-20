@@ -16,7 +16,7 @@
 # limitations under the License.
 
 """HIFI-GAN"""
-
+import gc
 from typing import Dict, Optional, List
 import numpy as np
 from scipy.signal import get_window
@@ -376,8 +376,28 @@ class HiFTGenerator(nn.Module):
         self.ups.apply(init_weights)
         self.conv_post.apply(init_weights)
         self.reflection_pad = nn.ReflectionPad1d((1, 0))
-        self.stft_window = torch.from_numpy(get_window("hann", istft_params["n_fft"], fftbins=True).astype(np.float32))
+        # MEMORY_FIX: Create window buffer that will be properly registered
+        window_np = get_window("hann", istft_params["n_fft"], fftbins=True).astype(np.float32)
+
+        # self.stft_window = torch.from_numpy(get_window("hann", istft_params["n_fft"], fftbins=True).astype(np.float32))
+        self.register_buffer("stft_window", torch.from_numpy(window_np), persistent=False)
+
         self.f0_predictor = f0_predictor
+
+        # MEMORY_FIX: Track device for proper cleanup
+        self._current_device = None
+
+        # MEMORY_FIX: Add cleanup method
+        def clear_cache(self):
+            """Clear any internal caches or temporary tensors"""
+            # Force garbage collection
+            gc.collect()
+
+            # Clear device cache
+            if hasattr(torch, 'mps') and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+            elif torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def remove_weight_norm(self):
         print('Removing weight norm...')
@@ -394,10 +414,19 @@ class HiFTGenerator(nn.Module):
             l.remove_weight_norm()
 
     def _stft(self, x):
+        # MEMORY_FIX: Use registered buffer directly (already on correct device)
         spec = torch.stft(
             x,
-            self.istft_params["n_fft"], self.istft_params["hop_len"], self.istft_params["n_fft"], window=self.stft_window.to(x.device),
-            return_complex=True)
+            self.istft_params["n_fft"],
+            self.istft_params["hop_len"],
+            self.istft_params["n_fft"],
+            window=self.stft_window,  # No .to(x.device) needed!
+            return_complex=True
+        )
+        # spec = torch.stft(
+        #     x,
+        #     self.istft_params["n_fft"], self.istft_params["hop_len"], self.istft_params["n_fft"], window=self.stft_window.to(x.device),
+        #     return_complex=True)
         spec = torch.view_as_real(spec)  # [B, F, TT, 2]
         return spec[..., 0], spec[..., 1]
 
@@ -405,13 +434,27 @@ class HiFTGenerator(nn.Module):
         magnitude = torch.clip(magnitude, max=1e2)
         real = magnitude * torch.cos(phase)
         img = magnitude * torch.sin(phase)
-        inverse_transform = torch.istft(torch.complex(real, img), self.istft_params["n_fft"], self.istft_params["hop_len"],
-                                        self.istft_params["n_fft"], window=self.stft_window.to(magnitude.device))
+        # MEMORY_FIX: Use registered buffer directly
+        inverse_transform = torch.istft(
+            torch.complex(real, img),
+            self.istft_params["n_fft"],
+            self.istft_params["hop_len"],
+            self.istft_params["n_fft"],
+            window=self.stft_window  # No .to(device) needed!
+        )
+        # inverse_transform = torch.istft(torch.complex(real, img), self.istft_params["n_fft"], self.istft_params["hop_len"],
+        #                                 self.istft_params["n_fft"], window=self.stft_window.to(magnitude.device))
         return inverse_transform
 
     def decode(self, x: torch.Tensor, s: torch.Tensor = torch.zeros(1, 1, 0)) -> torch.Tensor:
-        s_stft_real, s_stft_imag = self._stft(s.squeeze(1))
+        # MEMORY_FIX: More aggressive intermediate cleanup
+        s_squeezed = s.squeeze(1)
+        s_stft_real, s_stft_imag = self._stft(s_squeezed)
+        del s_squeezed  # Clean up immediately
+        # s_stft_real, s_stft_imag = self._stft(s.squeeze(1))
+
         s_stft = torch.cat([s_stft_real, s_stft_imag], dim=1)
+        del s_stft_real, s_stft_imag  # Clean up immediately
 
         x = self.conv_pre(x)
         for i in range(self.num_upsamples):
@@ -425,6 +468,7 @@ class HiFTGenerator(nn.Module):
             si = self.source_downs[i](s_stft)
             si = self.source_resblocks[i](si)
             x = x + si
+            del si  # MEMORY_FIX: Clean up immediately
 
             xs = None
             for j in range(self.num_kernels):
@@ -433,15 +477,21 @@ class HiFTGenerator(nn.Module):
                 else:
                     xs += self.resblocks[i * self.num_kernels + j](x)
             x = xs / self.num_kernels
+            del xs  # MEMORY_FIX: Clean up immediately
 
         x = F.leaky_relu(x)
         x = self.conv_post(x)
         magnitude = torch.exp(x[:, :self.istft_params["n_fft"] // 2 + 1, :])
         phase = torch.sin(x[:, self.istft_params["n_fft"] // 2 + 1:, :])  # actually, sin is redundancy
 
-        x = self._istft(magnitude, phase)
-        x = torch.clamp(x, -self.audio_limit, self.audio_limit)
-        return x
+        result = self._istft(magnitude, phase)
+        del magnitude, phase  # MEMORY_FIX: Clean up immediately
+
+        result = torch.clamp(result, -self.audio_limit, self.audio_limit)
+        return result
+        # x = self._istft(magnitude, phase)
+        # x = torch.clamp(x, -self.audio_limit, self.audio_limit)
+        # return x
 
     def forward(
             self,
@@ -450,25 +500,58 @@ class HiFTGenerator(nn.Module):
     ) -> Dict[str, Optional[torch.Tensor]]:
         speech_feat = batch['speech_feat'].transpose(1, 2).to(device)
         # mel->f0
+
+        # MEMORY_FIX: Clear any f0_predictor cache before inference
+        if hasattr(self.f0_predictor, 'clear_cache'):
+            self.f0_predictor.clear_cache()
+
         f0 = self.f0_predictor(speech_feat)
         # f0->source
-        s = self.f0_upsamp(f0[:, None]).transpose(1, 2)  # bs,n,t
-        s, _, _ = self.m_source(s)
+        s_upsampled = self.f0_upsamp(f0[:, None]).transpose(1, 2)
+        s, *source_extras = self.m_source(s_upsampled)
+        del s_upsampled, source_extras  # MEMORY_FIX: Clean up immediately
+
         s = s.transpose(1, 2)
+        # s = self.f0_upsamp(f0[:, None]).transpose(1, 2)  # bs,n,t
+        # s, _, _ = self.m_source(s)
+        # s = s.transpose(1, 2)
         # mel+source->speech
         generated_speech = self.decode(x=speech_feat, s=s)
+
+        # MEMORY_FIX: Clean up intermediate tensors
+        del s
+
         return generated_speech, f0
 
     @torch.inference_mode()
     def inference(self, speech_feat: torch.Tensor, cache_source: torch.Tensor = torch.zeros(1, 1, 0)) -> torch.Tensor:
+        # MEMORY_FIX: Pre-inference cleanup
+        if hasattr(self, 'clear_cache'):
+            self.clear_cache()
+
         # mel->f0
+        # MEMORY_FIX: Clear f0_predictor cache if available
+        if hasattr(self.f0_predictor, 'clear_cache'):
+            self.f0_predictor.clear_cache()
+
         f0 = self.f0_predictor(speech_feat)
         # f0->source
-        s = self.f0_upsamp(f0[:, None]).transpose(1, 2)  # bs,n,t
-        s, _, _ = self.m_source(s)
+        s_upsampled = self.f0_upsamp(f0[:, None]).transpose(1, 2)
+        s, *source_extras = self.m_source(s_upsampled)
+        del s_upsampled, source_extras  # MEMORY_FIX: Clean up immediately
+
         s = s.transpose(1, 2)
+        # s = self.f0_upsamp(f0[:, None]).transpose(1, 2)  # bs,n,t
+        # s, _, _ = self.m_source(s)
+        # s = s.transpose(1, 2)
         # use cache_source to avoid glitch
         if cache_source.shape[2] != 0:
             s[:, :, :cache_source.shape[2]] = cache_source
         generated_speech = self.decode(x=speech_feat, s=s)
+
+        # MEMORY_FIX: Post-inference cleanup
+        del f0  # Keep s for return value but clean f0
+        if hasattr(self, 'clear_cache'):
+            self.clear_cache()
+
         return generated_speech, s

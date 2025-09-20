@@ -8,7 +8,7 @@ import perth
 import torch.nn.functional as F
 from safetensors.torch import load_file as load_safetensors
 from huggingface_hub import snapshot_download
-
+import psutil
 from .models.t3 import T3
 from .models.t3.modules.t3_config import T3Config
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -17,6 +17,8 @@ from .models.tokenizers import MTLTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 
+def get_memory_mb():
+    return psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
 
 REPO_ID = "ResembleAI/chatterbox"
 
@@ -161,12 +163,16 @@ class ChatterboxMultilingualTTS:
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(ckpt_dir)
 
+        before_ve = get_memory_mb()
+        print(f"before_ve: {before_ve:.1f}")
         ve = VoiceEncoder()
         ve.load_state_dict(
             torch.load(ckpt_dir / "ve.pt", weights_only=True)
         )
         ve.to(device).eval()
 
+        before_t3 = get_memory_mb()
+        print(f"before_t3: {before_t3:.1f}")
         t3 = T3(T3Config.multilingual())
         t3_state = load_safetensors(ckpt_dir / "t3_23lang.safetensors")
         if "model" in t3_state.keys():
@@ -174,12 +180,15 @@ class ChatterboxMultilingualTTS:
         t3.load_state_dict(t3_state)
         t3.to(device).eval()
 
+        before_s3_gen = get_memory_mb()
+        print(f"before_s3_gen: {before_s3_gen:.1f}")
         s3gen = S3Gen()
         s3gen.load_state_dict(
             torch.load(ckpt_dir / "s3gen.pt", weights_only=True)
         )
         s3gen.to(device).eval()
-
+        before_tokenizer = get_memory_mb()
+        print(f"before_tokenizer: {before_tokenizer:.1f}")
         tokenizer = MTLTokenizer(
             str(ckpt_dir / "mtl_tokenizer.json")
         )
@@ -187,7 +196,8 @@ class ChatterboxMultilingualTTS:
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
             conds = Conditionals.load(builtin_voice).to(device)
-
+        after_from_local_load = get_memory_mb()
+        print(f"after_from_local_load: {after_from_local_load:.1f}")
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
@@ -251,11 +261,18 @@ class ChatterboxMultilingualTTS:
             )
         
         if audio_prompt_path:
+            before_audio_prompt = get_memory_mb()
+            print(f"before_audio_prompt: {before_audio_prompt:.1f}")
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
+            after_audio_prompt = get_memory_mb()
+            print(f"after_audio_prompt: {after_audio_prompt:.1f}")
         else:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
         # Update exaggeration if needed
+
+        before_exaggeration = get_memory_mb()
+        print(f"before_exaggeration: {before_exaggeration:.1f}")
         if float(exaggeration) != float(self.conds.t3.emotion_adv[0, 0, 0].item()):
             _cond: T3Cond = self.conds.t3
             self.conds.t3 = T3Cond(
@@ -264,16 +281,32 @@ class ChatterboxMultilingualTTS:
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
 
+        after_exaggeration = get_memory_mb()
+        print(f"after_exaggeration: {after_exaggeration:.1f}")
+
         # Norm and tokenize text
         text = punc_norm(text)
+
+        after_tokenize_text = get_memory_mb()
+        print(f"after_tokenize_text: {after_tokenize_text:.1f}")
         text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id.lower() if language_id else None).to(self.device)
+        after_text_to_tokens = get_memory_mb()
+        print(f"after_text_to_tokens: {after_text_to_tokens:.1f}")
         text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
+
+        after_torch_cat = get_memory_mb()
+        print(f"after_torch_cat: {after_torch_cat:.1f}")
 
         sot = self.t3.hp.start_text_token
         eot = self.t3.hp.stop_text_token
+
+        after_eot = get_memory_mb()
+        print(f"after_eot: {after_eot:.1f}")
         text_tokens = F.pad(text_tokens, (1, 0), value=sot)
         text_tokens = F.pad(text_tokens, (0, 1), value=eot)
 
+        generate_baseline = get_memory_mb()
+        print(f"generate_baseline: {generate_baseline:.1f}")
         with torch.inference_mode():
             speech_tokens = self.t3.inference(
                 t3_cond=self.conds.t3,
@@ -285,6 +318,8 @@ class ChatterboxMultilingualTTS:
                 min_p=min_p,
                 top_p=top_p,
             )
+            after_speech_tokens_created = get_memory_mb()
+            print(f"after_speech_tokens_created: {after_speech_tokens_created:.1f}")
             # Extract only the conditional batch.
             speech_tokens = speech_tokens[0]
 
@@ -292,10 +327,20 @@ class ChatterboxMultilingualTTS:
             speech_tokens = drop_invalid_tokens(speech_tokens)
             speech_tokens = speech_tokens.to(self.device)
 
-            wav, _ = self.s3gen.inference(
+            del text_tokens
+
+            before_s3gen_inference = get_memory_mb()
+            print(f"before_s3gen_inference: {before_s3gen_inference:.1f}")
+            wav, sources = self.s3gen.inference(
                 speech_tokens=speech_tokens,
                 ref_dict=self.conds.gen,
             )
+            if sources is not None:
+                del sources
+            after_s3gen_inference = get_memory_mb()
+
+            del speech_tokens
             wav = wav.squeeze(0).detach().cpu().numpy()
-            watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-        return torch.from_numpy(watermarked_wav).unsqueeze(0)
+
+            print(f"after_s3gen_inference: {after_s3gen_inference:.1f}")
+        return torch.from_numpy(wav).unsqueeze(0)

@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 from tqdm import tqdm
 import torch
 import torch.nn.functional as F
+import psutil
+import os
 from torch import nn, Tensor
 from transformers import LlamaModel, LlamaConfig
 from transformers.generation.logits_process import TopPLogitsWarper, RepetitionPenaltyLogitsProcessor, MinPLogitsWarper
@@ -24,6 +26,9 @@ from ..utils import AttrDict
 
 logger = logging.getLogger(__name__)
 
+
+def get_memory_mb():
+    return psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
 
 def _ensure_BOT_EOT(text_tokens: Tensor, hp):
     B = text_tokens.size(0)
@@ -106,10 +111,14 @@ class T3(nn.Module):
              cond_emb = cond_emb.expand(text_emb.size(0), -1, -1)
 
         # concat
-        embeds = torch.stack([
-            torch.cat((ce, te, se))
-            for ce, te, se in zip(cond_emb, text_emb, speech_emb)
-        ])  # (B, length, dim)
+        # embeds = torch.stack([
+        #     torch.cat((ce, te, se))
+        #     for ce, te, se in zip(cond_emb, text_emb, speech_emb)
+        # ])  # (B, length, dim)
+
+        # More memory efficient
+        embeds = torch.cat([cond_emb, text_emb, speech_emb], dim=1)
+
         return embeds, len_cond
 
     def forward(
@@ -147,8 +156,13 @@ class T3(nn.Module):
         len_speech = speech_tokens.size(1)
         B, _, dim = hidden_states.shape
         device, dtype = hidden_states.device, hidden_states.dtype
-        text_latents = torch.zeros(B, len_text, dim, dtype=dtype, device=device)
-        speech_latents = torch.zeros(B, len_speech, dim, dtype=dtype, device=device)
+        # text_latents = torch.zeros(B, len_text, dim, dtype=dtype, device=device)
+        # speech_latents = torch.zeros(B, len_speech, dim, dtype=dtype, device=device)
+
+        # More memory efficient - direct slicing
+        text_latents = hidden_states[:, len_cond:len_cond + len_text, :]
+        speech_latents = hidden_states[:, len_cond + len_text:len_cond + len_text + len_speech, :]
+
         ttl, stl = text_token_lens, speech_token_lens
         for i in range(B):
             text_end = len_cond + ttl[i].item()
