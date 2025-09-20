@@ -226,8 +226,24 @@ class ChatterboxMultilingualTTS:
         t3_cond_prompt_tokens = None
         if plen := self.t3.hp.speech_cond_prompt_len:
             s3_tokzr = self.s3gen.tokenizer
-            t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav[:self.ENC_COND_LEN]], max_len=plen)
+            # Limit audio length more aggressively for memory safety
+            # Use at most 3 seconds of audio (3 * 16000 = 48000 samples)
+            safe_audio_len = min(len(ref_16k_wav), 3 * S3_SR)
+            limited_audio = ref_16k_wav[:safe_audio_len]
+
+            # Add memory cleanup before tokenization
+            import gc
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            gc.collect()
+
+            # Use smaller max_len to be extra safe
+            safe_max_len = min(plen, 75)  # Limit to 75 tokens instead of 150
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward([limited_audio], max_len=safe_max_len)
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
+
+            # More memory cleanup after tokenization
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            gc.collect()
 
         # Voice-encoder speaker embedding
         ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR))

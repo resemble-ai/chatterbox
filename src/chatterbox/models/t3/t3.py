@@ -333,16 +333,40 @@ class T3(nn.Module):
         repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
 
         # ---- Initial Forward Pass (no kv_cache yet) ----
-        output = self.patched_model(
-            inputs_embeds=inputs_embeds,
-            past_key_values=None,
-            use_cache=True,
-            output_attentions=True,
-            output_hidden_states=True,
-            return_dict=True,
-        )
+        # Add memory cleanup before the memory-intensive operation
+        import gc
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        gc.collect()
+
+        # Use gradient checkpointing to reduce memory usage
+        original_gradient_checkpointing = getattr(self.patched_model, 'gradient_checkpointing', False)
+        if hasattr(self.patched_model, 'gradient_checkpointing_enable'):
+            self.patched_model.gradient_checkpointing_enable()
+
+        try:
+            output = self.patched_model(
+                inputs_embeds=inputs_embeds,
+                past_key_values=None,
+                use_cache=True,
+                output_attentions=True,  # Required by alignment stream analyzer
+                output_hidden_states=True,  # Required by T3 backend, keep enabled
+                return_dict=True,
+            )
+        except Exception as e:
+            # Restore original gradient checkpointing setting
+            if hasattr(self.patched_model, 'gradient_checkpointing_disable') and not original_gradient_checkpointing:
+                self.patched_model.gradient_checkpointing_disable()
+            raise e
         # Initialize kv_cache with the full context.
         past = output.past_key_values
+
+        # Restore original gradient checkpointing setting after initial pass
+        if hasattr(self.patched_model, 'gradient_checkpointing_disable') and not original_gradient_checkpointing:
+            self.patched_model.gradient_checkpointing_disable()
+
+        # Clean up memory after initial forward pass
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        gc.collect()
 
         # ---- Generation Loop using kv_cache ----
         for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
