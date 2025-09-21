@@ -15,6 +15,16 @@
 import torch
 
 from ..transformer.activation import Swish
+from ..transformer.attention import (MultiHeadedAttention,
+                                     RelPositionMultiHeadedAttention)
+from ..transformer.embedding import EspnetRelPositionalEncoding
+from ..transformer.embedding import (
+    PositionalEncoding,
+    RelPositionalEncoding,
+    WhisperPositionalEncoding,
+    LearnablePositionalEncoding,
+    NoPositionalEncoding)
+from ..transformer.subsampling import LegacyLinearNoSubsampling
 from ..transformer.subsampling import (
     LinearNoSubsampling,
     EmbedinigNoSubsampling,
@@ -23,17 +33,6 @@ from ..transformer.subsampling import (
     Conv2dSubsampling6,
     Conv2dSubsampling8,
 )
-from ..transformer.embedding import (
-    PositionalEncoding,
-    RelPositionalEncoding,
-    WhisperPositionalEncoding,
-    LearnablePositionalEncoding,
-    NoPositionalEncoding)
-from ..transformer.attention import (MultiHeadedAttention,
-    RelPositionMultiHeadedAttention)
-from ..transformer.embedding import EspnetRelPositionalEncoding
-from ..transformer.subsampling import LegacyLinearNoSubsampling
-
 
 COSYVOICE_ACTIVATION_CLASSES = {
     "hardtanh": torch.nn.Hardtanh,

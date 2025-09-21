@@ -30,8 +30,8 @@ from ..utils.class_utils import (
     COSYVOICE_ATTENTION_CLASSES,
     COSYVOICE_ACTIVATION_CLASSES,
 )
-from ..utils.mask import make_pad_mask
 from ..utils.mask import add_optional_chunk_mask
+from ..utils.mask import make_pad_mask
 
 
 class Upsample1D(nn.Module):

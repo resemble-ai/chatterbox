@@ -1,0 +1,37 @@
+{
+  "model": {
+    "text_use_gpu": true,
+    "text_use_small": true,
+    "coarse_use_gpu": true,
+    "coarse_use_small": true,
+    "fine_use_gpu": true,
+    "fine_use_small": true,
+    "codec_use_gpu": true
+  },
+  "gradio_interface_options": {
+    "inline": false,
+    "inbrowser": true,
+    "share": false,
+    "debug": false,
+    "max_threads": 40,
+    "auth": null,
+    "auth_message": null,
+    "prevent_thread_lock": false,
+    "show_error": false,
+    "server_name": "127.0.0.1",
+    "server_port": 7770,
+    "height": 500,
+    "width": "100%",
+    "favicon_path": null,
+    "ssl_keyfile": null,
+    "ssl_certfile": null,
+    "ssl_keyfile_password": null,
+    "ssl_verify": true,
+    "quiet": true,
+    "show_api": true,
+    "_frontend": true
+  },
+  "extensions": {
+    "disabled": []
+  }
+}

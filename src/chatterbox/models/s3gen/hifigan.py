@@ -18,17 +18,18 @@
 """HIFI-GAN"""
 
 from typing import Dict, Optional, List
+
 import numpy as np
-from scipy.signal import get_window
 import torch
 import torch.nn.functional as F
+from scipy.signal import get_window
+from torch import nn, sin, pow
+from torch.distributions.uniform import Uniform
 from torch.nn import Conv1d
 from torch.nn import ConvTranspose1d
+from torch.nn import Parameter
 from torch.nn.utils import remove_weight_norm
 from torch.nn.utils.parametrizations import weight_norm
-from torch.distributions.uniform import Uniform
-from torch import nn, sin, pow
-from torch.nn import Parameter
 
 
 class Snake(nn.Module):

@@ -8,7 +8,6 @@ from unicodedata import category
 from tokenizers import Tokenizer
 from huggingface_hub import hf_hub_download
 
-
 # Special tokens
 SOT = "[START]"
 EOT = "[STOP]"
