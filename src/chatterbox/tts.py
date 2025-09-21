@@ -12,6 +12,12 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from .tensor_utils import (
+    load_t3_state_dict_safe,
+    load_s3gen_safe, 
+    load_voice_encoder_safe,
+    load_conditionals_safe
+)
 from .shared_utils import (
     check_mps_availability,
     get_map_location,
@@ -127,35 +133,21 @@ class ChatterboxTTS:
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
 
-        # Use shared map_location utility
-        map_location = get_map_location(device)
+        # Load voice encoder
+        ve = load_voice_encoder_safe(ckpt_dir, device, is_multilingual=False)
 
-        ve = VoiceEncoder()
-        ve.load_state_dict(
-            load_file(ckpt_dir / "ve.safetensors")
-        )
-        ve.to(device).eval()
-
+        # Load T3 model
         t3 = T3()
-        t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
-        if "model" in t3_state.keys():
-            t3_state = t3_state["model"]
-        t3.load_state_dict(t3_state)
-        t3.to(device).eval()
+        load_t3_state_dict_safe(t3, ckpt_dir / "t3_cfg.safetensors", device)
 
-        s3gen = S3Gen()
-        s3gen.load_state_dict(
-            load_file(ckpt_dir / "s3gen.safetensors"), strict=False
-        )
-        s3gen.to(device).eval()
+        # Load S3Gen model
+        s3gen = load_s3gen_safe(ckpt_dir, device, is_multilingual=False)
 
-        tokenizer = EnTokenizer(
-            str(ckpt_dir / "tokenizer.json")
-        )
+        # Load tokenizer
+        tokenizer = EnTokenizer(str(ckpt_dir / "tokenizer.json"))
 
-        conds = None
-        if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice, map_location=map_location)
+        # Load conditionals if they exist
+        conds = load_conditionals_safe(ckpt_dir, device, is_multilingual=False)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
@@ -248,16 +240,17 @@ class ChatterboxTTS:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
         # Update exaggeration if needed using shared utility
-        needs_update, new_emotion_tensor = check_exaggeration_update_needed(
-            self.conds.t3.emotion_adv, exaggeration, self.device
-        )
-        if needs_update:
-            _cond: T3Cond = self.conds.t3
-            self.conds.t3 = T3Cond(
-                speaker_emb=_cond.speaker_emb,
-                cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
-                emotion_adv=new_emotion_tensor,
-            ).to(device=self.device, dtype=self.conds.t3.speaker_emb.dtype)
+        if self.conds is not None:
+            needs_update, new_emotion_tensor = check_exaggeration_update_needed(
+                self.conds.t3.emotion_adv, exaggeration, self.device
+            )
+            if needs_update:
+                _cond: T3Cond = self.conds.t3
+                self.conds.t3 = T3Cond(
+                    speaker_emb=_cond.speaker_emb,
+                    cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
+                    emotion_adv=new_emotion_tensor,
+                ).to(device=self.device, dtype=self.conds.t3.speaker_emb.dtype)
 
         # Normalize and check if text needs chunking
         text = punc_norm(text)

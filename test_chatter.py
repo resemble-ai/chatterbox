@@ -67,13 +67,13 @@ if MULTILINGUAL:
 if __name__ == "__main__":
     # Enable API mode to bypass config loading for faster testing
     skyrimnet_chatterbox._USE_API_MODE = True
-    clear_cache_files()
-    clear_output_directories()
+    #clear_cache_files()
+    #clear_output_directories()
     # shutil.rmtree(Path("cache").joinpath("conditionals"), ignore_errors=True)
     test_text_mums= "Now let's make my mum's favourite. So three mars bars into the pan. Then we add the tuna and just stir for a bit, just let the chocolate and fish infuse. A sprinkle of olive oil and some tomato ketchup. Now smell that. Oh boy this is going to be incredible."
     test_text_mums_short= "Now let's make my mum's favourite. Oh boy this is going to be incredible."
     test_asset2 = Path.cwd().joinpath("assets", "dlc1seranavoice.wav")
-    # test_asset = Path.cwd().joinpath("assets", "fishaudio_horror.wav")
+    test_asset = Path.cwd().joinpath("assets", "fishaudio_horror.wav")
     model = skyrimnet_chatterbox.load_model()
     # wavfile = generate(model, test_text, None, exaggeration=0.65, temperature=0.8, seed_num=420, cfgw=0)
     # wavfile = skyrimnet_chatterbox.generate(model, test_text, test_asset, exaggeration=0.65, temperature=0.9, seed_num=420, cfgw=0)
@@ -107,6 +107,6 @@ if __name__ == "__main__":
     #wavfile = skyrimnet_chatterbox.generate_audio(text=test_text2, speaker_audio=test_asset2, uuid=824914275390249349,**generate_audio_args)
     #wavfile = skyrimnet_chatterbox.generate_audio(text=test_text3, speaker_audio=test_asset2, uuid=824914275390249349,**generate_audio_args)
     #wavfile = skyrimnet_chatterbox.generate_audio(text=test_text4, speaker_audio=test_asset2, uuid=824914275390249349,**generate_audio_args)
-    #wavfile = skyrimnet_chatterbox.generate_audio(text=test_text5, speaker_audio=test_asset2, uuid=824914275390249349,**generate_audio_args)
+    wavfile = skyrimnet_chatterbox.generate_audio(text=test_text5, speaker_audio=test_asset, uuid=824914275390249349,**generate_audio_args)
 
 

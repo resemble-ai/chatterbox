@@ -5,6 +5,9 @@ from transformers.generation.logits_process import MinPLogitsWarper
 class FastMinPLogitsWarper(MinPLogitsWarper):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Pre-allocate tensors for CUDA graph compatibility
+        self.false_tensor = torch.zeros(1, dtype=torch.bool)
+        self.min_p_tensor = torch.tensor(self.min_p)
 
     def __call__(
         self, input_ids: torch.LongTensor, scores: torch.FloatTensor
@@ -15,7 +18,7 @@ class FastMinPLogitsWarper(MinPLogitsWarper):
         # Get the probability of the top token for each sequence in the batch
         top_probs, _ = probs.max(dim=-1, keepdim=True)
         # Calculate the actual min_p threshold by scaling min_p with the top token's probability
-        min_p_tensor = torch.tensor(self.min_p, device=device)
+        min_p_tensor = self.min_p_tensor.to(device)
         scaled_min_p = min_p_tensor * top_probs
         # Create a mask for tokens that have a probability less than the scaled min_p
         tokens_to_remove = probs < scaled_min_p
@@ -25,7 +28,7 @@ class FastMinPLogitsWarper(MinPLogitsWarper):
             tokens_to_remove, dim=-1, index=sorted_indices
         )
         # Keep at least min_tokens_to_keep
-        false_tensor = torch.zeros(1, dtype=torch.bool, device=device)
+        false_tensor = self.false_tensor.to(device)
         sorted_indices_to_remove[..., : self.min_tokens_to_keep] = false_tensor
 
         indices_to_remove = sorted_indices_to_remove.scatter(

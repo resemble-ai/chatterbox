@@ -14,6 +14,7 @@ from src.cache_utils import (
     clear_output_directories,
     clear_cache_files
 )
+from src.chatterbox.tensor_utils import initialize_model_dtype, safe_conditional_to_dtype
 
 from loguru import logger
 
@@ -173,8 +174,7 @@ def load_model():
             logger.info("Loading English Model")
             from src.chatterbox.tts import ChatterboxTTS as Chatterbox
         MODEL = Chatterbox.from_pretrained(DEVICE)
-        MODEL.t3.to(dtype=DTYPE)
-        MODEL.conds.t3.to(dtype=DTYPE)
+        initialize_model_dtype(MODEL, DTYPE)
         torch.cuda.empty_cache()
     return MODEL
 
@@ -213,7 +213,7 @@ def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration
         if not conditionals_loaded:
             model.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
             if dtype != torch.float32:
-                model.conds.t3.to(dtype=dtype)
+                safe_conditional_to_dtype(model, dtype)
             if cache_key and (enable_memory_cache or enable_disk_cache):
                 save_conditionals_cache(cache_key, model.conds, enable_memory_cache, enable_disk_cache)
     conditional_start_time = perf_counter_ns()

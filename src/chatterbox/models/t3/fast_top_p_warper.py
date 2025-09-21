@@ -6,6 +6,8 @@ class FastTopPLogitsWarper(TopPLogitsWarper):
     def __init__(self, *args, skip_when_1=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.skip_when_1 = skip_when_1
+        # Pre-allocate tensors for CUDA graph compatibility
+        self.zero_tensor = torch.tensor(0)
 
     def __call__(
         self, input_ids: torch.LongTensor, scores: torch.FloatTensor
@@ -20,7 +22,7 @@ class FastTopPLogitsWarper(TopPLogitsWarper):
         # Remove tokens with cumulative top_p above the threshold (token with 0 are kept)
         sorted_indices_to_remove = cumulative_probs <= (1 - self.top_p)
         # Keep at least min_tokens_to_keep
-        zero_tensor = torch.tensor(0, device=device)
+        zero_tensor = self.zero_tensor.to(device)
         sorted_indices_to_remove[..., -1:] = zero_tensor
 
         # scatter sorted tensors to original indexing

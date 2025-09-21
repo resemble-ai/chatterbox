@@ -87,10 +87,13 @@ class T3(nn.Module):
         return self.speech_emb.weight.dtype
 
     def to(self, *args, **kwargs):
-        self.min_p_warper.min_p = self.min_p_warper.min_p.to(*args, **kwargs)
-        self.min_p_warper.false_tensor = self.min_p_warper.false_tensor.to(*args, **kwargs)
-        self.top_p_warper.top_p = self.top_p_warper.top_p.to(*args, **kwargs)
-        self.top_p_warper.zero_tensor = self.top_p_warper.zero_tensor.to(*args, **kwargs)
+        # Move warper tensors to the target device
+        if hasattr(self.min_p_warper, 'false_tensor'):
+            self.min_p_warper.false_tensor = self.min_p_warper.false_tensor.to(*args, **kwargs)
+        if hasattr(self.min_p_warper, 'min_p_tensor'):
+            self.min_p_warper.min_p_tensor = self.min_p_warper.min_p_tensor.to(*args, **kwargs)
+        if hasattr(self.top_p_warper, 'zero_tensor'):
+            self.top_p_warper.zero_tensor = self.top_p_warper.zero_tensor.to(*args, **kwargs)
         return super().to(*args, **kwargs)
 
 
@@ -306,16 +309,19 @@ class T3(nn.Module):
 
     def init_processors(self, top_p=1.0, min_p=0.05, repetition_penalty=1.2):
         # Processors should be pre-instantiated to avoid recompilation
-        self.top_p_warper = FastTopPLogitsWarper(top_p=top_p, device=self.device)
-        self.min_p_warper = FastMinPLogitsWarper(min_p=min_p, device=self.device)
+        self.top_p_warper = FastTopPLogitsWarper(top_p=top_p)
+        self.min_p_warper = FastMinPLogitsWarper(min_p=min_p)
         self.repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=repetition_penalty)
 
     def update_processors(self, top_p, min_p, repetition_penalty, skip_when_1=False):
         if self.top_p_warper.top_p != top_p:
-            self.top_p_warper.top_p = torch.tensor(top_p, device=self.top_p_warper.top_p.device)
+            self.top_p_warper.top_p = top_p
             self.top_p_warper.skip_when_1 = skip_when_1
         if self.min_p_warper.min_p != min_p:
-            self.min_p_warper.min_p = torch.tensor(min_p, device=self.min_p_warper.min_p.device)
+            self.min_p_warper.min_p = min_p
+            # Update the pre-allocated tensor as well
+            if hasattr(self.min_p_warper, 'min_p_tensor'):
+                self.min_p_warper.min_p_tensor = torch.tensor(min_p, device=self.min_p_warper.min_p_tensor.device)
         if self.repetition_penalty_processor.penalty != repetition_penalty:
             self.repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=repetition_penalty)
 

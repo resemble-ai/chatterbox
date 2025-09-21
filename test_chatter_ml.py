@@ -12,6 +12,7 @@ from src.cache_utils import (
    get_cache_key,
    save_torchaudio_wav
 )
+from src.chatterbox.tensor_utils import initialize_model_dtype, safe_conditional_to_dtype
 # Third-party imports
 from pathlib import Path
 
@@ -31,10 +32,7 @@ def set_seed(seed: int):
 
 def load_model():
     model = ChatterboxMultilingualTTS.from_pretrained(DEVICE)
-    model.t3.to(dtype=DTYPE)
-    # Only set conditionals dtype if they exist
-    if model.conds is not None:
-        model.conds.t3.to(dtype=DTYPE)
+    initialize_model_dtype(model, DTYPE)
     torch.cuda.empty_cache()
     return model
 
@@ -68,7 +66,7 @@ def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num
         if not conditionals_loaded:
             model.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
             if dtype != torch.float32:
-                model.conds.t3.to(dtype=dtype)
+                safe_conditional_to_dtype(model, dtype)
             # Save to cache if we have a cache key and caching is enabled
             if cache_key and (enable_memory_cache or enable_disk_cache):
                 save_conditionals_cache(cache_key, model.conds, enable_memory_cache, enable_disk_cache)

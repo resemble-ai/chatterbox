@@ -63,7 +63,11 @@ def mel_spectrogram(y, n_fft=1920, num_mels=80, sampling_rate=24000, hop_size=48
             mel_scale="slaney",
         ).T
         mel_basis[key] = mel.to(dtype=torch.float32, device=y.device)
-        hann_window[str(y.device)] = torch.hann_window(win_size, device=y.device)
+    
+    # Create cache key that includes both win_size and device to avoid collisions
+    win_key = f"{win_size}_{y.device}"
+    if win_key not in hann_window:
+        hann_window[win_key] = torch.hann_window(win_size, device=y.device)
 
     y = torch.nn.functional.pad(
         y.unsqueeze(1), (int((n_fft - hop_size) / 2), int((n_fft - hop_size) / 2)), mode="reflect"
@@ -75,7 +79,7 @@ def mel_spectrogram(y, n_fft=1920, num_mels=80, sampling_rate=24000, hop_size=48
         n_fft,
         hop_length=hop_size,
         win_length=win_size,
-        window=hann_window[str(y.device)],
+        window=hann_window[win_key],
         center=center,
         pad_mode="reflect",
         normalized=False,

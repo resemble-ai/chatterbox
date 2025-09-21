@@ -13,6 +13,7 @@ import torch
 
 from src.InterruptionFlag import interruptible, InterruptionFlag
 from src.chatterbox.models.t3.modules.cond_enc import T3Cond
+from src.chatterbox.tensor_utils import safe_conditional_to_dtype, setup_s3gen_dtypes
 from src.chatterbox.tts import Conditionals
 from src.simple_model_state import simple_manage_model_state
 
@@ -46,24 +47,12 @@ def resolve_dtype(dtype):
 
 def t3_to(model: "ChatterboxTTS", dtype):
     model.t3.to(dtype=dtype)
-    model.conds.t3.to(dtype=dtype)
+    safe_conditional_to_dtype(model, dtype)
     return model
 
 
 def s3gen_to(model: "ChatterboxTTS", dtype):
-    if dtype == torch.float16:
-        model.s3gen.flow.fp16 = True
-    elif dtype == torch.float32:
-        model.s3gen.flow.fp16 = False
-    else:
-        raise NotImplementedError(f"Unsupported dtype {dtype}")
-    # model.s3gen.flow.to(dtype=dtype)
-    model.s3gen.to(dtype=dtype)
-    model.s3gen.mel2wav.to(dtype=torch.float32)
-    # due to "Error: cuFFT doesn't support tensor of type: BFloat16" from torch.stft
-    # and other errors and general instability
-    model.s3gen.tokenizer.to(dtype=torch.float32)
-    model.s3gen.speaker_encoder.to(dtype=torch.float32)
+    setup_s3gen_dtypes(model, dtype)
     return model
 
 
@@ -353,7 +342,7 @@ def _tts_generator(
                 model.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
 
                 if dtype != torch.float32:
-                    model.conds.t3.to(dtype=dtype)
+                    safe_conditional_to_dtype(model, dtype)
 
                 # Save to disk cache if we have a cache key
                 if cache_key:
