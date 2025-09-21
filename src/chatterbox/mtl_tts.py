@@ -147,7 +147,12 @@ class ChatterboxMultilingualTTS:
         t3 = T3(T3Config.multilingual())
         t3_state = load_file(ckpt_dir / "t3_23lang.safetensors")
         if "model" in t3_state.keys():
-            t3_state = t3_state["model"][0]
+            model_val = t3_state["model"]
+            # Support both old (list) and new (direct) formats
+            if isinstance(model_val, (list, tuple)):
+                t3_state = model_val[0]
+            else:
+                t3_state = model_val
         t3.load_state_dict(t3_state)
         t3.to(device).eval()
 

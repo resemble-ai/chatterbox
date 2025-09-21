@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from sys import (stdout)
-from time import  perf_counter_ns
+from time import perf_counter_ns
 from src.cache_utils import (
     load_conditionals_cache,
    save_conditionals_cache,
@@ -15,7 +15,6 @@ from src.cache_utils import (
 # Third-party imports
 from pathlib import Path
 
-import torch
 from loguru import logger
 from src.chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
@@ -108,7 +107,7 @@ def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num
     wav_length = wav.shape[-1]   / model.sr
 
     logger.info(f"Generated audio length: {wav_length:.2f} seconds {model.sr}. Speed: {wav_length / total_duration_s:.2f}x")
-    wave_file = str(save_torchaudio_wav(wav ,model.sr, audio_path=audio_prompt_path, uuid=cache_uuid))
+    wave_file = str(save_torchaudio_wav(wav, model.sr, audio_path=audio_prompt_path, uuid=cache_uuid))
     return wave_file
     #return (model.sr, wav.squeeze(0).cpu().numpy())
 

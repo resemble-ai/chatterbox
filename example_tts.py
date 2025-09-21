@@ -1,7 +1,7 @@
 import torchaudio as ta
 import torch
-from chatterbox.tts import ChatterboxTTS
-from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+from src.chatterbox.tts import ChatterboxTTS
+from src.chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
 # Automatically detect the best available device
 if torch.cuda.is_available():

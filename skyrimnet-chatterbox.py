@@ -4,7 +4,7 @@ import torch
 
 from argparse import ArgumentParser
 from pathlib import Path
-from time import  perf_counter_ns
+from time import perf_counter_ns
 from src.cache_utils import (
     load_conditionals_cache,
     save_conditionals_cache,
@@ -181,7 +181,7 @@ def load_model():
 
 def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration=0.5, temperature=0.8, seed_num=0, cfgw=0, min_p=0.05, top_p=1.0, repetition_penalty=1.2,cache_uuid=0):
 
-    logger.info(f"generate called for: \"{text}\", {Path(audio_prompt_path).stem if audio_prompt_path else "No ref audio"}, uuid: {cache_uuid}, exaggeration: {exaggeration}")  
+    logger.info(f'generate called for: "{text}", {Path(audio_prompt_path).stem if audio_prompt_path else "No ref audio"}, uuid: {cache_uuid}, exaggeration: {exaggeration}')  
     logger.info(f"Parameters - temp: {temperature}, min_p: {min_p}, top_p: {top_p}, rep_penalty: {repetition_penalty}, cfg_weight: {cfgw}")
 
     enable_memory_cache = ENABLE_MEMORY_CACHE

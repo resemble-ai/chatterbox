@@ -1,5 +1,5 @@
 #PYTORCH*********************************************************************
---extra-index-url=https://download.pytorch.org/whl/cu129 ; sys_platform  != 'darwin'
+--extra-index-url=https://download.pytorch.org/whl/cu129
 torch<2.9
 torchaudio
 
