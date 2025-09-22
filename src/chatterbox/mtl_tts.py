@@ -181,7 +181,7 @@ class ChatterboxMultilingualTTS:
         s3gen.to(device).eval()
 
         tokenizer = MTLTokenizer(
-            str(ckpt_dir / "mtl_tokenizer.json")
+            str(ckpt_dir / "mtl_tokenizer_expandedv1.json")
         )
 
         conds = None
@@ -197,7 +197,7 @@ class ChatterboxMultilingualTTS:
                 repo_id=REPO_ID,
                 repo_type="model",
                 revision="main", 
-                allow_patterns=["ve.pt", "t3_23lang.safetensors", "s3gen.pt", "mtl_tokenizer.json", "conds.pt", "Cangjie5_TC.json"],
+                allow_patterns=["ve.pt", "t3_23lang.safetensors", "s3gen.pt", "mtl_tokenizer_expandedv1.json", "conds.pt", "Cangjie5_TC.json"],
                 token=os.getenv("HF_TOKEN"),
             )
         )

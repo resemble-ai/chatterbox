@@ -234,12 +234,52 @@ class ChineseCangjieConverter:
                 output.append(t)
         return "".join(output)
 
+class RussianStressLabeler:
+    """Adds stress marks to Russian text when the optional dependency is available."""
+
+    def __init__(self):
+        self._stresser = None
+        self._available = False
+        self._error_logged = False
+        self._initialize()
+
+    def _initialize(self):
+        try:
+            from russian_text_stresser.text_stresser import RussianTextStresser
+        except ImportError:
+            logger.warning("russian_text_stresser not available - Russian stress labeling skipped")
+            self._error_logged = True
+            return
+        except Exception as exc:
+            logger.warning(f"Failed to import RussianTextStresser: {exc}")
+            self._error_logged = True
+            return
+
+        try:
+            self._stresser = RussianTextStresser()
+            self._available = True
+        except Exception as exc:
+            logger.warning(f"Failed to initialize RussianTextStresser: {exc}")
+            self._error_logged = True
+
+    def __call__(self, text: str) -> str:
+        if not text or not self._available:
+            return text
+
+        try:
+            return self._stresser.stress_text(text)
+        except Exception as exc:
+            if not self._error_logged:
+                logger.warning(f"Russian stress labeling failed: {exc}")
+                self._error_logged = True
+            return text
 
 class MTLTokenizer:
     def __init__(self, vocab_file_path):
         self.tokenizer: Tokenizer = Tokenizer.from_file(vocab_file_path)
         model_dir = Path(vocab_file_path).parent
         self.cangjie_converter = ChineseCangjieConverter(model_dir)
+        self.russian_stress_labeler = RussianStressLabeler()
         self.check_vocabset_sot_eot()
 
     def check_vocabset_sot_eot(self):
@@ -262,6 +302,8 @@ class MTLTokenizer:
             txt = add_hebrew_diacritics(txt)
         elif language_id == 'ko':
             txt = korean_normalize(txt)
+        elif language_id == 'ru':
+            txt = self.russian_stress_labeler(txt)
         
         # Prepend language token
         if language_id:
