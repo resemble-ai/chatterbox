@@ -2,7 +2,7 @@ import random
 import numpy as np
 import torch
 import gradio as gr
-from chatterbox.tts import ChatterboxTTS
+from audio.tts import ChatterboxTTS
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
