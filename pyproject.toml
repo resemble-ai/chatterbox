@@ -23,6 +23,9 @@ dependencies = [
     "pykakasi==2.3.0",
     "gradio==5.44.1",
     "russian-text-stresser @ git+https://github.com/Vuizur/add-stress-to-epub",
+    "aiogram>=3.13.1,<4.0.0",
+    "google-genai>=0.3.0",
+    "python-dotenv>=1.0.1",
 
 ]
 
