@@ -24,7 +24,7 @@ class ChatTurn:
 def _format_documents(documents: Sequence[DocumentChunk]) -> str:
     parts: List[str] = []
     for idx, doc in enumerate(documents, start=1):
-        parts.append(f"[Источник {idx}: {doc.source}]\n{doc.text}")
+        parts.append(f"Документ {idx} ({doc.source})\n{doc.text}")
     return "\n\n".join(parts)
 
 
@@ -46,9 +46,10 @@ class GeminiChatService:
         self._model = model
         self._kb = LocalKnowledgeBase(data_dir)
         self._system_prompt = system_prompt or (
-            "Ты помощник, отвечающий на вопросы об ИТМО."
-            " Используй предоставленные фрагменты и предыдущий диалог."
-            " Если не нашёл точного ответа, честно сообщи об этом."
+            "Ты — дружелюбный ассистент LISA INFO. Отвечай только на русском языке и помогай кратко и по делу. "
+            "Если вопрос требует данных из базы знаний, используй факты из документов без перечисления источников. "
+            "Когда точного ответа нет, честно сообщи об этом и предложи дальнейшие шаги. "
+            "Держи каждый ответ короче 2000 символов, начинай с конкретных действий и избегай лишней воды."
         )
         self._history_limit = max(2, history_limit)
 
@@ -59,63 +60,40 @@ class GeminiChatService:
         documents: Sequence[DocumentChunk],
     ) -> List[dict]:
         payload: List[dict] = []
-        payload.append(
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "text": (
-                            "[SYSTEM]\n"
-                            f"{self._system_prompt}\n\n"
-                            "Сначала изучи контекст, затем ответь на вопрос"
-                            " коротко и понятно."
-                        )
-                    }
-                ],
-            }
+
+        system_text = (
+            "[SYSTEM]\n"
+            f"{self._system_prompt}\n\n"
+            "Всегда отвечай на русском языке. Если информации недостаточно, объясни это и предложи, что можно сделать дальше."
+            "\nKeep replies focused on concrete actions, stay under 2000 characters, and avoid filler."
         )
+        payload.append({"role": "user", "parts": [{"text": system_text}]})
 
         for turn in history[-self._history_limit :]:
             payload.append({"role": turn.role, "parts": [{"text": turn.content}]})
 
         if documents:
-            payload.append(
-                {
-                    "role": "user",
-                    "parts": [
-                        {
-                            "text": (
-                                "[КОНТЕКСТ]\n"
-                                f"{_format_documents(documents)}\n\n"
-                                "Используй только факты из контекста."
-                            )
-                        }
-                    ],
-                }
+            docs_text = (
+                "[DOCUMENTS]\n"
+                f"{_format_documents(documents)}\n\n"
+                "Используй эти выдержки по смыслу, но не перечисляй источники в ответе."
             )
+            payload.append({"role": "user", "parts": [{"text": docs_text}]})
 
-        payload.append(
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "text": (
-                            "[ВОПРОС]\n"
-                            f"{user_message}\n\n"
-                            "Формат ответа: вежливое пояснение на русском языке"
-                            " с отсылками к источникам вида [Источник N]."
-                        )
-                    }
-                ],
-            }
+        user_text = (
+            "[USER]\n"
+            f"{user_message}\n\n"
+            "Ответ сформируй по-русски, без явного перечисления источников."
         )
+        payload.append({"role": "user", "parts": [{"text": user_text}]})
+
         return payload
 
     def _generate(self, payload: List[dict]) -> str:
         response = self._client.models.generate_content(model=self._model, contents=payload)
         text = getattr(response, "text", None)
         if not text:
-            text = "Извини, не удалось получить ответ от модели."
+            text = "К сожалению, ответ не был сформирован. Попробуйте переформулировать вопрос."
         return text.strip()
 
     def answer(

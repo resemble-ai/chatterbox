@@ -161,23 +161,28 @@ class ChatterboxMultilingualTTS:
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(ckpt_dir)
 
+        if device in {"cpu", "mps"}:
+            map_location = torch.device("cpu")
+            safetensor_device = "cpu"
+        else:
+            map_location = None
+            safetensor_device = device
+
         ve = VoiceEncoder()
-        ve.load_state_dict(
-            torch.load(ckpt_dir / "ve.pt", weights_only=True)
-        )
+        ve_state = torch.load(ckpt_dir / "ve.pt", map_location=map_location, weights_only=True)
+        ve.load_state_dict(ve_state)
         ve.to(device).eval()
 
         t3 = T3(T3Config.multilingual())
-        t3_state = load_safetensors(ckpt_dir / "t3_mtl23ls_v2.safetensors")
+        t3_state = load_safetensors(ckpt_dir / "t3_mtl23ls_v2.safetensors", device=safetensor_device)
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
         t3.to(device).eval()
 
         s3gen = S3Gen()
-        s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", weights_only=True)
-        )
+        s3gen_state = torch.load(ckpt_dir / "s3gen.pt", map_location=map_location, weights_only=True)
+        s3gen.load_state_dict(s3gen_state)
         s3gen.to(device).eval()
 
         tokenizer = MTLTokenizer(
@@ -186,7 +191,7 @@ class ChatterboxMultilingualTTS:
 
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice).to(device)
+            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 

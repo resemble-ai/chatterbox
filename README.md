@@ -38,16 +38,22 @@
    - `DATA_DIRECTORY` — путь к папке с текстами (по умолчанию `data`).
    - `DATABASE_PATH` — путь к файлу SQLite (по умолчанию `chattractive.db`).
    - `GEMINI_MODEL` — модель Gemini (по умолчанию `gemini-2.0-flash-exp`).
-   - `AUDIO_MODEL_DIR` — каталог с весами Chatterbox, чтобы включить TTS.
-   - `VOICE_DEVICE` — устройство для генерации звука (`cpu`, `cuda` и т.д.).
+   - `AUDIO_MODEL_DIR` - ??????? ? ?????? Chatterbox (?? ????????? ./models).
+   - `VOICE_DEVICE` - ?????????? ??? ????????? ????? (`cpu`, `cuda` ? ?.?.).
+   - `VOICE_LANGUAGE` - ???????? ??? ??? ??????? (????????, `ru`, `en`).
+
 
 3. **Заполните папку `data/`** текстовыми файлами (`.txt`, `.md`, `.rst`) с актуальной информацией.
 
 4. **Запустите бота**:
 
    ```bash
+   python load_model.py  # downloads Chatterbox multilingual TTS weights if missing
    python main.py
    ```
+
+By default multilingual weights are cached in ./models; keep AUDIO_MODEL_DIR unset to reuse that folder automatically.
+Supported language ids include: ar, da, de, el, en, es, fi, fr, he, hi, it, ja, ko, ms, nl, no, pl, pt, ru, sv, sw, tr, zh.
 
 ## Архитектура
 
@@ -73,3 +79,6 @@
 ---
 
 Проект предназначен как отправная точка для внутренних ассистентов на базе Gemini. Расширяйте и дополняйте функциональность под свои сценарии.
+
+
+

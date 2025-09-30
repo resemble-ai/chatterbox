@@ -8,6 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from app.bot.bot import BotConfig, TelegramBot
+from load_model import ensure_model_present, missing_required_files, resolve_model_dir
 
 
 logging.basicConfig(
@@ -36,9 +37,23 @@ async def main() -> None:
 
     data_dir = Path(_get_env("DATA_DIRECTORY", required=False) or "data")
     db_path = Path(_get_env("DATABASE_PATH", required=False) or "chattractive.db")
-    model_dir_env = _get_env("AUDIO_MODEL_DIR", required=False) or None
-    model_dir = Path(model_dir_env) if model_dir_env else None
+
+    model_dir_env = _get_env("AUDIO_MODEL_DIR", required=False)
+
+    if model_dir_env:
+        model_dir = Path(model_dir_env)
+        missing_files = missing_required_files(model_dir)
+        if missing_files:
+            missing_str = ", ".join(missing_files)
+            raise RuntimeError(
+                f"AUDIO_MODEL_DIR points to {model_dir} but is missing required files: {missing_str}"
+            )
+    else:
+        model_dir = resolve_model_dir()
+        ensure_model_present(model_dir)
+
     voice_device = _get_env("VOICE_DEVICE", required=False) or "cpu"
+    voice_language = _get_env("VOICE_LANGUAGE", required=False) or "ru"
     model_name = _get_env("GEMINI_MODEL", required=False) or "gemini-2.0-flash-exp"
 
     config = BotConfig(
@@ -49,6 +64,7 @@ async def main() -> None:
         model_dir=model_dir,
         model_name=model_name,
         voice_device=voice_device,
+        voice_language=voice_language,
     )
 
     bot = TelegramBot(config, api_key)
@@ -60,3 +76,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+

@@ -6,12 +6,13 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.types import FSInputFile, KeyboardButton, Message, ReplyKeyboardMarkup
 
 from app.AI.chat_service import ChatTurn, GeminiChatService
 from app.audio.voice_service import VoiceSynthesizer
@@ -21,11 +22,11 @@ from app.db.storage import ChatDatabase
 logger = logging.getLogger(__name__)
 
 
-RESTART_BUTTON = "🔄 Перезапуск"
-ENABLE_MANUAL_BUTTON = "🙋 Включить ручной режим"
-DISABLE_MANUAL_BUTTON = "🤖 Вернуться к боту"
-ENABLE_VOICE_BUTTON = "🎙 Включить голос"
-DISABLE_VOICE_BUTTON = "🔇 Только текст"
+RESTART_BUTTON = "Restart"
+ENABLE_MANUAL_BUTTON = "Enable manual"
+DISABLE_MANUAL_BUTTON = "Auto mode"
+ENABLE_VOICE_BUTTON = "Enable voice"
+DISABLE_VOICE_BUTTON = "Text only"
 
 
 def _build_keyboard(*, manual_mode: bool, voice_enabled: bool) -> ReplyKeyboardMarkup:
@@ -42,6 +43,33 @@ def _build_keyboard(*, manual_mode: bool, voice_enabled: bool) -> ReplyKeyboardM
     return keyboard
 
 
+def _split_message(text: str, max_len: int = 4000) -> List[str]:
+    '''Split long Telegram replies into chunks respecting word boundaries when possible.'''
+    if not text:
+        return []
+
+    chunks: List[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= max_len:
+            chunks.append(remaining)
+            break
+
+        split_idx = max(remaining.rfind('\n', 0, max_len), remaining.rfind(' ', 0, max_len))
+        if split_idx <= 0:
+            split_idx = max_len
+
+        chunk = remaining[:split_idx].rstrip()
+        if not chunk:
+            chunk = remaining[:max_len]
+            split_idx = max_len
+
+        chunks.append(chunk)
+        remaining = remaining[split_idx:].lstrip()
+
+    return chunks
+
+
 @dataclass
 class BotConfig:
     token: str
@@ -51,12 +79,13 @@ class BotConfig:
     model_dir: Optional[Path] = None
     model_name: str = "gemini-2.0-flash-exp"
     voice_device: str = "cpu"
+    voice_language: str = "ru"
 
 
 class TelegramBot:
     def __init__(self, config: BotConfig, api_key: str) -> None:
         self._config = config
-        self._bot = Bot(token=config.token, parse_mode=ParseMode.HTML)
+        self._bot = Bot(token=config.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         self._dispatcher = Dispatcher()
         self._db = ChatDatabase(config.db_path)
         self._chat_service = GeminiChatService(
@@ -64,7 +93,7 @@ class TelegramBot:
             data_dir=config.data_dir,
             model=config.model_name,
         )
-        self._voice = VoiceSynthesizer(model_dir=config.model_dir, device=config.voice_device)
+        self._voice = VoiceSynthesizer(model_dir=config.model_dir, device=config.voice_device, language=config.voice_language)
         self._register_handlers()
 
     @property
@@ -176,12 +205,9 @@ class TelegramBot:
             self._db.add_message(chat_id, "user", message.text)
             self._db.add_message(chat_id, "assistant", reply_text)
 
-            sources_block = ""
-            if documents:
-                lines = [f"[Источник {idx}] {doc.source}" for idx, doc in enumerate(documents, start=1)]
-                sources_block = "\n\n" + "\n".join(lines)
-
-            await message.answer(reply_text + sources_block)
+            for chunk in _split_message(reply_text):
+                if chunk:
+                    await message.answer(chunk)
 
             if self._db.is_voice_enabled(chat_id):
                 audio_path = Path("tmp_audio") / f"reply_{chat_id}_{message.message_id}.wav"
@@ -190,12 +216,11 @@ class TelegramBot:
                     lambda: self._voice.synthesize(reply_text, audio_path),
                 )
                 if generated_path:
-                    with generated_path.open("rb") as audio_file:
-                        await self._bot.send_voice(chat_id, audio_file)
+                    await self._bot.send_voice(chat_id, FSInputFile(str(generated_path)))
                     try:
                         generated_path.unlink()
                     except OSError:
-                        logger.debug("Не удалось удалить временный файл %s", generated_path)
+                        logger.debug("Failed to remove temporary voice file %s", generated_path)
 
     def _current_keyboard(self, chat_id: int) -> ReplyKeyboardMarkup:
         manual = self._db.is_manual_mode(chat_id)
@@ -204,3 +229,6 @@ class TelegramBot:
 
     async def start(self) -> None:
         await self._dispatcher.start_polling(self._bot)
+
+
+
