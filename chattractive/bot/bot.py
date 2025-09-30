@@ -15,9 +15,9 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import FSInputFile, KeyboardButton, Message, ReplyKeyboardMarkup
 
-from app.AI.chat_service import ChatTurn, GeminiChatService
-from app.audio.voice_service import VoiceSynthesizer
-from app.db.storage import ChatDatabase
+from chattractive.ai.chat_service import ChatTurn, GeminiChatService
+from chattractive.audio.voice_service import VoiceSynthesizer
+from chattractive.db.storage import ChatDatabase
 
 
 logger = logging.getLogger(__name__)

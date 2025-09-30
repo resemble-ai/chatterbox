@@ -7,7 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from app.bot.bot import BotConfig, TelegramBot
+from chattractive.bot.bot import BotConfig, TelegramBot
 from load_model import ensure_model_present, missing_required_files, resolve_model_dir
 
 

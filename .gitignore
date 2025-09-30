@@ -49,3 +49,5 @@ checkpoints/
 chattractive.bd
 chattractive.db
 models/
+!chattractive/vendor/chatterbox/models/
+!chattractive/vendor/chatterbox/models/**

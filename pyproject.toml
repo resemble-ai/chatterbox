@@ -1,12 +1,12 @@
 [project]
-name = "chatterbox-tts"
-version = "0.1.4"
-description = "Chatterbox: Open Source TTS and Voice Conversion by Resemble AI"
+name = "chattractive"
+version = "0.1.0"
+description = "Chattractive Telegram assistant with Gemini RAG and Chatterbox TTS"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
-    {name = "resemble-ai", email = "engineering@resemble.ai"}
+    {name = "Chattractive Team"}
 ]
 dependencies = [
     "numpy>=1.24.0,<1.26.0",
@@ -32,13 +32,12 @@ dependencies = [
 gradio = ["gradio==3.50.2"]
 
 [project.urls]
-Homepage = "https://github.com/resemble-ai/chatterbox"
-Repository = "https://github.com/resemble-ai/chatterbox"
+Repository = "https://github.com/Chattractive/Chattractive"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["app"]
+where = ["chattractive"]
 

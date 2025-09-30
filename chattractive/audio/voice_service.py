@@ -83,6 +83,15 @@ def _strip_spurious_stress_marks(text: str) -> str:
     return _STRESS_APOSTROPHE_RE.sub('', text)
 
 
+def _preview(text: str, *, limit: int = 120) -> str:
+    if not text:
+        return ""
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[: limit - 1]}…"
+
+
 class VoiceSynthesizer:
     """Lazily loads the multilingual Chatterbox TTS model and exposes a helper method."""
 
@@ -238,8 +247,8 @@ class VoiceSynthesizer:
             logger.warning("Подготовленный текст для озвучки пуст; используем оригинальный ответ")
             prepared_text = text.strip()
 
-        logger.info("Gemini reply text: %s", text)
-        logger.info("Gemini TTS text: %s", prepared_text)
+        logger.debug("Gemini reply preview: %s", _preview(text))
+        logger.debug("Gemini TTS preview: %s", _preview(prepared_text))
 
         chunks = _split_text_for_tts(prepared_text)
         if not chunks:
