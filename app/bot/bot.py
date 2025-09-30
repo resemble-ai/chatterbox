@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
@@ -22,11 +23,11 @@ from app.db.storage import ChatDatabase
 logger = logging.getLogger(__name__)
 
 
-RESTART_BUTTON = "Restart"
-ENABLE_MANUAL_BUTTON = "Enable manual"
-DISABLE_MANUAL_BUTTON = "Auto mode"
-ENABLE_VOICE_BUTTON = "Enable voice"
-DISABLE_VOICE_BUTTON = "Text only"
+RESTART_BUTTON = "🔄 Перезапуск"
+ENABLE_MANUAL_BUTTON = "🧑‍💻 Включить ручной"
+DISABLE_MANUAL_BUTTON = "🤖 Авто режим"
+ENABLE_VOICE_BUTTON = "🔊 Включить голос"
+DISABLE_VOICE_BUTTON = "💬 Только текст"
 
 
 def _build_keyboard(*, manual_mode: bool, voice_enabled: bool) -> ReplyKeyboardMarkup:
@@ -93,7 +94,13 @@ class TelegramBot:
             data_dir=config.data_dir,
             model=config.model_name,
         )
-        self._voice = VoiceSynthesizer(model_dir=config.model_dir, device=config.voice_device, language=config.voice_language)
+        self._voice = VoiceSynthesizer(
+            model_dir=config.model_dir,
+            device=config.voice_device,
+            language=config.voice_language,
+            gemini_api_key=api_key,
+            gemini_model=config.model_name,
+        )
         self._register_handlers()
 
     @property
@@ -160,7 +167,7 @@ class TelegramBot:
             mapping = self._db.resolve_manual_reply(message.reply_to_message.message_id)
             if not mapping:
                 return
-            chat_id, _, _ = mapping
+            chat_id, _, _, info_message_id = mapping
             if message.text:
                 await self._bot.send_message(chat_id, message.text)
                 self._db.add_message(chat_id, "assistant", message.text)
@@ -170,7 +177,11 @@ class TelegramBot:
             else:
                 await message.copy_to(chat_id)
                 self._db.add_message(chat_id, "assistant", "[Ответ администратора]")
-            self._db.remove_manual_record(message.reply_to_message.message_id)
+            if info_message_id:
+                try:
+                    await self._bot.delete_message(chat_id, info_message_id)
+                except TelegramBadRequest:
+                    pass
 
         @dp.message()
         async def handle_message(message: Message) -> None:
@@ -182,14 +193,15 @@ class TelegramBot:
                 return
             if self._db.is_manual_mode(chat_id):
                 forwarded = await message.forward(self._config.admin_group_id)
+                notice = await message.answer("📨 Сообщение передано администраторам. Ожидайте ответа.")
                 self._db.register_manual_forward(
                     admin_message_id=forwarded.message_id,
                     chat_id=chat_id,
                     user_id=user_id or 0,
                     user_message_id=message.message_id,
+                    info_message_id=notice.message_id,
                 )
                 self._db.add_message(chat_id, "user", message.text)
-                await message.answer("Отправил сообщение администраторам. Они скоро ответят.")
                 return
 
             history_records = self._db.get_history(chat_id)
@@ -210,17 +222,24 @@ class TelegramBot:
                     await message.answer(chunk)
 
             if self._db.is_voice_enabled(chat_id):
+                status_message = await message.answer("🎧 Генерирую аудио-версию ответа...")
                 audio_path = Path("tmp_audio") / f"reply_{chat_id}_{message.message_id}.wav"
-                generated_path = await loop.run_in_executor(
-                    None,
-                    lambda: self._voice.synthesize(reply_text, audio_path),
-                )
-                if generated_path:
-                    await self._bot.send_voice(chat_id, FSInputFile(str(generated_path)))
+                try:
+                    generated_path = await loop.run_in_executor(
+                        None,
+                        lambda: self._voice.synthesize(reply_text, audio_path),
+                    )
+                    if generated_path:
+                        await self._bot.send_voice(chat_id, FSInputFile(str(generated_path)))
+                        try:
+                            generated_path.unlink()
+                        except OSError:
+                            logger.debug("Failed to remove temporary voice file %s", generated_path)
+                finally:
                     try:
-                        generated_path.unlink()
-                    except OSError:
-                        logger.debug("Failed to remove temporary voice file %s", generated_path)
+                        await self._bot.delete_message(chat_id, status_message.message_id)
+                    except TelegramBadRequest:
+                        pass
 
     def _current_keyboard(self, chat_id: int) -> ReplyKeyboardMarkup:
         manual = self._db.is_manual_mode(chat_id)

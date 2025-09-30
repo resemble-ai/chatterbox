@@ -24,7 +24,9 @@ dependencies = [
     "russian-text-stresser @ git+https://github.com/Vuizur/add-stress-to-epub",
     "aiogram>=3.13.1,<4.0.0",
     "python-dotenv>=1.0.1",
-    "google-genai>=0.2.2,<0.4.0",\r\n    "num2words>=0.5.13",\r\n\r\n]
+    "google-genai>=0.2.2,<0.4.0",
+    "num2words>=0.5.13",
+]
 
 [project.optional-dependencies]
 gradio = ["gradio==3.50.2"]

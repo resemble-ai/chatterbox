@@ -1,5 +1,7 @@
 import logging
 import json
+import sqlite3
+import threading
 
 import torch
 from pathlib import Path
@@ -234,17 +236,66 @@ class ChineseCangjieConverter:
         return "".join(output)
 
 
-def add_russian_stress(text: str) -> str:
-    """Russian text normalization: adds stress marks to Russian text."""
-    global _russian_stresser
-    
+
+
+_russian_stresser_lock = threading.Lock()
+
+
+class _ThreadSafeCursorProxy:
+    def __init__(self, connection, lock):
+        self._connection = connection
+        self._lock = lock
+
+    def execute(self, *args, **kwargs):
+        with self._lock:
+            return self._connection.execute(*args, **kwargs)
+
+    def executemany(self, *args, **kwargs):
+        with self._lock:
+            return self._connection.executemany(*args, **kwargs)
+
+
+def _ensure_threadsafe_russian_dictionary(stresser) -> None:
+    rd = getattr(stresser, "rd", None)
+    if rd is None or getattr(rd, "_threadsafe", False):
+        return
     try:
+        conn = rd._con
+        db_info = conn.execute("PRAGMA database_list").fetchone()
+        db_path = db_info[2] if db_info else None
+        conn.close()
+        if not db_path:
+            return
+        lock = threading.Lock()
+        threadsafe_conn = sqlite3.connect(db_path, check_same_thread=False)
+        rd._con = threadsafe_conn
+        rd._cur = _ThreadSafeCursorProxy(threadsafe_conn, lock)
+        rd._threadsafe_lock = lock
+        rd._threadsafe = True
+    except Exception as exc:
+        logger.warning(f'Failed to enable thread-safe Russian dictionary access: {exc}')
+
+
+def _get_russian_stresser():
+    global _russian_stresser
+    if _russian_stresser is not None:
+        return _russian_stresser
+    with _russian_stresser_lock:
         if _russian_stresser is None:
             from russian_text_stresser.text_stresser import RussianTextStresser
-            _russian_stresser = RussianTextStresser()
-        
-        return _russian_stresser.stress_text(text)
-        
+            stresser = RussianTextStresser()
+            _ensure_threadsafe_russian_dictionary(stresser)
+            _russian_stresser = stresser
+    return _russian_stresser
+
+
+def add_russian_stress(text: str) -> str:
+    """Russian text normalization: adds stress marks to Russian text."""
+    try:
+        stresser = _get_russian_stresser()
+        if stresser is None:
+            return text
+        return stresser.stress_text(text)
     except ImportError:
         logger.warning("russian_text_stresser not available - Russian stress labeling skipped")
         return text

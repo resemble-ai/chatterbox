@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 from google import genai
+from requests.exceptions import RequestException
 
 from .knowledge_base import DocumentChunk, LocalKnowledgeBase
 
@@ -65,6 +66,7 @@ class GeminiChatService:
             "[SYSTEM]\n"
             f"{self._system_prompt}\n\n"
             "Всегда отвечай на русском языке. Если информации недостаточно, объясни это и предложи, что можно сделать дальше."
+            "\nИспользуй для форматирование только эти символы, которые понимает Telegram: **жирный**, __курсив__, ~~зачёркнутый~~, `моно`, ```моно-блок``` и ничего сверх этого."
             "\nKeep replies focused on concrete actions, stay under 2000 characters, and avoid filler."
         )
         payload.append({"role": "user", "parts": [{"text": system_text}]})
@@ -90,7 +92,14 @@ class GeminiChatService:
         return payload
 
     def _generate(self, payload: List[dict]) -> str:
-        response = self._client.models.generate_content(model=self._model, contents=payload)
+        try:
+            response = self._client.models.generate_content(model=self._model, contents=payload)
+        except RequestException as exc:
+            logger.warning("Gemini request failed: %s", exc)
+            return "Сейчас не получается получить ответ. Попробуйте ещё раз чуть позже."
+        except Exception as exc:
+            logger.exception("Gemini request crashed: %s", exc)
+            return "Произошла ошибка при обращении к модели. Попробуйте повторить запрос позднее."
         text = getattr(response, "text", None)
         if not text:
             text = "К сожалению, ответ не был сформирован. Попробуйте переформулировать вопрос."

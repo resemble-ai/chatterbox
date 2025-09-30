@@ -49,10 +49,15 @@ class ChatDatabase:
                 chat_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
                 user_message_id INTEGER NOT NULL,
+                info_message_id INTEGER,
                 FOREIGN KEY(chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
             );
             """
         )
+        cur.execute("PRAGMA table_info(manual_queue)")
+        columns = {row[1] for row in cur.fetchall()}
+        if "info_message_id" not in columns:
+            cur.execute("ALTER TABLE manual_queue ADD COLUMN info_message_id INTEGER")
         cur.close()
         self._conn.commit()
 
@@ -132,27 +137,25 @@ class ChatDatabase:
         chat_id: int,
         user_id: int,
         user_message_id: int,
+        info_message_id: Optional[int] = None,
     ) -> None:
         with self._cursor() as cur:
             cur.execute(
                 """
-                INSERT OR REPLACE INTO manual_queue(admin_message_id, chat_id, user_id, user_message_id)
-                VALUES (?, ?, ?, ?)
+                INSERT OR REPLACE INTO manual_queue(admin_message_id, chat_id, user_id, user_message_id, info_message_id)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (admin_message_id, chat_id, user_id, user_message_id),
+                (admin_message_id, chat_id, user_id, user_message_id, info_message_id),
             )
         self._conn.commit()
 
-    def resolve_manual_reply(self, admin_message_id: int) -> Optional[Tuple[int, int, int]]:
+
+    def resolve_manual_reply(self, admin_message_id: int) -> Optional[Tuple[int, int, int, Optional[int]]]:
         with self._cursor() as cur:
             cur.execute(
-                "SELECT chat_id, user_id, user_message_id FROM manual_queue WHERE admin_message_id = ?",
+                "SELECT chat_id, user_id, user_message_id, info_message_id FROM manual_queue WHERE admin_message_id = ?",
                 (admin_message_id,),
             )
             row = cur.fetchone()
         return tuple(row) if row else None
 
-    def remove_manual_record(self, admin_message_id: int) -> None:
-        with self._cursor() as cur:
-            cur.execute("DELETE FROM manual_queue WHERE admin_message_id = ?", (admin_message_id,))
-        self._conn.commit()

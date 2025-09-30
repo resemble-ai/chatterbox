@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Resemble AI
+﻿# Copyright (c) 2025 Resemble AI
 # Author: John Meade, Jeremy Hsu
 # MIT License
 import logging
@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 LLAMA_ALIGNED_HEADS = [(12, 15), (13, 11), (9, 2)]
+MAX_TAIL_FRAMES = 80  # force EOS if tail exceeds ~1.6s (assuming ~20ms per frame)
 
 
 @dataclass
@@ -133,7 +134,11 @@ class AlignmentStreamAnalyzer:
         last_text_token_duration = A[15:, -3:].sum()
 
         # Activations for the final token that last too long are likely hallucinations.
-        long_tail = self.complete and (A[self.completed_at:, -3:].sum(dim=0).max() >= 5) # 200ms
+        long_tail = self.complete and (A[self.completed_at:, -3:].sum(dim=0).max() >= 5) # ~200ms
+        if self.complete and self.completed_at is not None:
+            tail_frames = self.curr_frame_pos - self.completed_at
+            if tail_frames >= MAX_TAIL_FRAMES:
+                long_tail = True
 
         # If there are activations in previous tokens after generation has completed, assume this is a repetition error.
         alignment_repetition = self.complete and (A[self.completed_at:, :-5].max(dim=1).values.sum() > 5)
@@ -146,22 +151,23 @@ class AlignmentStreamAnalyzer:
             else:
                 token_id = next_token
             self.generated_tokens.append(token_id)
-            
-            # Keep only last 8 tokens to prevent memory issues
-            if len(self.generated_tokens) > 8:
-                self.generated_tokens = self.generated_tokens[-8:]
-            
-        # Check for excessive token repetition (3x same token in a row)
+
+            # Keep only last 12 tokens to limit memory while keeping enough context
+            if len(self.generated_tokens) > 12:
+                self.generated_tokens = self.generated_tokens[-12:]
+
+        # Check for excessive repetition: require three identical tokens in a row
+        recent_window = self.generated_tokens[-3:]
         token_repetition = (
-            # self.complete and 
-            len(self.generated_tokens) >= 3 and
-            len(set(self.generated_tokens[-2:])) == 1
+            len(recent_window) == 3
+            and len(set(recent_window)) == 1
+            and self.started
         )
-        
+
         if token_repetition:
-            repeated_token = self.generated_tokens[-1]
-            logger.warning(f"🚨 Detected 2x repetition of token {repeated_token}")
-            
+            repeated_token = recent_window[-1]
+            logger.warning(f"Detected 3x repetition of token {repeated_token}")
+
         # Suppress EoS to prevent early termination
         if cur_text_posn < S - 3 and S > 5:  # Only suppress if text is longer than 5 tokens
             logits[..., self.eos_idx] = -2**15
@@ -170,9 +176,9 @@ class AlignmentStreamAnalyzer:
         # NOTE: this means logits may be inconsistent with latents!
         if long_tail or alignment_repetition or token_repetition:
             logger.warning(f"forcing EOS token, {long_tail=}, {alignment_repetition=}, {token_repetition=}")
-            # (±2**15 is safe for all dtypes >= 16bit)
-            logits = -(2**15) * torch.ones_like(logits)
-            logits[..., self.eos_idx] = 2**15
+            logits = logits.clone()
+            eos_boost = logits.max(dim=-1, keepdim=True).values
+            logits[..., self.eos_idx] = eos_boost + 10
 
         self.curr_frame_pos += 1
         return logits
