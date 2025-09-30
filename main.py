@@ -24,8 +24,16 @@ def _get_env(name: str, *, required: bool = True) -> str:
     return value or ""
 
 
+def _parse_bool_env(value: str | None) -> bool:
+    if not value:
+        return False
+    return value.strip().upper() in {"TRUE", "1", "YES", "ON"}
+
+
 async def main() -> None:
     load_dotenv()
+
+    antisleep_enabled = _parse_bool_env(_get_env("ANTISLEEP", required=False))
 
     token = _get_env("TELEGRAM_BOT_TOKEN")
     api_key = _get_env("GOOGLE_API_KEY")
@@ -67,11 +75,24 @@ async def main() -> None:
         voice_language=voice_language,
     )
 
+    guard = None
+    if antisleep_enabled:
+        try:
+            from chattractive.antisleep import AntiSleepGuard
+
+            guard = AntiSleepGuard()
+            guard.enable()
+        except Exception:  # pragma: no cover - platform dependent
+            logging.exception("Failed to enable anti-sleep guard")
+            guard = None
+
     bot = TelegramBot(config, api_key)
     try:
         await bot.start()
     finally:
         await bot.close()
+        if guard:
+            guard.disable()
 
 
 if __name__ == "__main__":

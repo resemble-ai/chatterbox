@@ -17,10 +17,14 @@ Chattractive — Telegram‑бот, который отвечает на воп�
 1. **Создайте виртуальное окружение и установите зависимости**:
 
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   pip install --upgrade pip
+   -3.11 -m venv venv
+   venv/Scripts/Activate
    pip install -e .
+
+   #Для использование cuda, нужно указать VOICE_DEVICE=cuda в окружении и дополнительно ввести команды:
+
+   pip uninstall torch torchaudio
+   pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0 torchaudio==2.6.0
    ```
 
 2. **Заполните переменные окружения**. Скопируйте `env.example` в `.env` и пропишите значения:

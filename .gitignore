@@ -11,7 +11,13 @@ __pycache__/
 # C extensions
 *.so
 
-# Distribution / packaging
+.env
+.env.local
+.env.production
+.env.staging
+.env.development
+
+*.so
 .Python
 build/
 develop-eggs/
@@ -29,6 +35,17 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+.virtualenvs/
+.env/
+.venv
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
