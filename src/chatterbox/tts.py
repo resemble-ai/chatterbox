@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence, Union
 
 import librosa
 import torch
@@ -8,6 +11,7 @@ import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
+from .audio_utils import load_and_condition_reference
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
 from .models.s3gen import S3GEN_SR, S3Gen
@@ -103,6 +107,9 @@ class Conditionals:
         return cls(T3Cond(**kwargs['t3']), kwargs['gen'])
 
 
+AudioReference = Union[str, Path, Sequence[Union[str, Path]]]
+
+
 class ChatterboxTTS:
     ENC_COND_LEN = 6 * S3_SR
     DEC_COND_LEN = 10 * S3GEN_SR
@@ -179,16 +186,30 @@ class ChatterboxTTS:
 
         return cls.from_local(Path(local_path).parent, device)
 
-    def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
-        ## Load reference wav
-        s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
+    def prepare_conditionals(
+        self,
+        wav_fpath: AudioReference,
+        exaggeration=0.5,
+        trim_db: float = 40.0,
+        target_loudness_db: float = -27.0,
+    ):
+        """Pre-compute conditioning from one or multiple reference files."""
+        s3gen_ref_wav = load_and_condition_reference(
+            wav_fpath,
+            target_sr=S3GEN_SR,
+            max_samples=self.DEC_COND_LEN,
+            top_db=trim_db,
+            target_loudness_db=target_loudness_db,
+        )
 
         ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+        if ref_16k_wav.shape[-1] > self.ENC_COND_LEN:
+            ref_16k_wav = ref_16k_wav[:self.ENC_COND_LEN]
 
-        s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
 
         # Speech cond prompt tokens
+        t3_cond_prompt_tokens = None
         if plen := self.t3.hp.speech_cond_prompt_len:
             s3_tokzr = self.s3gen.tokenizer
             t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav[:self.ENC_COND_LEN]], max_len=plen)
@@ -211,7 +232,7 @@ class ChatterboxTTS:
         repetition_penalty=1.2,
         min_p=0.05,
         top_p=1.0,
-        audio_prompt_path=None,
+        audio_prompt_path: AudioReference | None = None,
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
