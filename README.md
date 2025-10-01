@@ -30,6 +30,8 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
 - **General Use (TTS and Voice Agents):**
   - The default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts.
   - If the reference speaker has a fast speaking style, lowering `cfg_weight` to around `0.3` can improve pacing.
+  - You can pass a list of reference audio files to `audio_prompt_path` (or `target_voice_path` in voice conversion) and the
+    library will trim silence and loudness-normalise the takes before computing the conditioning.
 
 - **Expressive or Dramatic Speech:**
   - Try lower `cfg_weight` values (e.g. `~0.3`) and increase `exaggeration` to around `0.7` or higher.
@@ -64,12 +66,24 @@ text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the e
 wav = model.generate(text)
 ta.save("test-1.wav", wav, model.sr)
 
-# If you want to synthesize with a different voice, specify the audio prompt
-AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
-wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
+# If you want to synthesize with a different voice, specify one or more audio prompts
+AUDIO_PROMPTS = ["YOUR_FILE.wav", "ANOTHER_TAKE.wav"]
+wav = model.generate(text, audio_prompt_path=AUDIO_PROMPTS)
 ta.save("test-2.wav", wav, model.sr)
 ```
+When you pass multiple prompts, Chatterbox automatically trims leading/trailing silence and loudness-normalises them before
+deriving the speaker embedding so that the resulting timbre is more stable.
 See `example_tts.py` and `example_vc.py` for more examples.
+
+### Voice cloning quickstart (Gradio)
+
+Launch the guided voice cloning UI for step-by-step conditioning and synthesis:
+
+```bash
+python gradio_voice_clone_app.py
+```
+
+The app lets you record or upload a short reference take, drop in extra clean takes for more stable cloning, tweak the expressiveness controls, and export the generated voice in one click.
 
 ## Fine-tuning
 You can fine-tune the model with LoRA adapters using `scripts/train_lora.py`:

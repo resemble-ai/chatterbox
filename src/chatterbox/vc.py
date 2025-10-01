@@ -1,6 +1,8 @@
-from pathlib import Path
+from __future__ import annotations
 
-import librosa
+from pathlib import Path
+from typing import Sequence, Union
+
 import torch
 import perth
 from huggingface_hub import hf_hub_download
@@ -8,9 +10,13 @@ from safetensors.torch import load_file
 
 from .models.s3tokenizer import S3_SR
 from .models.s3gen import S3GEN_SR, S3Gen
+from .audio_utils import AudioLike, load_and_condition_reference, load_source_audio
 
 
 REPO_ID = "ResembleAI/chatterbox"
+
+
+VoiceReference = Union[AudioLike, Sequence[AudioLike]]
 
 
 class ChatterboxVC:
@@ -73,17 +79,26 @@ class ChatterboxVC:
 
         return cls.from_local(Path(local_path).parent, device)
 
-    def set_target_voice(self, wav_fpath):
-        ## Load reference wav
-        s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
-
-        s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
+    def set_target_voice(
+        self,
+        wav_fpath: VoiceReference,
+        trim_db: float = 40.0,
+        target_loudness_db: float = -27.0,
+    ):
+        """Compute reference conditioning for the target voice."""
+        s3gen_ref_wav = load_and_condition_reference(
+            wav_fpath,
+            target_sr=S3GEN_SR,
+            max_samples=self.DEC_COND_LEN,
+            top_db=trim_db,
+            target_loudness_db=target_loudness_db,
+        )
         self.ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
 
     def generate(
         self,
-        audio,
-        target_voice_path=None,
+        audio: AudioLike,
+        target_voice_path: VoiceReference | None = None,
     ):
         if target_voice_path:
             self.set_target_voice(target_voice_path)
@@ -91,7 +106,7 @@ class ChatterboxVC:
             assert self.ref_dict is not None, "Please `prepare_conditionals` first or specify `target_voice_path`"
 
         with torch.inference_mode():
-            audio_16, _ = librosa.load(audio, sr=S3_SR)
+            audio_16 = load_source_audio(audio, target_sr=S3_SR, top_db=40.0, normalise=True)
             audio_16 = torch.from_numpy(audio_16).float().to(self.device)[None, ]
 
             s3_tokens, _ = self.s3gen.tokenizer(audio_16)
