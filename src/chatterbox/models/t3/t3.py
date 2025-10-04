@@ -360,9 +360,8 @@ class T3(nn.Module):
         # Initialize kv_cache with the full context.
         past = output.past_key_values
 
-        # Restore original gradient checkpointing setting after initial pass
-        if hasattr(self.patched_model, 'gradient_checkpointing_disable') and not original_gradient_checkpointing:
-            self.patched_model.gradient_checkpointing_disable()
+        # Keep gradient checkpointing enabled throughout generation for better memory management
+        # (Previously disabled here, but keeping it on reduces memory usage)
 
         # Clean up memory after initial forward pass
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
@@ -426,6 +425,11 @@ class T3(nn.Module):
             )
             # Update the kv_cache.
             past = output.past_key_values
+
+            # Aggressive memory cleanup every 10 steps
+            if i % 10 == 0:
+                torch.cuda.empty_cache() if torch.cuda.is_available() else None
+                gc.collect()
 
         # Concatenate all predicted tokens along the sequence dimension.
         predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
