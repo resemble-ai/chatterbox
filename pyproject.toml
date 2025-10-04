@@ -1,5 +1,5 @@
 [project]
-name = "chatterbox-tts"
+name = "chatterbox"
 version = "0.1.4"
 description = "Chatterbox: Open Source TTS and Voice Conversion by Resemble AI"
 readme = "README.md"
