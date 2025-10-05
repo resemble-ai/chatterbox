@@ -523,6 +523,7 @@ class ChatterboxMultilingualTTS:
         top_p=1.0,
         chunk_size_words=50,
         overlap_duration=1.0,
+        progress_callback=None,
     ):
         """
         Generate long audio by chunking text and using sliding window conditioning.
@@ -543,6 +544,8 @@ class ChatterboxMultilingualTTS:
             top_p: Top-p sampling threshold
             chunk_size_words: Target words per chunk (default: 50)
             overlap_duration: Crossfade duration in seconds (default: 1.0)
+            progress_callback: Optional callback function(stage, **kwargs) called at various stages.
+                              See documentation for callback parameters at each stage.
 
         Returns:
             Audio tensor with shape (1, samples)
@@ -557,6 +560,8 @@ class ChatterboxMultilingualTTS:
 
         # Prepare initial conditioning
         if audio_prompt_path:
+            if progress_callback:
+                progress_callback(stage="preparing_conditionals", audio_path=audio_prompt_path)
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
@@ -568,12 +573,29 @@ class ChatterboxMultilingualTTS:
         for i, chunk in enumerate(text_chunks):
             print(f"  Chunk {i+1}: {len(chunk.split())} words - '{chunk[:50]}...'")
 
+        if progress_callback:
+            progress_callback(
+                stage="text_split",
+                total_chunks=len(text_chunks),
+                chunk_previews=[(i+1, len(chunk.split()), chunk[:50]) for i, chunk in enumerate(text_chunks)]
+            )
+
         all_audio_chunks = []
         current_conditioning = audio_prompt_path
 
         # Generate each chunk
         for i, text_chunk in enumerate(text_chunks):
             print(f"\nGenerating chunk {i+1}/{len(text_chunks)}...")
+
+            if progress_callback:
+                progress_callback(
+                    stage="chunk_start",
+                    chunk_index=i,
+                    chunk_number=i+1,
+                    total_chunks=len(text_chunks),
+                    text_preview=text_chunk[:50],
+                    word_count=len(text_chunk.split())
+                )
 
             # Generate audio for this chunk
             audio = self.generate(
@@ -590,6 +612,15 @@ class ChatterboxMultilingualTTS:
 
             all_audio_chunks.append(audio)
 
+            if progress_callback:
+                progress_callback(
+                    stage="chunk_complete",
+                    chunk_index=i,
+                    chunk_number=i+1,
+                    total_chunks=len(text_chunks),
+                    audio_shape=audio.shape
+                )
+
             # Save last N seconds as conditioning for next chunk
             if i < len(text_chunks) - 1:
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
@@ -599,6 +630,14 @@ class ChatterboxMultilingualTTS:
 
         # Crossfade and concatenate all chunks
         print(f"\nCrossfading {len(all_audio_chunks)} chunks...")
+
+        if progress_callback:
+            progress_callback(
+                stage="crossfading",
+                total_chunks=len(all_audio_chunks),
+                overlap_duration=overlap_duration
+            )
+
         final_audio = self._crossfade_chunks(all_audio_chunks, overlap_duration)
 
         # Clean up temporary files
@@ -607,5 +646,12 @@ class ChatterboxMultilingualTTS:
                 os.unlink(current_conditioning)
             except:
                 pass
+
+        if progress_callback:
+            progress_callback(
+                stage="complete",
+                total_chunks=len(all_audio_chunks),
+                final_audio_shape=(1, len(final_audio))
+            )
 
         return torch.from_numpy(final_audio).unsqueeze(0)
