@@ -427,18 +427,13 @@ class ChatterboxMultilingualTTS:
             # Japanese and Chinese sentence endings
             sentence_pattern = r'[。！？\.!?]+'
         else:
-            # Most other languages
-            sentence_pattern = r'[.!?]+\s+'
+            # Most other languages - use lookbehind to split AFTER punctuation
+            # This prevents losing sentences in the split/recombine process
+            sentence_pattern = r'(?<=[.!?])\s+'
 
-        # Split into sentences
-        sentences = re.split(f'({sentence_pattern})', text)
-        # Recombine sentences with their punctuation
-        sentences = [''.join(sentences[i:i+2]).strip() for i in range(0, len(sentences)-1, 2)]
-        if len(sentences) * 2 < len(text.split(sentence_pattern)):
-            # Add last sentence if it exists
-            last = text.split(sentences[-1])[-1].strip() if sentences else text
-            if last:
-                sentences.append(last)
+        # Split into sentences using lookbehind pattern
+        # This keeps punctuation with each sentence and doesn't require recombination
+        sentences = [s.strip() for s in re.split(sentence_pattern, text) if s.strip()]
 
         # Group sentences into chunks of approximately target_words_per_chunk
         chunks = []
