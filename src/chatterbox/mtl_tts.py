@@ -271,6 +271,48 @@ class ChatterboxMultilingualTTS:
         min_p=0.05,
         top_p=1.0,
     ):
+        """
+        Generate speech from text in a single pass.
+
+        Use this method for short to medium-length text (up to ~50 words).
+        For longer text, use `generate_long()` which handles memory more efficiently.
+
+        Args:
+            text: Input text to synthesize
+            language_id: Language code (e.g., 'en', 'es', 'ja', 'zh'). See SUPPORTED_LANGUAGES for full list.
+            audio_prompt_path: Path to reference audio file for voice cloning. If None, uses previously
+                             prepared conditionals via `prepare_conditionals()`.
+            exaggeration: Voice exaggeration/expressiveness level (0.0-1.0). Higher values produce more
+                        expressive speech. Default: 0.5
+            cfg_weight: Classifier-free guidance weight (0.0-1.0). Higher values follow conditioning more
+                      closely. Default: 0.5. Set to 0 to disable CFG (not recommended).
+            temperature: Sampling temperature for token generation (0.0-2.0). Higher values increase
+                       randomness. Default: 0.8
+            repetition_penalty: Penalty for repeating tokens (1.0-3.0). Higher values reduce repetition.
+                              Default: 2.0. Try lowering to 1.2-1.5 for more natural speech.
+            min_p: Minimum probability threshold for sampling. Tokens with probability below this are filtered.
+                  Default: 0.05
+            top_p: Nucleus sampling threshold. Only tokens with cumulative probability up to this value
+                  are considered. Default: 1.0 (no filtering).
+
+        Returns:
+            torch.Tensor: Generated audio waveform with shape (1, num_samples) at 24kHz sample rate.
+
+        Raises:
+            ValueError: If language_id is not in SUPPORTED_LANGUAGES.
+            AssertionError: If audio_prompt_path is None and conditionals haven't been prepared.
+
+        Example:
+            >>> model = ChatterboxMultilingualTTS.from_pretrained()
+            >>> wav = model.generate(
+            ...     "Hello, how are you?",
+            ...     language_id="en",
+            ...     audio_prompt_path="reference.wav",
+            ...     exaggeration=0.3,
+            ...     cfg_weight=0.5
+            ... )
+            >>> torchaudio.save("output.wav", wav, model.sr)
+        """
         # Validate language_id
         if language_id and language_id.lower() not in SUPPORTED_LANGUAGES:
             supported_langs = ", ".join(SUPPORTED_LANGUAGES.keys())
@@ -311,7 +353,9 @@ class ChatterboxMultilingualTTS:
         text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id.lower() if language_id else None).to(self.device)
         after_text_to_tokens = get_memory_mb()
         print(f"after_text_to_tokens: {after_text_to_tokens:.1f}")
-        text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
+
+        if cfg_weight > 0.0:
+            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
 
         after_torch_cat = get_memory_mb()
         print(f"after_torch_cat: {after_torch_cat:.1f}")
@@ -465,8 +509,13 @@ class ChatterboxMultilingualTTS:
         if len(chunks) == 1:
             chunk = chunks[0]
             if isinstance(chunk, torch.Tensor):
-                return chunk.detach().cpu().numpy()
-            return chunk
+                chunk_np = chunk.detach().cpu().numpy()
+            else:
+                chunk_np = chunk
+            # Ensure 1D output (squeeze if needed)
+            if chunk_np.ndim == 2:
+                chunk_np = chunk_np.squeeze(0)
+            return chunk_np
 
         overlap_samples = int(overlap_duration * self.sr)
 
@@ -526,29 +575,76 @@ class ChatterboxMultilingualTTS:
         progress_callback=None,
     ):
         """
-        Generate long audio by chunking text and using sliding window conditioning.
+        Generate long audio by chunking text with crossfading between chunks.
 
-        This method splits long text into smaller chunks, generates audio for each chunk,
-        and uses the end of each generated chunk as conditioning for the next one.
-        This maintains voice consistency without memory issues.
+        This method is optimized for generating speech from long text (>50 words) without
+        running out of memory. It splits the text into smaller chunks, generates audio for
+        each chunk independently, and seamlessly combines them with crossfading.
+
+        **When to use:**
+        - Text longer than ~50 words
+        - Documents, articles, or long-form content
+        - When you need memory-efficient generation
+
+        **How it works:**
+        1. Splits text intelligently at sentence/phrase boundaries
+        2. Generates audio for each chunk using the reference voice
+        3. Crossfades chunks together for smooth transitions
 
         Args:
-            text: Input text to synthesize
-            language_id: Language code (e.g., 'en', 'es', 'ja')
-            audio_prompt_path: Path to reference audio for voice cloning
-            exaggeration: Voice exaggeration level (0.0-1.0)
-            cfg_weight: Classifier-free guidance weight
-            temperature: Sampling temperature
-            repetition_penalty: Penalty for token repetition
-            min_p: Minimum probability threshold
-            top_p: Top-p sampling threshold
-            chunk_size_words: Target words per chunk (default: 50)
-            overlap_duration: Crossfade duration in seconds (default: 1.0)
-            progress_callback: Optional callback function(stage, **kwargs) called at various stages.
-                              See documentation for callback parameters at each stage.
+            text: Input text to synthesize (any length)
+            language_id: Language code (e.g., 'en', 'es', 'ja', 'zh'). See SUPPORTED_LANGUAGES for full list.
+            audio_prompt_path: Path to reference audio file for voice cloning. If None, uses previously
+                             prepared conditionals via `prepare_conditionals()`.
+            exaggeration: Voice exaggeration/expressiveness level (0.0-1.0). Higher values produce more
+                        expressive speech. Default: 0.5
+            cfg_weight: Classifier-free guidance weight (0.0-1.0). Higher values follow conditioning more
+                      closely. Default: 0.5. Set to 0 to disable CFG (not recommended).
+            temperature: Sampling temperature for token generation (0.0-2.0). Higher values increase
+                       randomness. Default: 0.8
+            repetition_penalty: Penalty for repeating tokens (1.0-3.0). Higher values reduce repetition.
+                              Default: 2.0. Try lowering to 1.2-1.5 for more natural speech.
+            min_p: Minimum probability threshold for sampling. Tokens with probability below this are filtered.
+                  Default: 0.05
+            top_p: Nucleus sampling threshold. Only tokens with cumulative probability up to this value
+                  are considered. Default: 1.0 (no filtering).
+            chunk_size_words: Target number of words per chunk. Default: 50. Increase for faster generation
+                            but higher memory usage; decrease for lower memory usage.
+            overlap_duration: Duration in seconds of crossfade between chunks. Default: 1.0. Increase for
+                            smoother transitions; decrease for sharper boundaries.
+            progress_callback: Optional callback function to monitor generation progress. Called with
+                             (stage, **kwargs) at various stages:
+                             - "preparing_conditionals": Before loading reference audio
+                             - "text_split": After splitting text into chunks
+                             - "chunk_start": Before generating each chunk
+                             - "chunk_complete": After generating each chunk
+                             - "crossfading": Before combining chunks
+                             - "complete": After final audio is ready
 
         Returns:
-            Audio tensor with shape (1, samples)
+            torch.Tensor: Generated audio waveform with shape (1, num_samples) at 24kHz sample rate.
+
+        Raises:
+            ValueError: If language_id is not in SUPPORTED_LANGUAGES.
+            AssertionError: If audio_prompt_path is None and conditionals haven't been prepared.
+
+        Example:
+            >>> model = ChatterboxMultilingualTTS.from_pretrained()
+            >>> long_text = "This is a very long text that spans multiple sentences..."
+            >>>
+            >>> def progress_handler(stage, **kwargs):
+            ...     if stage == "chunk_start":
+            ...         print(f"Generating chunk {kwargs['chunk_number']}/{kwargs['total_chunks']}")
+            >>>
+            >>> wav = model.generate_long(
+            ...     long_text,
+            ...     language_id="en",
+            ...     audio_prompt_path="reference.wav",
+            ...     chunk_size_words=50,
+            ...     overlap_duration=1.0,
+            ...     progress_callback=progress_handler
+            ... )
+            >>> torchaudio.save("long_output.wav", wav, model.sr)
         """
         # Validate language_id
         if language_id and language_id.lower() not in SUPPORTED_LANGUAGES:
@@ -620,13 +716,6 @@ class ChatterboxMultilingualTTS:
                     total_chunks=len(text_chunks),
                     audio_shape=audio.shape
                 )
-
-            # Save last N seconds as conditioning for next chunk
-            if i < len(text_chunks) - 1:
-                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
-                    temp_path = tmp_file.name
-                    self._save_last_n_seconds(audio, temp_path, duration=3.0)
-                    current_conditioning = temp_path
 
         # Crossfade and concatenate all chunks
         print(f"\nCrossfading {len(all_audio_chunks)} chunks...")
