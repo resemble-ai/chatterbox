@@ -9,7 +9,7 @@ authors = [
     {name = "resemble-ai", email = "engineering@resemble.ai"}
 ]
 dependencies = [
-    "numpy>=1.22.3,<2.0",
+    "numpy>=2.3.3",
     "librosa==0.11.0",
     "s3tokenizer",
     "torch==2.6.0",
@@ -21,7 +21,6 @@ dependencies = [
     "safetensors==0.5.3",
     "spacy-pkuseg==1.0.1",
     "pykakasi==2.3.0",
-    "gradio>=4.0,<5.0",
     "russian-text-stresser@git+https://github.com/Vuizur/add-stress-to-epub.git",
 
 ]
