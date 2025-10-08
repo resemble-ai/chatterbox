@@ -177,7 +177,7 @@ class ChatterboxMultilingualTTS:
         before_t3 = get_memory_mb()
         print(f"before_t3: {before_t3:.1f}")
         t3 = T3(T3Config.multilingual())
-        t3_state = load_safetensors(ckpt_dir / "t3_23lang.safetensors")
+        t3_state = load_safetensors(ckpt_dir / "t3_mtl23ls_v2.safetensors")
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
@@ -193,7 +193,7 @@ class ChatterboxMultilingualTTS:
         before_tokenizer = get_memory_mb()
         print(f"before_tokenizer: {before_tokenizer:.1f}")
         tokenizer = MTLTokenizer(
-            str(ckpt_dir / "mtl_tokenizer.json")
+            str(ckpt_dir / "grapheme_mtl_merged_expanded_v1.json")
         )
 
         conds = None
@@ -210,7 +210,7 @@ class ChatterboxMultilingualTTS:
                 repo_id=REPO_ID,
                 repo_type="model",
                 revision="main", 
-                allow_patterns=["ve.pt", "t3_23lang.safetensors", "s3gen.pt", "mtl_tokenizer.json", "conds.pt", "Cangjie5_TC.json"],
+                allow_patterns=["ve.pt", "t3_mtl23ls_v2.safetensors", "s3gen.pt", "grapheme_mtl_merged_expanded_v1.json", "conds.pt", "Cangjie5_TC.json"],
                 token=os.getenv("HF_TOKEN"),
             )
         )
