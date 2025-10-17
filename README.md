@@ -47,14 +47,14 @@ pip install chatterbox-tts
 
 Alternatively, you can install from source:
 ```shell
-# conda create -yn chatterbox python=3.11
+# conda create -yn chatterbox python=3.13
 # conda activate chatterbox
 
 git clone https://github.com/resemble-ai/chatterbox.git
 cd chatterbox
 pip install -e .
 ```
-We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
+We developed and tested Chatterbox on Python 3.11 on Debian 11 OS and validated compatibility through Python 3.13. Dependency versions are pinned in `pyproject.toml` to ensure consistency, and you can modify the code or dependencies in this installation mode. When running on Python 3.12+, the optional Russian stress marker utility is skipped automatically because the upstream package has not yet published wheels for these versions.
 
 # Usage
 ```python
