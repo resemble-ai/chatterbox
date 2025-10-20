@@ -416,9 +416,20 @@ class CAMPPlus(torch.nn.Module):
                 if m.bias is not None:
                     torch.nn.init.zeros_(m.bias)
 
+    @property
+    def dtype(self):
+        # We can infer the dtype from any parameter (e.g., the first one)
+        try:
+            return next(self.parameters()).dtype
+        except StopIteration:
+            return torch.float32 # Default if no parameters found
+
     def forward(self, x):
+        # Ensure input matches the model dtype (e.g., BF16)
+        if x.dtype != self.dtype:
+             x = x.to(self.dtype)
         x = x.permute(0, 2, 1)  # (B,T,F) => (B,F,T)
-        x = self.head(x)
+        x = self.head(x) # The crash occurred inside here (FCM)
         x = self.xvector(x)
         if self.output_level == "frame":
             x = x.transpose(1, 2)
@@ -426,5 +437,5 @@ class CAMPPlus(torch.nn.Module):
 
     def inference(self, audio_list):
         speech, speech_lengths, speech_times = extract_feature(audio_list)
-        results = self.forward(speech.to(torch.float32))
+        results = self.forward(speech)
         return results

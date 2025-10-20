@@ -52,6 +52,12 @@ class ConvRNNF0Predictor(nn.Module):
         self.classifier = nn.Linear(in_features=cond_channels, out_features=self.num_class)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.condnet(x)
+        # Get the model's expected dtype from its parameters
+        expected_dtype = self.classifier.weight.dtype
+        # Defensively ensure the input tensor matches the model's dtype
+        if x.dtype != expected_dtype:
+            x = x.to(expected_dtype)
+
+        x = self.condnet(x) # error was here
         x = x.transpose(1, 2)
         return torch.abs(self.classifier(x).squeeze(-1))

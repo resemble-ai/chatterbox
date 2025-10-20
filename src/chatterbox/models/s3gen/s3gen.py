@@ -230,6 +230,13 @@ class S3Token2Wav(S3Token2Mel):
         trim_fade[n_trim:] = (torch.cos(torch.linspace(torch.pi, 0, n_trim)) + 1) / 2
         self.register_buffer("trim_fade", trim_fade, persistent=False) # (buffers get automatic device casting)
 
+    @property
+    def dtype(self):
+        try:
+            return next(self.parameters()).dtype
+        except StopIteration:
+            return torch.float32
+
     def forward(
         self,
         speech_tokens,
@@ -241,16 +248,22 @@ class S3Token2Wav(S3Token2Mel):
         ref_dict: Optional[dict] = None,
         finalize: bool = False
     ):
+        # output_mels will be in the precision of the flow model (e.g., BF16)
         output_mels = super().forward(speech_tokens, speech_token_lens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
 
-        # TODO jrm: ignoring the speed control (mel interpolation) and the HiFTGAN caching mechanisms for now.
-        hift_cache_source = torch.zeros(1, 1, 0).to(self.device)
+        # Ensure cache_source matches batch size, dtype, and device
+        B = output_mels.shape[0]
+        # Use self.dtype and correct batch size B instead of hardcoding
+        hift_cache_source = torch.zeros(B, 1, 0, device=self.device, dtype=self.dtype)
 
+        # The input (output_mels) already matches the expected dtype (self.dtype).
         output_wavs, *_ = self.mel2wav.inference(speech_feat=output_mels, cache_source=hift_cache_source)
 
         if not self.training:
             # NOTE: ad-hoc method to reduce "spillover" from the reference clip.
-            output_wavs[:, :len(self.trim_fade)] *= self.trim_fade
+            # Robustly apply trim_fade: Ensure slice length doesn't exceed wav length
+            trim_len = min(len(self.trim_fade), output_wavs.shape[1])
+            output_wavs[:, :trim_len] *= self.trim_fade[:trim_len]
 
         return output_wavs
 
@@ -272,7 +285,13 @@ class S3Token2Wav(S3Token2Mel):
     def hift_inference(self, speech_feat, cache_source: torch.Tensor = None):
         if cache_source is None:
             B = speech_feat.shape[0]
-            cache_source = torch.zeros(B, 1, 0).to(self.device)
+            # Ensure cache_source matches dtype and device
+            cache_source = torch.zeros(B, 1, 0, device=self.device, dtype=self.dtype)
+
+        # Ensure input feat matches expected dtype (in case this is called standalone)
+        if speech_feat.dtype != self.dtype:
+            speech_feat = speech_feat.to(self.dtype)
+
         return self.mel2wav.inference(speech_feat=speech_feat, cache_source=cache_source)
 
 
@@ -291,10 +310,16 @@ class S3Token2Wav(S3Token2Mel):
     ):
         if speech_token_lens is None:
             speech_token_lens = torch.tensor([speech_tokens.size(1)] * speech_tokens.size(0), device=speech_tokens.device)
+        
+        # output_mels will be in the model precision (e.g., BF16)
         output_mels = self.flow_inference(speech_tokens, speech_token_lens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
+        
+        # hift_inference handles dtype matching internally now
         output_wavs, output_sources = self.hift_inference(output_mels, cache_source)
 
         # NOTE: ad-hoc method to reduce "spillover" from the reference clip.
-        output_wavs[:, :len(self.trim_fade)] *= self.trim_fade
+        # Robustly apply trim_fade
+        trim_len = min(len(self.trim_fade), output_wavs.shape[1])
+        output_wavs[:, :trim_len] *= self.trim_fade[:trim_len]
 
         return output_wavs, output_sources

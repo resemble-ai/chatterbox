@@ -135,52 +135,57 @@ class MaskedDiffWithXvec(torch.nn.Module):
                   prompt_feat,
                   prompt_feat_len,
                   embedding,
-                  flow_cache):
-        if self.fp16 is True:
-            prompt_feat = prompt_feat.half()
-            embedding = embedding.half()
+                  finalize):
+        # Use the actual model dtype for inputs
+        expected_dtype = self.dtype
+
+        # Ensure inputs match the expected dtype (replaces the old self.fp16 check)
+        if prompt_feat.dtype != expected_dtype:
+            prompt_feat = prompt_feat.to(expected_dtype)
+        if embedding.dtype != expected_dtype:
+            embedding = embedding.to(expected_dtype)
         
         B = token.shape[0]
-
         # xvec projection
         embedding = F.normalize(embedding, dim=1)
         embedding = self.spk_embed_affine_layer(embedding)
 
         # concat text and prompt_text
-        token_len1, token_len2 = prompt_token.shape[1], token.shape[1]
         token, token_len = torch.concat([prompt_token, token], dim=1), prompt_token_len + token_len
         mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
-        
-        # Check for out-of-bounds token IDs
-        vocab_size = self.input_embedding.num_embeddings
-        if token.max() >= vocab_size or token.min() < 0:
-            logging.warning(f"S3Gen: Token IDs out of bounds: min={token.min().item()}, max={token.max().item()}, vocab_size={vocab_size}")
-        
-        token = self.input_embedding(torch.clamp(token, min=0, max=vocab_size-1)) * mask
+        token = self.input_embedding(torch.clamp(token, min=0, max=self.input_embedding.num_embeddings-1)) * mask
 
-        # text encode
-        h, h_lengths = self.encoder(token, token_len)
+        # text encode (Your fix for token_len is applied here)
+        h, _ = self.encoder(token, token_len)  # Ignore h_lengths from encoder
+        h_lengths = token_len * self.token_mel_ratio
+
+        if finalize is False:
+            h = h[:, :-self.pre_lookahead_len * self.token_mel_ratio]
+            h_lengths = h_lengths - self.pre_lookahead_len * self.token_mel_ratio
+            h_lengths = torch.clamp(h_lengths, min=0)
+
+        mel_len1, mel_len2 = prompt_feat.shape[1], h.shape[1] - prompt_feat.shape[1]
         h = self.encoder_proj(h)
-        mel_len1, mel_len2 = prompt_feat.shape[1], int(token_len2 / self.input_frame_rate * 22050 / 256)
-        h, h_lengths = self.length_regulator.inference(h[:, :token_len1], h[:, token_len1:], mel_len1, mel_len2, self.input_frame_rate)
 
         # get conditions
+        # Ensure conds tensor is created with the correct dtype (h.dtype)
         conds = torch.zeros([B, mel_len1 + mel_len2, self.output_size], device=token.device).to(h.dtype)
         conds[:, :mel_len1] = prompt_feat
         conds = conds.transpose(1, 2)
 
-        mask = (~make_pad_mask(torch.tensor([mel_len1 + mel_len2]))).to(h)
-        feat, flow_cache = self.decoder(
+        mask = (~make_pad_mask(h_lengths)).to(h)
+        feat, _ = self.decoder(
             mu=h.transpose(1, 2).contiguous(),
             mask=mask.unsqueeze(1),
             spks=embedding,
             cond=conds,
-            n_timesteps=10,
-            prompt_len=mel_len1,
-            flow_cache=flow_cache
+            n_timesteps=10
         )
         feat = feat[:, :, mel_len1:]
-        return feat.float(), flow_cache
+        # assert feat.shape[2] == mel_len2  # This assertion is not batch-aware
+        
+        # CRITICAL: Do NOT cast to .float() here. Keep the precision (e.g., BF16) for the Vocoder.
+        return feat, None
 
 
 class CausalMaskedDiffWithXvec(torch.nn.Module):
@@ -240,9 +245,16 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         self.only_mask_loss = only_mask_loss
         self.token_mel_ratio = token_mel_ratio
         self.pre_lookahead_len = pre_lookahead_len
+        # Remove the reliance on the manual fp16 flag if it exists.
+        if hasattr(self, 'fp16'):
+           del self.fp16
 
-        # FIXME: this was missing - just putting it in as false
-        self.fp16 = False
+    @property
+    def dtype(self):
+        try:
+            return next(self.parameters()).dtype
+        except StopIteration:
+            return torch.float32
 
     @torch.inference_mode()
     def inference(self,
@@ -254,9 +266,15 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
                   prompt_feat_len,
                   embedding,
                   finalize):
-        if self.fp16 is True:
-            prompt_feat = prompt_feat.half()
-            embedding = embedding.half()
+        
+        # Use the actual model dtype for inputs
+        expected_dtype = self.dtype
+
+        # Ensure inputs match the expected dtype (replaces the old self.fp16 check)
+        if prompt_feat.dtype != expected_dtype:
+            prompt_feat = prompt_feat.to(expected_dtype)
+        if embedding.dtype != expected_dtype:
+            embedding = embedding.to(expected_dtype)
 
         B = token.shape[0]
         # xvec projection
@@ -295,4 +313,6 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         )
         feat = feat[:, :, mel_len1:]
         # assert feat.shape[2] == mel_len2  # This assertion is not batch-aware
-        return feat.float(), None  # NOTE jrm: why are they returning None here?
+        
+        # CRITICAL: Do NOT cast to .float() here. Keep the precision (e.g., BF16) for the Vocoder.
+        return feat, None
