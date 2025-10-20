@@ -24,11 +24,19 @@ except (ImportError, NameError):
 # --- Configuration ---
 
 # 1. Define the texts you want to generate in a batch.
+# texts_to_generate = [
+#     "Artists create a sequence of drawings to visualize the animation, shot by shot, much like a comic book. This process helps the entire team understand the director's vision, plan the pacing of the story, and identify potential issues before any resource-intensive digital work commences. It serves as the essential blueprint that guides all subsequent stages of production, ensuring a cohesive final product.",
+#     "Following this, the rigging process gives the models a digital skeleton, or armature, which allows animators to pose and move them realistically. This technical yet artistic step is fundamental for creating believable movement, as a well-constructed rig provides the intuitive controls necessary for bringing static models to life.",
+#     "Simultaneously, the texturing process involves painting and applying surface details, such as skin, fabric, or metal, to the models. These detailed maps, known as textures, determine how light interacts with the surfaces, adding a layer of realism and visual richness. This combination of movement and surface artistry transforms simple geometric shapes into compelling characters.",
+#     "Rendering is the computationally intensive process of calculating the final image from all the data, turning the 3D scene into a sequence of 2D frames. Finally, compositing combines these rendered layers with visual effects and color grading in post-production, seamlessly integrating every component to achieve the final, stunning look of the completed animation.",
+# ]
+
+
 texts_to_generate = [
-    "Artists create a sequence of drawings to visualize the animation, shot by shot, much like a comic book. This process helps the entire team understand the director's vision, plan the pacing of the story, and identify potential issues before any resource-intensive digital work commences. It serves as the essential blueprint that guides all subsequent stages of production, ensuring a cohesive final product.",
-    "Following this, the rigging process gives the models a digital skeleton, or armature, which allows animators to pose and move them realistically. This technical yet artistic step is fundamental for creating believable movement, as a well-constructed rig provides the intuitive controls necessary for bringing static models to life.",
-    "Simultaneously, the texturing process involves painting and applying surface details, such as skin, fabric, or metal, to the models. These detailed maps, known as textures, determine how light interacts with the surfaces, adding a layer of realism and visual richness. This combination of movement and surface artistry transforms simple geometric shapes into compelling characters.",
-    "Rendering is the computationally intensive process of calculating the final image from all the data, turning the 3D scene into a sequence of 2D frames. Finally, compositing combines these rendered layers with visual effects and color grading in post-production, seamlessly integrating every component to achieve the final, stunning look of the completed animation.",
+    "Artists create a sequence of drawings to visualize the animation, shot by shot, much like a comic book. ",
+    "Following this, the rigging process gives the models a digital skeleton, or armature, which allows animators to pose and move them realistically. ",
+    "Simultaneously, the texturing process involves painting and applying surface details, such as skin, fabric, or metal, to the models.",
+    "Rendering is the computationally intensive process of calculating the final image from all the data, turning the 3D scene into a sequence of 2D frames.",
 ]
 
 # 2. Define the path to the voice prompt audio file.
