@@ -85,11 +85,18 @@ class Conditionals:
     t3: T3Cond
     gen: dict
 
-    def to(self, device):
-        self.t3 = self.t3.to(device=device)
+    def to(self, device, dtype=None):
+        # Use the updated T3Cond.to method
+        self.t3 = self.t3.to(device=device, dtype=dtype)
+        
+        # Update S3Gen conditionals (dictionary)
         for k, v in self.gen.items():
             if torch.is_tensor(v):
-                self.gen[k] = v.to(device=device)
+                # Cast float tensors if dtype is provided
+                if dtype is not None and v.is_floating_point():
+                   self.gen[k] = v.to(device=device, dtype=dtype)
+                else:
+                   self.gen[k] = v.to(device=device)
         return self
 
     def save(self, fpath: Path):
@@ -119,23 +126,28 @@ class ChatterboxTTS:
         tokenizer: EnTokenizer,
         device: str,
         conds: Conditionals = None,
+        dtype: torch.dtype = torch.float32, # Add dtype tracking
     ):
-        self.sr = S3GEN_SR  # sample rate of synthesized audio
+        self.sr = S3GEN_SR
         self.t3 = t3
         self.s3gen = s3gen
         self.ve = ve
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
+        self.dtype = dtype # Store the dtype
         self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
+    def from_local(cls, ckpt_dir, device, dtype=torch.float32, compile_model=False) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
 
-        # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
+        # Handle device mapping and enforce FP32 on non-CUDA devices
         if device in ["cpu", "mps"]:
             map_location = torch.device('cpu')
+            if dtype != torch.float32:
+                print(f"Note: Forcing FP32 on {device}.")
+                dtype = torch.float32
         else:
             map_location = None
 
@@ -143,6 +155,7 @@ class ChatterboxTTS:
         ve.load_state_dict(
             load_file(ckpt_dir / "ve.safetensors")
         )
+        # Keep VoiceEncoder in FP32 for stability.
         ve.to(device).eval()
 
         t3 = T3()
@@ -150,13 +163,28 @@ class ChatterboxTTS:
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
-        t3.to(device).eval()
+        t3.to(device=device, dtype=dtype).eval() # Cast T3 to target dtype
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
             load_file(ckpt_dir / "s3gen.safetensors"), strict=False
         )
-        s3gen.to(device).eval()
+        s3gen.to(device=device, dtype=dtype).eval() # Cast S3Gen to target dtype
+
+        # ------------------------------------
+        # Compilation Logic (torch.compile)
+        if compile_model and hasattr(torch, 'compile') and device == 'cuda':
+            print("Compiling models... (This might take a few minutes on the first run)")
+            try:
+                # Compile the Llama backbone (the most critical part of T3)
+                # mode="reduce-overhead" is often better for smaller batch sizes during decoding.
+                t3.tfmr = torch.compile(t3.tfmr, mode="reduce-overhead")
+                # Compile S3Gen
+                s3gen = torch.compile(s3gen, mode="reduce-overhead")
+                print("Compilation successful.")
+            except Exception as e:
+                print(f"Warning: Model compilation failed: {e}. Proceeding without compilation.")
+        # ------------------------------------
 
         tokenizer = EnTokenizer(
             str(ckpt_dir / "tokenizer.json")
@@ -164,12 +192,13 @@ class ChatterboxTTS:
 
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
+            # Load and cast conditionals using the updated .to() method
+            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device=device, dtype=dtype)
 
-        return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
+        return cls(t3, s3gen, ve, tokenizer, device, conds=conds, dtype=dtype)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTTS':
+    def from_pretrained(cls, device, use_bf16=True, compile_model=False) -> 'ChatterboxTTS':
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -178,10 +207,21 @@ class ChatterboxTTS:
                 print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
             device = "cpu"
 
+        # Determine the dtype
+        dtype = torch.float32
+        if device == "cuda" and use_bf16:
+            if torch.cuda.is_bf16_supported():
+                dtype = torch.bfloat16
+                print("Using BFloat16 precision.")
+            else:
+                # Fallback to FP16
+                dtype = torch.float16
+                print("BFloat16 not supported. Using Float16 precision.")
+
         for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 
-        return cls.from_local(Path(local_path).parent, device)
+        return cls.from_local(Path(local_path).parent, device, dtype=dtype, compile_model=compile_model)
 
     def prepare_conditionals(self, wav_fpaths: Union[str, List[str]], exaggeration=0.5):
         if isinstance(wav_fpaths, str):
@@ -243,6 +283,13 @@ class ChatterboxTTS:
         else:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
+        # --- CRITICAL: Ensure Conditionals match Model dtype ---
+        # The prepare_conditionals uses VE (FP32) to create embeddings.
+        # We must ensure they match T3's dtype (e.g., BF16) before inference.
+        if self.conds.t3.speaker_emb.dtype != self.dtype:
+            # Cast all floating point conditionals to match the model dtype
+            self.conds = self.conds.to(device=self.device, dtype=self.dtype)
+
         # Broadcast conditioning if a single prompt is used for a batch of texts
         current_cond_bs = self.conds.t3.speaker_emb.size(0)
         if current_cond_bs == 1 and batch_size > 1:
@@ -263,9 +310,14 @@ class ChatterboxTTS:
         elif current_cond_bs != batch_size and not (current_cond_bs == 1 and batch_size == 1):
              raise ValueError(f"Mismatch between number of texts ({batch_size}) and audio prompts ({current_cond_bs})")
 
-        # Update exaggeration if needed (applied to the whole batch)
-        if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
-            self.conds.t3.emotion_adv = exaggeration * torch.ones(batch_size, 1, 1, device=self.device)
+        # Update exaggeration if needed (Ensure dtype consistency and robust checks)
+        if self.conds.t3.emotion_adv is not None and self.conds.t3.emotion_adv.numel() > 0:
+            # Use .item() for safe comparison and ensure the new tensor matches dtype
+            if exaggeration != self.conds.t3.emotion_adv[0, 0, 0].item():
+                self.conds.t3.emotion_adv = exaggeration * torch.ones(batch_size, 1, 1, device=self.device, dtype=self.dtype)
+        elif exaggeration != 0.5: # Default value check
+             # Handle case where it might be None initially but a new value is provided
+             self.conds.t3.emotion_adv = exaggeration * torch.ones(batch_size, 1, 1, device=self.device, dtype=self.dtype)
 
         # Norm and tokenize text
         texts = [punc_norm(t) for t in text]
@@ -323,7 +375,8 @@ class ChatterboxTTS:
             audio_lengths = s3gen_token_lens * TOKEN_TO_WAV_RATIO
             output_tensors = []
             for i, wav in enumerate(wavs):
-                trimmed_wav = wav[:audio_lengths[i]].cpu().numpy()
+                # Ensure output is FP32 for watermarking/saving compatibility
+                trimmed_wav = wav[:audio_lengths[i]].cpu().float().numpy()
                 watermarked_wav = self.watermarker.apply_watermark(trimmed_wav, sample_rate=self.sr)
                 output_tensors.append(torch.from_numpy(watermarked_wav).unsqueeze(0))
 
