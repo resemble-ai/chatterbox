@@ -1,4 +1,4 @@
-#chatterbox/src/chatterbox/models/t3/s3tokenizer/s3tokenizer.py
+#chatterbox/src/chatterbox/models/s3tokenizer/s3tokenizer.py
 
 from typing import List, Tuple
 
