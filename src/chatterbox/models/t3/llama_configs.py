@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/t3/llama_configs.py
+
 LLAMA_520M_CONFIG_DICT = dict(
     # Arbitrary small number that won't cause problems when loading.
     # These param are unused due to custom input layers.

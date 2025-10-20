@@ -1,3 +1,5 @@
+# chatterbox/src/chatterbox/vc.py
+
 from pathlib import Path
 
 import librosa

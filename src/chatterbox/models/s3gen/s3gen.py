@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/s3gen.py
+
 # Modified from CosyVoice https://github.com/FunAudioLLM/CosyVoice
 #
 # Licensed under the Apache License, Version 2.0 (the "License");

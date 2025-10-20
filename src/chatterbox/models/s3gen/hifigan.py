@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/hifigan.py
+
 # jrm: adapted from CosyVoice/cosyvoice/hifigan/generator.py
 #      most modules should be reusable, but I found their SineGen changed a git.
 

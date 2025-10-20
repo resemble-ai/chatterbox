@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/utils/mask.py
+
 # Copyright (c) 2019 Shigeki Karita
 #               2020 Mobvoi Inc (Binbin Zhang)
 #               2024 Alibaba Inc (authors: Xiang Lyu)

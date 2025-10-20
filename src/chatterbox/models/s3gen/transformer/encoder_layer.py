@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/transformer/encoder_layer.py
+
 # Copyright (c) 2021 Mobvoi Inc (Binbin Zhang, Di Wu)
 #               2022 Xingchen Song (sxc19@mails.tsinghua.edu.cn)
 #

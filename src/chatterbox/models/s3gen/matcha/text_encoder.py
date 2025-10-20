@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/text_encoder.py
+
 """ from https://github.com/jaywalnut310/glow-tts """
 
 import math

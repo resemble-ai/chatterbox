@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/transformer/attention.py
+
 # Copyright (c) 2019 Shigeki Karita
 #               2020 Mobvoi Inc (Binbin Zhang)
 #               2022 Xingchen Song (sxc19@mails.tsinghua.edu.cn)

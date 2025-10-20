@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/t3/s3tokenizer/s3tokenizer.py
+
 from typing import List, Tuple
 
 import numpy as np

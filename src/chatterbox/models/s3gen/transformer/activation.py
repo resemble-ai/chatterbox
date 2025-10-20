@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/transformer/activation.py
+
 # Copyright (c) 2020 Johns Hopkins University (Shinji Watanabe)
 #               2020 Northwestern Polytechnical University (Pengcheng Guo)
 #               2020 Mobvoi Inc (Binbin Zhang)

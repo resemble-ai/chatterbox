@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/xvector.py
+
 #!/usr/bin/env python3
 # -*- encoding: utf-8 -*-
 # Copyright FunASR (https://github.com/alibaba-damo-academy/FunASR). All Rights Reserved.
