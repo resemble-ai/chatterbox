@@ -17,9 +17,9 @@ print(f"Using device: {device}")
 
 model = ChatterboxTTS.from_pretrained(device=device)
 
-text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill."
+text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus."
 wav = model.generate(text)
-ta.save("test-1.wav", wav, model.sr)
+ta.save("test-default-voice.wav", wav, model.sr)
 
 multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device)
 text = "Bonjour, comment ça va? Ceci est le modèle de synthèse vocale multilingue Chatterbox, il prend en charge 23 langues."

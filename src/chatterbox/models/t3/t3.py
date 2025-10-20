@@ -96,7 +96,8 @@ class T3(nn.Module):
         cond_emb = self.prepare_conditioning(t3_cond)  # (B, len_cond, dim)
         text_emb = self.text_emb(text_tokens)  # (B, len_text, dim)
         if cfg_weight > 0.0:
-            text_emb[1].zero_()  # CFG uncond
+            B = text_tokens.size(0) // 2
+            text_emb[B:].zero_()  # CFG uncond
 
         speech_emb = self.speech_emb(speech_tokens)  # (B, len_speech, dim)
         if self.hp.input_pos_emb == "learned":
@@ -108,10 +109,7 @@ class T3(nn.Module):
              cond_emb = cond_emb.expand(text_emb.size(0), -1, -1)
 
         # concat
-        embeds = torch.stack([
-            torch.cat((ce, te, se))
-            for ce, te, se in zip(cond_emb, text_emb, speech_emb)
-        ])  # (B, length, dim)
+        embeds = torch.cat([cond_emb, text_emb, speech_emb], dim=1) # (B, length, dim)
         return embeds, len_cond
 
     def forward(
@@ -214,10 +212,8 @@ class T3(nn.Module):
         t3_cond: T3Cond,
         text_tokens: Tensor,
         initial_speech_tokens: Optional[Tensor]=None,
-
         # misc conditioning
         prepend_prompt_speech_tokens: Optional[Tensor]=None,
-
         # HF generate args
         num_return_sequences=1,
         max_new_tokens=None,
@@ -238,6 +234,11 @@ class T3(nn.Module):
         assert prepend_prompt_speech_tokens is None, "not implemented"
         _ensure_BOT_EOT(text_tokens, self.hp)
         text_tokens = torch.atleast_2d(text_tokens).to(dtype=torch.long, device=self.device)
+        B_orig = text_tokens.size(0)
+        if cfg_weight > 0.0:
+            B_orig = B_orig // 2
+
+        max_new_tokens = max_new_tokens or self.hp.max_speech_tokens
 
         # Default initial speech to a single start-of-speech token
         if initial_speech_tokens is None:
@@ -281,23 +282,7 @@ class T3(nn.Module):
             self.patched_model = patched_model
             self.compiled = True
 
-        # # Run normal generate method, which calls our custom extended methods
-        # return self.patched_model.generate(
-        #     inputs=initial_speech_tokens,
-        #     decoder_cond=embeds,
-        #     bos_token_id=self.hp.start_speech_token,
-        #     eos_token_id=(self.hp.stop_speech_token if stop_on_eos else -1),
-        #     pad_token_id=self.hp.stop_speech_token,
-        #     max_new_tokens=max_new_tokens or self.hp.max_speech_tokens,
-        #     num_return_sequences=num_return_sequences,
-        #     temperature=temperature,
-        #     min_p=min_p,
-        #     length_penalty=length_penalty,
-        #     repetition_penalty=repetition_penalty,
-        #     do_sample=do_sample,
-        #     # cache_implementation=None if not self.compiled else "static",
-        # )
-
+        inputs_embeds = embeds
         device = embeds.device
 
         bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=device)
@@ -333,6 +318,17 @@ class T3(nn.Module):
         past = output.past_key_values
 
         # ---- Generation Loop using kv_cache ----
+        len_initial_speech = initial_speech_tokens.size(1)
+
+        # for CFG, we only need to track the conditional part for repetition penalty and output
+        # Pre-allocate tensor to avoid memory leak from torch.cat
+        max_len = len_initial_speech + max_new_tokens
+        generated_ids_cond = torch.full((B_orig, max_len), 0, dtype=torch.long, device=device)
+        generated_ids_cond[:, :len_initial_speech] = generated_ids[0:B_orig]
+        
+        is_finished = torch.zeros(B_orig, dtype=torch.bool, device=device)
+        current_token_idx = len_initial_speech
+
         for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
             logits_step = output.logits[:, -1, :]                
             # CFG combine  → (1, V)
@@ -365,8 +361,9 @@ class T3(nn.Module):
             probs = torch.softmax(logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)  # shape: (B, 1)
 
-            predicted.append(next_token)
-            generated_ids = torch.cat([generated_ids, next_token], dim=1)
+            # Update the pre-allocated tensor in-place
+            generated_ids_cond[:, current_token_idx] = next_token.squeeze(-1)
+            current_token_idx += 1
 
             # Check for EOS token.
             if next_token.view(-1) == self.hp.stop_speech_token:
@@ -375,7 +372,7 @@ class T3(nn.Module):
 
             # Get embedding for the new token.
             next_token_embed = self.speech_emb(next_token)
-            next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
+            next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(len_initial_speech + i)
 
             #  For CFG
             next_token_embed = torch.cat([next_token_embed, next_token_embed])
@@ -391,6 +388,14 @@ class T3(nn.Module):
             # Update the kv_cache.
             past = output.past_key_values
 
-        # Concatenate all predicted tokens along the sequence dimension.
-        predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
-        return predicted_tokens
+        # Un-batch and trim EOS token
+        output_tokens = []
+        for gen_ids in generated_ids_cond:
+            # Remove initial speech tokens that were passed in
+            gen_ids = gen_ids[len_initial_speech:]
+            eos_idx = (gen_ids == self.hp.stop_speech_token).nonzero(as_tuple=True)[0]
+            if len(eos_idx) > 0:
+                gen_ids = gen_ids[:eos_idx[0]]
+            output_tokens.append(gen_ids)
+
+        return output_tokens

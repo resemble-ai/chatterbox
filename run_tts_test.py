@@ -1,4 +1,4 @@
-# run_tts_test.py
+# chatterbox/run_tts_test.py
 
 import torchaudio
 import torch
