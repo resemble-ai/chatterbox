@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/s3gen.py
+
 # Modified from CosyVoice https://github.com/FunAudioLLM/CosyVoice
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,11 +33,6 @@ from .transformer.upsample_encoder import UpsampleConformerEncoder
 from .flow_matching import CausalConditionalCFM
 from .decoder import ConditionalDecoder
 from .configs import CFM_PARAMS
-
-
-def drop_invalid_tokens(x):
-    assert len(x.shape) <= 2 and x.shape[0] == 1, "only batch size of one allowed for now"
-    return x[x < SPEECH_VOCAB_SIZE]
 
 
 # TODO: global resampler cache
@@ -146,7 +143,7 @@ class S3Token2Mel(torch.nn.Module):
                 "Reference mel length is not equal to 2 * reference token length.\n"
             )
             ref_speech_tokens = ref_speech_tokens[:, :ref_mels_24.shape[1] // 2]
-            ref_speech_token_lens[0] = ref_speech_tokens.shape[1]
+            ref_speech_token_lens.fill_(ref_speech_tokens.shape[1])
 
         return dict(
             prompt_token=ref_speech_tokens.to(device),
@@ -159,6 +156,7 @@ class S3Token2Mel(torch.nn.Module):
     def forward(
         self,
         speech_tokens: torch.LongTensor,
+        speech_token_lens: torch.LongTensor,
         # locally-computed ref embedding (mutex with ref_dict)
         ref_wav: Optional[torch.Tensor],
         ref_sr: Optional[int],
@@ -197,9 +195,6 @@ class S3Token2Mel(torch.nn.Module):
         if len(speech_tokens.shape) == 1:
             speech_tokens = speech_tokens.unsqueeze(0)
 
-        # assert speech_tokens.shape[0] == 1, "only batch size of one allowed for now"
-        speech_token_lens = torch.LongTensor([speech_tokens.size(1)]).to(self.device)
-
         output_mels, _ = self.flow.inference(
             token=speech_tokens,
             token_len=speech_token_lens,
@@ -235,9 +230,17 @@ class S3Token2Wav(S3Token2Mel):
         trim_fade[n_trim:] = (torch.cos(torch.linspace(torch.pi, 0, n_trim)) + 1) / 2
         self.register_buffer("trim_fade", trim_fade, persistent=False) # (buffers get automatic device casting)
 
+    @property
+    def dtype(self):
+        try:
+            return next(self.parameters()).dtype
+        except StopIteration:
+            return torch.float32
+
     def forward(
         self,
         speech_tokens,
+        speech_token_lens: torch.LongTensor,
         # locally-computed ref embedding (mutex with ref_dict)
         ref_wav: Optional[torch.Tensor],
         ref_sr: Optional[int],
@@ -245,16 +248,22 @@ class S3Token2Wav(S3Token2Mel):
         ref_dict: Optional[dict] = None,
         finalize: bool = False
     ):
-        output_mels = super().forward(speech_tokens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
+        # output_mels will be in the precision of the flow model (e.g., BF16)
+        output_mels = super().forward(speech_tokens, speech_token_lens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
 
-        # TODO jrm: ignoring the speed control (mel interpolation) and the HiFTGAN caching mechanisms for now.
-        hift_cache_source = torch.zeros(1, 1, 0).to(self.device)
+        # Ensure cache_source matches batch size, dtype, and device
+        B = output_mels.shape[0]
+        # Use self.dtype and correct batch size B instead of hardcoding
+        hift_cache_source = torch.zeros(B, 1, 0, device=self.device, dtype=self.dtype)
 
+        # The input (output_mels) already matches the expected dtype (self.dtype).
         output_wavs, *_ = self.mel2wav.inference(speech_feat=output_mels, cache_source=hift_cache_source)
 
         if not self.training:
             # NOTE: ad-hoc method to reduce "spillover" from the reference clip.
-            output_wavs[:, :len(self.trim_fade)] *= self.trim_fade
+            # Robustly apply trim_fade: Ensure slice length doesn't exceed wav length
+            trim_len = min(len(self.trim_fade), output_wavs.shape[1])
+            output_wavs[:, :trim_len] *= self.trim_fade[:trim_len]
 
         return output_wavs
 
@@ -262,6 +271,7 @@ class S3Token2Wav(S3Token2Mel):
     def flow_inference(
         self,
         speech_tokens,
+        speech_token_lens: torch.LongTensor,
         # locally-computed ref embedding (mutex with ref_dict)
         ref_wav: Optional[torch.Tensor] = None,
         ref_sr: Optional[int] = None,
@@ -269,18 +279,27 @@ class S3Token2Wav(S3Token2Mel):
         ref_dict: Optional[dict] = None,
         finalize: bool = False,
     ):
-        return super().forward(speech_tokens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
+        return super().forward(speech_tokens, speech_token_lens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
 
     @torch.inference_mode()
     def hift_inference(self, speech_feat, cache_source: torch.Tensor = None):
         if cache_source is None:
-            cache_source = torch.zeros(1, 1, 0).to(self.device)
+            B = speech_feat.shape[0]
+            # Ensure cache_source matches dtype and device
+            cache_source = torch.zeros(B, 1, 0, device=self.device, dtype=self.dtype)
+
+        # Ensure input feat matches expected dtype (in case this is called standalone)
+        if speech_feat.dtype != self.dtype:
+            speech_feat = speech_feat.to(self.dtype)
+
         return self.mel2wav.inference(speech_feat=speech_feat, cache_source=cache_source)
+
 
     @torch.inference_mode()
     def inference(
         self,
         speech_tokens,
+        speech_token_lens: Optional[torch.LongTensor] = None,
         # locally-computed ref embedding (mutex with ref_dict)
         ref_wav: Optional[torch.Tensor] = None,
         ref_sr: Optional[int] = None,
@@ -289,10 +308,18 @@ class S3Token2Wav(S3Token2Mel):
         cache_source: torch.Tensor = None, # NOTE: this arg is for streaming, it can probably be removed here
         finalize: bool = True,
     ):
-        output_mels = self.flow_inference(speech_tokens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
+        if speech_token_lens is None:
+            speech_token_lens = torch.tensor([speech_tokens.size(1)] * speech_tokens.size(0), device=speech_tokens.device)
+        
+        # output_mels will be in the model precision (e.g., BF16)
+        output_mels = self.flow_inference(speech_tokens, speech_token_lens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
+        
+        # hift_inference handles dtype matching internally now
         output_wavs, output_sources = self.hift_inference(output_mels, cache_source)
 
         # NOTE: ad-hoc method to reduce "spillover" from the reference clip.
-        output_wavs[:, :len(self.trim_fade)] *= self.trim_fade
+        # Robustly apply trim_fade
+        trim_len = min(len(self.trim_fade), output_wavs.shape[1])
+        output_wavs[:, :trim_len] *= self.trim_fade[:trim_len]
 
         return output_wavs, output_sources

@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/f0_predictor.py
+
 # Copyright (c) 2024 Alibaba Inc (authors: Xiang Lyu, Kai Hu)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -49,7 +51,18 @@ class ConvRNNF0Predictor(nn.Module):
         )
         self.classifier = nn.Linear(in_features=cond_channels, out_features=self.num_class)
 
+    @property
+    def dtype(self):
+        try:# Dynamically determine the dtype from parameters
+            return self.classifier.weight.dtype
+        except StopIteration:
+            return torch.float32
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.condnet(x)
+        # Ensure input matches the model's dtype (e.g., BF16)
+        if x.dtype != self.dtype:
+            x = x.to(self.dtype)
+            
+        x = self.condnet(x) # This now works: BF16 input, BF16 weights
         x = x.transpose(1, 2)
         return torch.abs(self.classifier(x).squeeze(-1))

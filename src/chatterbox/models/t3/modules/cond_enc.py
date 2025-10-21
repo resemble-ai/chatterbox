@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/t3/modules/cond_enc.py
+
 from dataclasses import dataclass
 from typing import Optional
 
@@ -25,8 +27,12 @@ class T3Cond:
         "Cast to a device and dtype. Dtype casting is ignored for long/int tensors."
         for k, v in self.__dict__.items():
             if torch.is_tensor(v):
-                is_fp = type(v.view(-1)[0].item()) is not int
-                setattr(self, k, v.to(device=device, dtype=dtype if is_fp else None))
+                # Use torch.is_floating_point() for a robust check (safe for empty tensors)
+                if v.is_floating_point() and dtype is not None:
+                    setattr(self, k, v.to(device=device, dtype=dtype))
+                elif device is not None:
+                    # Only move to device if dtype casting is not applicable or not requested
+                    setattr(self, k, v.to(device=device))
         return self
 
     def save(self, fpath):

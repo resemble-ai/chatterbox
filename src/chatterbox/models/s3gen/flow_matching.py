@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/flow_matching.py
+
 # Copyright (c) 2024 Alibaba Inc (authors: Xiang Lyu, Zhihao Du)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -91,21 +93,28 @@ class ConditionalCFM(BASECFM):
         # Or in future might add like a return_all_steps flag
         sol = []
 
+        B = x.size(0)
         # Do not use concat, it may cause memory format changed and trt infer with wrong results!
-        x_in = torch.zeros([2, 80, x.size(2)], device=x.device, dtype=x.dtype)
-        mask_in = torch.zeros([2, 1, x.size(2)], device=x.device, dtype=x.dtype)
-        mu_in = torch.zeros([2, 80, x.size(2)], device=x.device, dtype=x.dtype)
-        t_in = torch.zeros([2], device=x.device, dtype=x.dtype)
-        spks_in = torch.zeros([2, 80], device=x.device, dtype=x.dtype)
-        cond_in = torch.zeros([2, 80, x.size(2)], device=x.device, dtype=x.dtype)
+        x_in = torch.zeros([B * 2, 80, x.size(2)], device=x.device, dtype=x.dtype)
+        mask_in = torch.zeros([B * 2, 1, x.size(2)], device=x.device, dtype=x.dtype)
+        mu_in = torch.zeros([B * 2, 80, x.size(2)], device=x.device, dtype=x.dtype)
+        t_in = torch.zeros([B * 2], device=x.device, dtype=x.dtype)
+        spks_in = torch.zeros([B * 2, 80], device=x.device, dtype=x.dtype)
+        cond_in = torch.zeros([B * 2, 80, x.size(2)], device=x.device, dtype=x.dtype)
         for step in range(1, len(t_span)):
             # Classifier-Free Guidance inference introduced in VoiceBox
-            x_in[:] = x
-            mask_in[:] = mask
-            mu_in[0] = mu
-            t_in[:] = t.unsqueeze(0)
-            spks_in[0] = spks
-            cond_in[0] = cond
+            x_in[:] = torch.cat([x, x], dim=0)
+            mask_in[:] = torch.cat([mask, mask], dim=0)
+            mu_in[0:B] = mu
+            # mu_in[B:] is zero for uncond
+            t_in[:] = t.expand(B * 2)
+            if spks is not None:
+                spks_in[0:B] = spks
+            # spks_in[B:] is zero for uncond
+            if cond is not None:
+                cond_in[0:B] = cond
+            # cond_in[B:] is zero for uncond
+
             dphi_dt = self.forward_estimator(
                 x_in, mask_in,
                 mu_in, t_in,
@@ -127,12 +136,13 @@ class ConditionalCFM(BASECFM):
             return self.estimator.forward(x, mask, mu, t, spks, cond)
         else:
             with self.lock:
-                self.estimator.set_input_shape('x', (2, 80, x.size(2)))
-                self.estimator.set_input_shape('mask', (2, 1, x.size(2)))
-                self.estimator.set_input_shape('mu', (2, 80, x.size(2)))
-                self.estimator.set_input_shape('t', (2,))
-                self.estimator.set_input_shape('spks', (2, 80))
-                self.estimator.set_input_shape('cond', (2, 80, x.size(2)))
+                B = x.size(0)
+                self.estimator.set_input_shape('x', (B, 80, x.size(2)))
+                self.estimator.set_input_shape('mask', (B, 1, x.size(2)))
+                self.estimator.set_input_shape('mu', (B, 80, x.size(2)))
+                self.estimator.set_input_shape('t', (B,))
+                self.estimator.set_input_shape('spks', (B, 80))
+                self.estimator.set_input_shape('cond', (B, 80, x.size(2)))
                 # run trt engine
                 self.estimator.execute_v2([x.contiguous().data_ptr(),
                                            mask.contiguous().data_ptr(),
@@ -211,6 +221,7 @@ class CausalConditionalCFM(ConditionalCFM):
         """
 
         z = self.rand_noise[:, :, :mu.size(2)].to(mu.device).to(mu.dtype) * temperature
+        z = z.expand(mu.shape[0], -1, -1)
         # fix prompt and overlap part mu and z
         t_span = torch.linspace(0, 1, n_timesteps + 1, device=mu.device, dtype=mu.dtype)
         if self.t_scheduler == 'cosine':

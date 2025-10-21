@@ -1,0 +1,180 @@
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>958ac2fa-ebae-40f7-bf36-e239ba9b0efd</ProjectGuid>
+    <ProjectHome>.</ProjectHome>
+    <StartupFile>run_tts_test.py</StartupFile>
+    <SearchPath>
+    </SearchPath>
+    <WorkingDirectory>.</WorkingDirectory>
+    <OutputPath>.</OutputPath>
+    <Name>chatterbox</Name>
+    <RootNamespace>chatterbox</RootNamespace>
+    <SuppressConfigureTestFrameworkPrompt>true</SuppressConfigureTestFrameworkPrompt>
+    <InterpreterId>MSBuild|venv|C:\_myDrive\repos\auto-vlog\AutoVlogProj\AutoVlogProj.pyproj</InterpreterId>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <DebugSymbols>true</DebugSymbols>
+    <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DebugSymbols>true</DebugSymbols>
+    <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="example_for_mac.py" />
+    <Compile Include="example_tts.py" />
+    <Compile Include="example_vc.py" />
+    <Compile Include="example_vc_batching.py" />
+    <Compile Include="gradio_tts_app.py" />
+    <Compile Include="gradio_vc_app.py" />
+    <Compile Include="run_tts_test.py" />
+    <Compile Include="src\chatterbox\models\s3gen\configs.py" />
+    <Compile Include="src\chatterbox\models\s3gen\const.py" />
+    <Compile Include="src\chatterbox\models\s3gen\decoder.py" />
+    <Compile Include="src\chatterbox\models\s3gen\f0_predictor.py" />
+    <Compile Include="src\chatterbox\models\s3gen\flow.py" />
+    <Compile Include="src\chatterbox\models\s3gen\flow_matching.py" />
+    <Compile Include="src\chatterbox\models\s3gen\hifigan.py" />
+    <Compile Include="src\chatterbox\models\s3gen\matcha\decoder.py" />
+    <Compile Include="src\chatterbox\models\s3gen\matcha\flow_matching.py" />
+    <Compile Include="src\chatterbox\models\s3gen\matcha\text_encoder.py" />
+    <Compile Include="src\chatterbox\models\s3gen\matcha\transformer.py" />
+    <Compile Include="src\chatterbox\models\s3gen\s3gen.py" />
+    <Compile Include="src\chatterbox\models\s3gen\transformer\activation.py" />
+    <Compile Include="src\chatterbox\models\s3gen\transformer\attention.py" />
+    <Compile Include="src\chatterbox\models\s3gen\transformer\convolution.py" />
+    <Compile Include="src\chatterbox\models\s3gen\transformer\embedding.py" />
+    <Compile Include="src\chatterbox\models\s3gen\transformer\encoder_layer.py" />
+    <Compile Include="src\chatterbox\models\s3gen\transformer\positionwise_feed_forward.py" />
+    <Compile Include="src\chatterbox\models\s3gen\transformer\subsampling.py" />
+    <Compile Include="src\chatterbox\models\s3gen\transformer\upsample_encoder.py" />
+    <Compile Include="src\chatterbox\models\s3gen\transformer\__init__.py" />
+    <Compile Include="src\chatterbox\models\s3gen\utils\class_utils.py" />
+    <Compile Include="src\chatterbox\models\s3gen\utils\mask.py" />
+    <Compile Include="src\chatterbox\models\s3gen\utils\mel.py" />
+    <Compile Include="src\chatterbox\models\s3gen\xvector.py" />
+    <Compile Include="src\chatterbox\models\s3gen\__init__.py" />
+    <Compile Include="src\chatterbox\models\s3tokenizer\s3tokenizer.py" />
+    <Compile Include="src\chatterbox\models\s3tokenizer\__init__.py" />
+    <Compile Include="src\chatterbox\models\t3\inference\alignment_stream_analyzer.py" />
+    <Compile Include="src\chatterbox\models\t3\inference\t3_hf_backend.py" />
+    <Compile Include="src\chatterbox\models\t3\llama_configs.py" />
+    <Compile Include="src\chatterbox\models\t3\modules\cond_enc.py" />
+    <Compile Include="src\chatterbox\models\t3\modules\learned_pos_emb.py" />
+    <Compile Include="src\chatterbox\models\t3\modules\perceiver.py" />
+    <Compile Include="src\chatterbox\models\t3\modules\t3_config.py" />
+    <Compile Include="src\chatterbox\models\t3\t3.py" />
+    <Compile Include="src\chatterbox\models\t3\__init__.py" />
+    <Compile Include="src\chatterbox\models\tokenizers\tokenizer.py" />
+    <Compile Include="src\chatterbox\models\tokenizers\__init__.py" />
+    <Compile Include="src\chatterbox\models\utils.py" />
+    <Compile Include="src\chatterbox\models\voice_encoder\config.py" />
+    <Compile Include="src\chatterbox\models\voice_encoder\melspec.py" />
+    <Compile Include="src\chatterbox\models\voice_encoder\voice_encoder.py" />
+    <Compile Include="src\chatterbox\models\voice_encoder\__init__.py" />
+    <Compile Include="src\chatterbox\models\__init__.py" />
+    <Compile Include="src\chatterbox\tts.py" />
+    <Compile Include="src\chatterbox\vc.py" />
+    <Compile Include="src\chatterbox\__init__.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="src\" />
+    <Folder Include="src\chatterbox\" />
+    <Folder Include="src\chatterbox\models\" />
+    <Folder Include="src\chatterbox\models\s3gen\" />
+    <Folder Include="src\chatterbox\models\s3gen\matcha\" />
+    <Folder Include="src\chatterbox\models\s3gen\matcha\__pycache__\" />
+    <Folder Include="src\chatterbox\models\s3gen\transformer\" />
+    <Folder Include="src\chatterbox\models\s3gen\transformer\__pycache__\" />
+    <Folder Include="src\chatterbox\models\s3gen\utils\" />
+    <Folder Include="src\chatterbox\models\s3gen\utils\__pycache__\" />
+    <Folder Include="src\chatterbox\models\s3gen\__pycache__\" />
+    <Folder Include="src\chatterbox\models\s3tokenizer\" />
+    <Folder Include="src\chatterbox\models\s3tokenizer\__pycache__\" />
+    <Folder Include="src\chatterbox\models\t3\" />
+    <Folder Include="src\chatterbox\models\t3\inference\" />
+    <Folder Include="src\chatterbox\models\t3\inference\__pycache__\" />
+    <Folder Include="src\chatterbox\models\t3\modules\" />
+    <Folder Include="src\chatterbox\models\t3\modules\__pycache__\" />
+    <Folder Include="src\chatterbox\models\t3\__pycache__\" />
+    <Folder Include="src\chatterbox\models\tokenizers\" />
+    <Folder Include="src\chatterbox\models\tokenizers\__pycache__\" />
+    <Folder Include="src\chatterbox\models\voice_encoder\" />
+    <Folder Include="src\chatterbox\models\voice_encoder\__pycache__\" />
+    <Folder Include="src\chatterbox\models\__pycache__\" />
+    <Folder Include="src\chatterbox\__pycache__\" />
+    <Folder Include="src\chatterbox_tts.egg-info\" />
+    <Folder Include="tts_test_outputs\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="src\chatterbox\models\s3gen\matcha\__pycache__\decoder.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\matcha\__pycache__\flow_matching.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\matcha\__pycache__\transformer.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\transformer\__pycache__\activation.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\transformer\__pycache__\attention.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\transformer\__pycache__\convolution.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\transformer\__pycache__\embedding.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\transformer\__pycache__\encoder_layer.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\transformer\__pycache__\positionwise_feed_forward.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\transformer\__pycache__\subsampling.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\transformer\__pycache__\upsample_encoder.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\transformer\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\utils\__pycache__\class_utils.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\utils\__pycache__\mask.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\utils\__pycache__\mel.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\__pycache__\configs.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\__pycache__\const.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\__pycache__\decoder.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\__pycache__\f0_predictor.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\__pycache__\flow.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\__pycache__\flow_matching.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\__pycache__\hifigan.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\__pycache__\s3gen.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\__pycache__\xvector.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3gen\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3tokenizer\__pycache__\s3tokenizer.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\s3tokenizer\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\t3\inference\__pycache__\t3_hf_backend.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\t3\modules\__pycache__\cond_enc.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\t3\modules\__pycache__\learned_pos_emb.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\t3\modules\__pycache__\perceiver.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\t3\modules\__pycache__\t3_config.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\t3\__pycache__\llama_configs.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\t3\__pycache__\t3.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\t3\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\tokenizers\__pycache__\tokenizer.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\tokenizers\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\voice_encoder\__pycache__\config.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\voice_encoder\__pycache__\melspec.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\voice_encoder\__pycache__\voice_encoder.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\voice_encoder\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\__pycache__\utils.cpython-311.pyc" />
+    <Content Include="src\chatterbox\models\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="src\chatterbox\__pycache__\tts.cpython-311.pyc" />
+    <Content Include="src\chatterbox\__pycache__\vc.cpython-311.pyc" />
+    <Content Include="src\chatterbox\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="src\chatterbox_tts.egg-info\dependency_links.txt" />
+    <Content Include="src\chatterbox_tts.egg-info\PKG-INFO" />
+    <Content Include="src\chatterbox_tts.egg-info\requires.txt" />
+    <Content Include="src\chatterbox_tts.egg-info\SOURCES.txt" />
+    <Content Include="src\chatterbox_tts.egg-info\top_level.txt" />
+    <Content Include="tts_test_outputs\output_batch_1.wav" />
+    <Content Include="tts_test_outputs\output_batch_2.wav" />
+    <Content Include="tts_test_outputs\output_batch_3.wav" />
+    <Content Include="tts_test_outputs\output_batch_4.wav" />
+  </ItemGroup>
+  <ItemGroup>
+    <InterpreterReference Include="MSBuild|venv|C:\_myDrive\repos\auto-vlog\AutoVlogProj\AutoVlogProj.pyproj" />
+  </ItemGroup>
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
+  <!-- Uncomment the CoreCompile target to enable the Build command in
+       Visual Studio and specify your pre- and post-build commands in
+       the BeforeBuild and AfterBuild targets below. -->
+  <!--<Target Name="CoreCompile" />-->
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+</Project>

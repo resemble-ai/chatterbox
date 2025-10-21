@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/utils/class_utils.py
+
 # Copyright [2023-11-28] <sxc19@mails.tsinghua.edu.cn, Xingchen Song>
 #            2024 Alibaba Inc (authors: Xiang Lyu)
 #

@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3tokenizer/s3tokenizer.py
+
 from typing import List, Tuple
 
 import numpy as np
@@ -19,11 +21,24 @@ S3_TOKEN_RATE = 25
 SPEECH_VOCAB_SIZE = 6561
 
 
+def drop_invalid_tokens(x: torch.Tensor) -> List[torch.Tensor]:
+    """
+    Filters out invalid tokens from a batch of token sequences.
+    Invalid tokens are those with an ID >= SPEECH_VOCAB_SIZE.
+    Returns a list of tensors, as each sequence may have a different length after filtering.
+    """
+    if x.dim() == 1:
+        x = x.unsqueeze(0)
+    return [row[row < SPEECH_VOCAB_SIZE] for row in x]
+
+
 class S3Tokenizer(S3TokenizerV2):
     """
     s3tokenizer.S3TokenizerV2 with the following changes:
     - a more integrated `forward`
     - compute `log_mel_spectrogram` using `_mel_filters` and `window` in `register_buffers`
+    - robust dtype handling for mixed precision support
+    - corrected batch normalization in log_mel_spectrogram
     """
 
     ignore_state_dict_missing = ("_mel_filters", "window")
@@ -41,15 +56,26 @@ class S3Tokenizer(S3TokenizerV2):
             n_fft=self.n_fft,
             n_mels=config.n_mels
         )
+        
+        # Register buffers without explicit FP32 cast to allow them to adopt
+        # the module's dtype when .to(dtype) is called.
         self.register_buffer(
             "_mel_filters",
-            torch.FloatTensor(_mel_filters),
+            torch.from_numpy(_mel_filters).float(),
         )
 
         self.register_buffer(
             "window",
             torch.hann_window(self.n_fft),
         )
+
+    @property
+    def dtype(self):
+        # Dynamically determine the dtype from parameters/buffers
+        try:
+            return self.window.dtype
+        except StopIteration:
+            return torch.float32
 
     def pad(self, wavs, sr) -> List[torch.Tensor]:
         """
@@ -119,7 +145,9 @@ class S3Tokenizer(S3TokenizerV2):
         else:
             tokenizer = accelerator.unwrap_model(self)
 
-        speech_tokens, speech_token_lens = tokenizer.quantize(mels, mel_lens.to(self.device))
+        # The parent S3TokenizerV2's quantize method is sensitive to dtype.
+        # For stability, we ensure the input is float32, creating an "FP32 island".
+        speech_tokens, speech_token_lens = tokenizer.float().quantize(mels.float(), mel_lens.to(self.device))
         return (
             speech_tokens.long().detach(),
             speech_token_lens.long().detach(),
@@ -150,19 +178,44 @@ class S3Tokenizer(S3TokenizerV2):
         if not torch.is_tensor(audio):
             audio = torch.from_numpy(audio)
 
-        audio = audio.to(self.device)
+        # `torch.stft` requires FP32 input. Cast audio to float32 here.
+        audio = audio.to(self.device).float()
+        
         if padding > 0:
             audio = F.pad(audio, (0, padding))
         stft = torch.stft(
             audio, self.n_fft, S3_HOP,
-            window=self.window.to(self.device),
+            window=self.window,
             return_complex=True
         )
         magnitudes = stft[..., :-1].abs()**2
 
-        mel_spec = self._mel_filters.to(self.device) @ magnitudes
+        # Cast magnitudes to the target dtype BEFORE matrix multiplication
+        # This ensures the matrix multiplication is done in the desired precision (e.g., BF16).
+        magnitudes = magnitudes.to(self.dtype)
+
+        # This matrix multiplication now works because both operands are the same dtype.
+        mel_spec = self._mel_filters @ magnitudes
 
         log_spec = torch.clamp(mel_spec, min=1e-10).log10()
-        log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
+        
+        # Robustness Enhancement: Handle potential instability in mixed precision
+        if not torch.isfinite(log_spec).all():
+             print("Warning: Numerical instability detected in log_mel_spectrogram (BF16/FP16). Falling back to FP32 calculation for this step.")
+             mel_spec_fp32 = mel_spec.float()
+             log_spec = torch.clamp(mel_spec_fp32, min=1e-10).log10()
+             log_spec = log_spec.to(self.dtype)
+
+        # Functional Fix: Correct normalization for batched input
+        B = log_spec.shape[0]
+        if B > 1:
+            # Flatten feature/time dimensions to find max per batch item
+            max_vals = log_spec.view(B, -1).max(dim=1, keepdim=True)[0].view(B, 1, 1)
+        else:
+            # Optimization for single input
+            max_vals = log_spec.max()
+            
+        log_spec = torch.maximum(log_spec, max_vals - 8.0)
+        
         log_spec = (log_spec + 4.0) / 4.0
         return log_spec

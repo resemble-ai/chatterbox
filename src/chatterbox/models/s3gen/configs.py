@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/configs.py
+
 from ..utils import AttrDict
 
 CFM_PARAMS = AttrDict({

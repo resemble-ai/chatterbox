@@ -1,3 +1,5 @@
+#chatterbox/src/chatterbox/models/s3gen/transformer/subsampling.py
+
 # Copyright (c) 2021 Mobvoi Inc (Binbin Zhang, Di Wu)
 #               2024 Alibaba Inc (Xiang Lyu)
 #
