@@ -43,13 +43,33 @@ class T3(nn.Module):
             different PE embedding space for speech.
     """
 
-    def __init__(self, hp=None):
+    def __init__(self, hp=None, dtype=torch.float32):
         if hp is None:
             hp = T3Config.english_only()  # Default to English-only config for backward compatibility
         super().__init__()
         self.hp = hp
-        self.cfg = LlamaConfig(**LLAMA_CONFIGS[hp.llama_config_name])
-        self.tfmr = LlamaModel(self.cfg)
+        
+        config_dict = LLAMA_CONFIGS[hp.llama_config_name].copy()
+        # Note: We no longer need to set torch_dtype in the config, as it's not used for scratch initialization.
+        # config_dict['torch_dtype'] = dtype 
+        self.cfg = LlamaConfig(**config_dict)
+
+        # --- DEFINITIVE FIX for Flash Attention Initialization ---
+        # The LlamaModel constructor does not respect config.torch_dtype for scratch initialization;
+        # it uses the global default. We temporarily set the global default dtype to our target dtype
+        # to ensure the model's layers are created in BF16 from the start.
+        original_dtype = torch.get_default_dtype()
+        try:
+            if dtype in [torch.float16, torch.bfloat16]:
+                torch.set_default_dtype(dtype)
+            
+            self.tfmr = LlamaModel(self.cfg)
+
+        finally:
+            # Always restore the original default dtype to avoid side-effects elsewhere.
+            torch.set_default_dtype(original_dtype)
+        # --- End of Fix ---
+
         self.dim = self.cfg.hidden_size
         self.deepspeed_patch_applied = False
 

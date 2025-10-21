@@ -1,5 +1,15 @@
 #chatterbox/src/chatterbox/models/t3/llama_configs.py
 
+# Detect Flash Attention 2
+try:
+    import flash_attn
+    ATTN_IMPLEMENTATION = "flash_attention_2"
+    print("Successfully detected Flash Attention 2. It will be used.")
+except ImportError:
+    # Fallback to PyTorch's built-in optimized attention
+    ATTN_IMPLEMENTATION = "sdpa"
+    print("Flash Attention 2 not found. Falling back to SDPA. Install 'flash-attn' for potentially better performance.")
+
 LLAMA_520M_CONFIG_DICT = dict(
     # Arbitrary small number that won't cause problems when loading.
     # These param are unused due to custom input layers.
@@ -10,7 +20,7 @@ LLAMA_520M_CONFIG_DICT = dict(
     intermediate_size=4096,
     num_hidden_layers=30,
     num_attention_heads=16,
-    attn_implementation="sdpa",
+    attn_implementation=ATTN_IMPLEMENTATION, # Use the detected implementation
     head_dim=64,
     tie_word_embeddings=False,
     hidden_act="silu",
@@ -30,7 +40,7 @@ LLAMA_520M_CONFIG_DICT = dict(
         rope_type="llama3"
     ),
     rope_theta=500000.0,
-    torch_dtype="bfloat16",
+    torch_dtype="bfloat16", # This is informational; runtime dtype is set during loading.
     use_cache=True,
 )
 

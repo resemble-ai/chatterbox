@@ -64,9 +64,19 @@ def main():
     print("\nLoading Chatterbox TTS model... (This may take a moment)")
     start_time = time.time()
     try:
-        model = ChatterboxTTS.from_pretrained(device=device)
+        # Enable BF16 and Compilation if running on CUDA
+        use_optimizations = (device == "cuda")
+        
+        # Use the updated from_pretrained method
+        model = ChatterboxTTS.from_pretrained(
+            device=device, 
+            use_bf16=use_optimizations, 
+            compile_model=use_optimizations
+        )
     except Exception as e:
         print(f"Failed to load model: {e}")
+        import traceback
+        traceback.print_exc()
         return
     load_time = time.time() - start_time
     print(f"Model loaded successfully in {load_time:.2f} seconds.")

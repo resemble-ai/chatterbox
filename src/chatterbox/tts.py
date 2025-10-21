@@ -158,7 +158,7 @@ class ChatterboxTTS:
         # Keep VoiceEncoder in FP32 for stability.
         ve.to(device).eval()
 
-        t3 = T3()
+        t3 = T3(dtype=dtype)
         t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
@@ -174,16 +174,22 @@ class ChatterboxTTS:
         # ------------------------------------
         # Compilation Logic (torch.compile)
         if compile_model and hasattr(torch, 'compile') and device == 'cuda':
-            print("Compiling models... (This might take a few minutes on the first run)")
-            try:
-                # Compile the Llama backbone (the most critical part of T3)
-                # mode="reduce-overhead" is often better for smaller batch sizes during decoding.
-                t3.tfmr = torch.compile(t3.tfmr, mode="reduce-overhead")
-                # Compile S3Gen
-                s3gen = torch.compile(s3gen, mode="reduce-overhead")
-                print("Compilation successful.")
-            except Exception as e:
-                print(f"Warning: Model compilation failed: {e}. Proceeding without compilation.")
+            # Disable torch.compile on Windows due to Triton dependency:
+            import sys
+            if sys.platform == "win32":
+                print("Skipping torch.compile on Windows due to lack of official Triton support.")
+                print("Flash Attention 2 will be used for acceleration, which is often sufficient.")
+            else:
+                print("Compiling models... (This might take a few minutes on the first run)")
+                try:
+                    # Compile the Llama backbone (the most critical part of T3)
+                    # mode="reduce-overhead" is often better for smaller batch sizes during decoding.
+                    t3.tfmr = torch.compile(t3.tfmr, mode="reduce-overhead")
+                    # Compile S3Gen
+                    s3gen = torch.compile(s3gen, mode="reduce-overhead")
+                    print("Compilation successful.")
+                except Exception as e:
+                    print(f"Warning: Model compilation failed: {e}. Proceeding without compilation.")
         # ------------------------------------
 
         tokenizer = EnTokenizer(
