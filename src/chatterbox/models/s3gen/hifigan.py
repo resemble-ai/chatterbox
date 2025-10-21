@@ -196,32 +196,48 @@ class SineGen(torch.nn.Module):
 
     def _f02uv(self, f0):
         # generate uv signal
-        uv = (f0 > self.voiced_threshold).type(torch.float32)
+        # FIX: Ensure output matches the dtype of the input f0
+        uv = (f0 > self.voiced_threshold).to(f0.dtype)
         return uv
 
     @torch.no_grad()
     def forward(self, f0):
         """
-        :param f0: [B, 1, sample_len], Hz
-        :return: [B, 1, sample_len]
+        :param f0: [B, 1, sample_len], Hz. Expected input dtype (e.g., BF16).
+        :return: [B, 1, sample_len]. Output matches input dtype.
         """
+        # Stable FP32 Island
+        # Operations like cumsum and sin can be unstable in BF16/FP16.
+        # We perform the core math in FP32 for stability, then cast back.
+        
+        # Store the target dtype (e.g., BF16)
+        target_dtype = f0.dtype
+        
+        # Cast input F0 to FP32 for calculation stability
+        f0_fp32 = f0.float()
 
-        F_mat = torch.zeros((f0.size(0), self.harmonic_num + 1, f0.size(-1))).to(f0.device)
+        # Initialize F_mat in FP32
+        B, _, T = f0.shape
+        F_mat = torch.zeros((B, self.harmonic_num + 1, T), device=f0.device, dtype=torch.float32)
+        
         for i in range(self.harmonic_num + 1):
-            F_mat[:, i: i + 1, :] = f0 * (i + 1) / self.sampling_rate
+            F_mat[:, i: i + 1, :] = f0_fp32 * (i + 1) / self.sampling_rate
 
+        # Calculations remain in FP32
         theta_mat = 2 * np.pi * (torch.cumsum(F_mat, dim=-1) % 1)
         u_dist = Uniform(low=-np.pi, high=np.pi)
-        phase_vec = u_dist.sample(sample_shape=(f0.size(0), self.harmonic_num + 1, 1)).to(F_mat.device)
+        
+        # Ensure phase_vec is FP32 (Uniform defaults to FP32)
+        phase_vec = u_dist.sample(sample_shape=(B, self.harmonic_num + 1, 1)).to(F_mat.device)
         phase_vec[:, 0, :] = 0
 
-        # generate sine waveforms
+        # generate sine waveforms (FP32)
         sine_waves = self.sine_amp * torch.sin(theta_mat + phase_vec)
 
-        # generate uv signal
-        uv = self._f02uv(f0)
+        # generate uv signal (using FP32 version)
+        uv = self._f02uv(f0_fp32)
 
-        # noise: for unvoiced should be similar to sine_amp
+        # noise (FP32): for unvoiced should be similar to sine_amp
         #        std = self.sine_amp/3 -> max value ~ self.sine_amp
         # .       for voiced regions is self.noise_std
         noise_amp = uv * self.noise_std + (1 - uv) * self.sine_amp / 3
@@ -230,7 +246,9 @@ class SineGen(torch.nn.Module):
         # first: set the unvoiced part to 0 by uv
         # then: additive noise
         sine_waves = sine_waves * uv + noise
-        return sine_waves, uv, noise
+        
+        # Cast final outputs back to the target dtype (e.g., BF16)
+        return sine_waves.to(target_dtype), uv.to(target_dtype), noise.to(target_dtype)
 
 
 class SourceModuleHnNSF(torch.nn.Module):
@@ -266,6 +284,15 @@ class SourceModuleHnNSF(torch.nn.Module):
         self.l_linear = torch.nn.Linear(harmonic_num + 1, 1)
         self.l_tanh = torch.nn.Tanh()
 
+    # Add dtype property
+    @property
+    def dtype(self):
+        try:
+            # Dynamically determine dtype from the linear layer weights
+            return self.l_linear.weight.dtype
+        except StopIteration:
+            return torch.float32
+
     def forward(self, x):
         """
         Sine_source, noise_source = SourceModuleHnNSF(F0_sampled)
@@ -273,14 +300,22 @@ class SourceModuleHnNSF(torch.nn.Module):
         Sine_source (batchsize, length, 1)
         noise_source (batchsize, length 1)
         """
+        # Ensure input x (F0 from F0Predictor) matches the module dtype
+        if x.dtype != self.dtype:
+            x = x.to(self.dtype)
+
         # source for harmonic branch
         with torch.no_grad():
+            # SineGen now handles stability internally and returns the correct dtype (e.g., BF16)
             sine_wavs, uv, _ = self.l_sin_gen(x.transpose(1, 2))
             sine_wavs = sine_wavs.transpose(1, 2)
             uv = uv.transpose(1, 2)
+        
+        # This operation (the location of the matmul error) works because 
+        # sine_wavs (BF16) matches l_linear weights (BF16)
         sine_merge = self.l_tanh(self.l_linear(sine_wavs))
 
-        # source for noise branch, in the same shape as uv
+        # source for noise branch, torch.randn_like respects the dtype of uv (BF16)
         noise = torch.randn_like(uv) * self.sine_amp / 3
         return sine_merge, noise, uv
 
@@ -381,6 +416,13 @@ class HiFTGenerator(nn.Module):
         self.stft_window = torch.from_numpy(get_window("hann", istft_params["n_fft"], fftbins=True).astype(np.float32))
         self.f0_predictor = f0_predictor
 
+    @property
+    def dtype(self):
+        try:
+            return self.conv_pre.weight.dtype
+        except StopIteration:
+            return torch.float32
+
     def remove_weight_norm(self):
         print('Removing weight norm...')
         for l in self.ups:
@@ -389,15 +431,16 @@ class HiFTGenerator(nn.Module):
             l.remove_weight_norm()
         remove_weight_norm(self.conv_pre)
         remove_weight_norm(self.conv_post)
-        self.m_source.remove_weight_norm()
+        # self.m_source.remove_weight_norm() # SourceModuleHnNSF does not have this method
         for l in self.source_downs:
             remove_weight_norm(l)
         for l in self.source_resblocks:
             l.remove_weight_norm()
 
     def _stft(self, x):
+        # This function requires FP32 input for stft
         spec = torch.stft(
-            x,
+            x.float(),
             self.istft_params["n_fft"], self.istft_params["hop_len"], self.istft_params["n_fft"], window=self.stft_window.to(x.device),
             return_complex=True)
         spec = torch.view_as_real(spec)  # [B, F, TT, 2]
@@ -407,13 +450,25 @@ class HiFTGenerator(nn.Module):
         magnitude = torch.clip(magnitude, max=1e2)
         real = magnitude * torch.cos(phase)
         img = magnitude * torch.sin(phase)
-        inverse_transform = torch.istft(torch.complex(real, img), self.istft_params["n_fft"], self.istft_params["hop_len"],
+        # This function requires FP32 complex input for istft
+        inverse_transform = torch.istft(torch.complex(real.float(), img.float()), self.istft_params["n_fft"], self.istft_params["hop_len"],
                                         self.istft_params["n_fft"], window=self.stft_window.to(magnitude.device))
         return inverse_transform
 
     def decode(self, x: torch.Tensor, s: torch.Tensor = torch.zeros(1, 1, 0)) -> torch.Tensor:
+        expected_dtype = self.dtype
+        # Defensively cast inputs to match the model's expected dtype
+        if x.dtype != expected_dtype:
+            x = x.to(expected_dtype)
+        if s.dtype != expected_dtype:
+            s = s.to(expected_dtype)
+
+        # _stft handles casting its input to float32 internally
         s_stft_real, s_stft_imag = self._stft(s.squeeze(1))
         s_stft = torch.cat([s_stft_real, s_stft_imag], dim=1)
+        
+        # s_stft is now FP32, cast it to the model's dtype for downstream layers
+        s_stft = s_stft.to(expected_dtype)
 
         x = self.conv_pre(x)
         for i in range(self.num_upsamples):
@@ -441,6 +496,7 @@ class HiFTGenerator(nn.Module):
         magnitude = torch.exp(x[:, :self.istft_params["n_fft"] // 2 + 1, :])
         phase = torch.sin(x[:, self.istft_params["n_fft"] // 2 + 1:, :])  # actually, sin is redundancy
 
+        # _istft handles casting its inputs to float32 internally
         x = self._istft(magnitude, phase)
         x = torch.clamp(x, -self.audio_limit, self.audio_limit)
         return x
@@ -471,6 +527,6 @@ class HiFTGenerator(nn.Module):
         s = s.transpose(1, 2)
         # use cache_source to avoid glitch
         if cache_source.shape[2] != 0:
-            s[:, :, :cache_source.shape[2]] = cache_source
+            s[:, :, :cache_source.shape[2]] = cache_source.to(s.dtype)
         generated_speech = self.decode(x=speech_feat, s=s)
         return generated_speech, s

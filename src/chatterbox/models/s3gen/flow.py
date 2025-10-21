@@ -155,7 +155,7 @@ class MaskedDiffWithXvec(torch.nn.Module):
         mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
         token = self.input_embedding(torch.clamp(token, min=0, max=self.input_embedding.num_embeddings-1)) * mask
 
-        # text encode (Your fix for token_len is applied here)
+        # text encode (Using your corrected version)
         h, _ = self.encoder(token, token_len)  # Ignore h_lengths from encoder
         h_lengths = token_len * self.token_mel_ratio
 
@@ -182,9 +182,9 @@ class MaskedDiffWithXvec(torch.nn.Module):
             n_timesteps=10
         )
         feat = feat[:, :, mel_len1:]
-        # assert feat.shape[2] == mel_len2  # This assertion is not batch-aware
         
-        # CRITICAL: Do NOT cast to .float() here. Keep the precision (e.g., BF16) for the Vocoder.
+        # CRITICAL FIX: Do NOT cast to .float(). Keep the precision (e.g., BF16) for the Vocoder.
+        # OLD LINE was: return feat.float(), None
         return feat, None
 
 
@@ -249,6 +249,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         if hasattr(self, 'fp16'):
            del self.fp16
 
+    # Add helper property for dtype
     @property
     def dtype(self):
         try:
@@ -270,7 +271,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         # Use the actual model dtype for inputs
         expected_dtype = self.dtype
 
-        # Ensure inputs match the expected dtype (replaces the old self.fp16 check)
+        # Ensure inputs match the expected dtype
         if prompt_feat.dtype != expected_dtype:
             prompt_feat = prompt_feat.to(expected_dtype)
         if embedding.dtype != expected_dtype:
