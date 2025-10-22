@@ -21,7 +21,7 @@ dependencies = [
     "safetensors==0.5.3",
     "pykakasi==2.3.0",
     "gradio==5.44.1",
-
+    "torchcodec>=0.8.0"
 ]
 
 [project.urls]
