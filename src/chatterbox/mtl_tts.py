@@ -40,7 +40,6 @@ SUPPORTED_LANGUAGES = {
   "no": "Norwegian",
   "pl": "Polish",
   "pt": "Portuguese",
-  "ru": "Russian",
   "sv": "Swedish",
   "sw": "Swahili",
   "tr": "Turkish",
