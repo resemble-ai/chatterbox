@@ -26,6 +26,8 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
 - Watermarked outputs
 - Easy voice conversion script
 - [Outperforms ElevenLabs](https://podonos.com/resembleai/chatterbox)
+- Smart artifact cleaning with pause protection
+- Support for custom pause tags `[pause:xx]`
 
 # Supported Languages 
 Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • Spanish (es) • Finnish (fi) • French (fr) • Hebrew (he) • Hindi (hi) • Italian (it) • Japanese (ja) • Korean (ko) • Malay (ms) • Dutch (nl) • Norwegian (no) • Polish (pl) • Portuguese (pt) • Russian (ru) • Swedish (sv) • Swahili (sw) • Turkish (tr) • Chinese (zh)
@@ -84,6 +86,15 @@ ta.save("test-chinese.wav", wav_chinese, model.sr)
 AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
 ta.save("test-2.wav", wav, model.sr)
+
+# Using artifact cleaning feature
+wav = model.generate(
+    text="Hello[pause:0.5s]world!",  # Support [pause:xx] tag for adding pauses
+    use_auto_editor=True,            # Enable artifact cleaning
+    ae_threshold=0.06,               # Volume threshold (0-1)
+    ae_margin=0.2                    # Boundary protection time (seconds)
+)
+ta.save("test-3.wav", wav, model.sr)
 ```
 See `example_tts.py` and `example_vc.py` for more examples.
 

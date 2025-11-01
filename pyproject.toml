@@ -10,6 +10,7 @@ authors = [
 ]
 dependencies = [
     "numpy>=1.24.0,<1.26.0",
+    "resampy==0.4.3",
     "librosa==0.11.0",
     "s3tokenizer",
     "torch==2.6.0",
@@ -23,7 +24,7 @@ dependencies = [
     "pykakasi==2.3.0",
     "gradio==5.44.1",
     "russian-text-stresser @ git+https://github.com/Vuizur/add-stress-to-epub",
-
+    "auto-editor>=27.0.0"
 ]
 
 [project.urls]
@@ -36,3 +37,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "gradio>=4.44.1",
+    "resemble-perth>=1.0.1",
+    "setuptools>=80.9.0",
+]
