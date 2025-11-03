@@ -46,3 +46,8 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+
+.venv/
+audio_data/
+test_outputs/
+*.png

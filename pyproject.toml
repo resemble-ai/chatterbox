@@ -9,19 +9,21 @@ authors = [
     {name = "resemble-ai", email = "engineering@resemble.ai"}
 ]
 dependencies = [
-    "numpy>=1.24.0,<1.26.0",
+    "numpy>=1.26.0",
     "librosa==0.11.0",
     "s3tokenizer",
+    "onnx>=1.18.0,<1.19.0",
     "torch==2.6.0",
     "torchaudio==2.6.0",
     "transformers==4.46.3",
     "diffusers==0.29.0",
+    #"ml-dtypes>=0.3.0",
     "resemble-perth==1.0.1",
     "conformer==0.3.2",
     "safetensors==0.5.3",
     "spacy-pkuseg",
     "pykakasi==2.3.0",
-    "gradio==5.44.1",
+    "gradio",
     "russian-text-stresser @ git+https://github.com/Vuizur/add-stress-to-epub",
 
 ]
@@ -36,3 +38,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
