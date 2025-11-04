@@ -2,6 +2,7 @@ import numpy as np
 import queue
 import threading
 from chatterbox import ChatterboxTTS
+import time
 
 class AudioBuffer:
     def __init__(
@@ -94,7 +95,7 @@ class ThreadedStreamer:
     ):
         self.sr = sample_rate
         self.dtype = np.float32
-        self.queue = queue.Queue(maxsize=queue_maxsize)
+        self.queue = queue.Queue(maxsize=10)
         self.buffer = AudioBuffer(
             fade_duration=fade_duration,
             sample_rate=sample_rate,
@@ -115,7 +116,29 @@ class ThreadedStreamer:
             self._started = True
             self._producer_thread.start()
     
-    
+    def text_to_speech_streaming(
+        self,
+        text: str,
+        exaggeration: float = 0.5,
+        cfg_weight: float = 0.5,
+        chunk_size: int = 60,
+        temperature: float = 0.8,
+        context_window: int = 150,
+    ):
+        start_time = time.time()
+        timt_to_first_chunk = None
+        try:
+            for chunk, metrics in self.model.generate_stream(
+                text=text,
+                exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
+                chunk_size=chunk_size,
+                fade_duration=fade_duration,
+                context_window=context_window,
+                temperature=temperature,
+            ):
+                # blocks if queue is full
+                self.queue.put(chunk)
 
     def load_model(self):
         """Loads chatterbox model for tts generation"""
