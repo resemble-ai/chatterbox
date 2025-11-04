@@ -297,7 +297,6 @@ class ChatterboxTTS:
         start_time,
         metrics,
         print_metrics,
-        fade_duration=0.02  # seconds to apply linear fade-in on each chunk
     ):
         # Combine buffered chunks of tokens
         new_tokens = torch.cat(token_buffer, dim=-1)
@@ -344,12 +343,12 @@ class ChatterboxTTS:
 
         # Apply a short linear fade-in on the new chunk to smooth boundaries
         # TODO -> change to cross fading as opposed to a simple fade in
-        fade_samples = int(fade_duration * self.sr)
-        if fade_samples > 0:
-            if fade_samples > len(audio_chunk):
-                fade_samples = len(audio_chunk)
-            fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=audio_chunk.dtype)
-            audio_chunk[:fade_samples] *= fade_in
+        # fade_samples = int(fade_duration * self.sr)
+        # if fade_samples > 0:
+        #     if fade_samples > len(audio_chunk):
+        #         fade_samples = len(audio_chunk)
+        #     fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=audio_chunk.dtype)
+        #     audio_chunk[:fade_samples] *= fade_in
 
         # Compute audio duration and watermark
         audio_duration = len(audio_chunk) / self.sr
@@ -380,7 +379,6 @@ class ChatterboxTTS:
         temperature: float = 0.8,
         chunk_size: int = 25,  # Tokens per chunk
         context_window = 50,
-        fade_duration=0.02,  # seconds to apply linear fade-in on each chunk
     ) -> Generator[Tuple[torch.Tensor, StreamingMetrics], None, None]:
         """
         Streaming version of generate that yields audio chunks as they are generated.
@@ -459,7 +457,7 @@ class ChatterboxTTS:
                     # Process each chunk immediately
                     audio_tensor, audio_duration, success = self._process_token_buffer(
                         [token_chunk], all_tokens_processed, context_window, 
-                        start_time, metrics, fade_duration
+                        start_time, metrics
                     )
 
                     if success:
