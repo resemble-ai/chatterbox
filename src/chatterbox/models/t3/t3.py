@@ -21,6 +21,8 @@ from .inference.t3_hf_backend import T3HuggingfaceBackend
 from .inference.alignment_stream_analyzer import AlignmentStreamAnalyzer
 from ..utils import AttrDict
 
+from typing import Generator, Tuple, Optional
+
 
 logger = logging.getLogger(__name__)
 
@@ -392,3 +394,177 @@ class T3(nn.Module):
         # Concatenate all predicted tokens along the sequence dimension.
         predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
         return predicted_tokens
+
+    def inference_stream(
+        self,
+        *,
+        t3_cond: T3Cond,
+        text_tokens: torch.Tensor,
+        # initial_speech_tokens: Optional[Tensor]=None, NOTE -> Removing input since it is not implemented
+
+        # misc conditioning
+        # prepend_prompt_speech_tokens: Optional[Tensor]=None,  NOTE -> Removing input since it doesn't seem to be implemented
+
+        # num_return_sequences=1,
+        max_new_tokens=None,
+        # stop_on_eos=True,
+        # do_sample=True,
+        temperature=0.8,
+        top_p=1.0,
+        min_p=0.05,
+        # length_penalty=1.0,
+        repetition_penalty=1.2,
+        cfg_weight=0.5,
+        chunk_size=25,  # Number of tokens per chunk
+    ) -> Generator[torch.Tensor, None, None]:
+        """
+        Streaming version of T3 inference that yields speech tokens in chunks
+        """
+    
+        # Validate / sanitize inputs
+        # assert prepend_prompt_speech_tokens is None, "not implemented" NOTE -> Doesn't seem to be implemented.
+        # _ensure_BOT_EOT(text_tokens, self.hp) # TODO This was intentionally not included in the original chatterbox streaming repo, so we should determine it's purpose before adding it.
+        text_tokens = torch.atleast_2d(text_tokens).to(dtype=torch.long, device=self.device)
+
+        # Default initial speech to a single start-of-speech token
+        initial_speech_tokens = self.hp.start_speech_token * torch.ones_like(text_tokens[:, :1])
+
+        # Prepare custom input embeds
+        embeds, len_cond = self.prepare_input_embeds(
+            t3_cond=t3_cond,
+            text_tokens=text_tokens,
+            speech_tokens=initial_speech_tokens,
+            cfg_weight=cfg_weight
+        )
+
+        # Setup model if not compiled
+        if not self.compiled:
+            # Default to None for English models, only create for multilingual
+            alignment_stream_analyzer = None
+            if self.hp.is_multilingual:
+                # NOTE -> Raise error if multilingual
+                raise ValueError("hp.is_multilingual should be set to false")
+                alignment_stream_analyzer = AlignmentStreamAnalyzer(
+                    self.tfmr,
+                    None,
+                    text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
+                    alignment_layer_idx=9,
+                    eos_idx=self.hp.stop_speech_token,
+                )
+
+            patched_model = T3HuggingfaceBackend(
+                config=self.cfg,
+                llama=self.tfmr,
+                speech_enc=self.speech_emb,
+                speech_head=self.speech_head,
+                alignment_stream_analyzer=alignment_stream_analyzer,
+            )
+            self.patched_model = patched_model
+            self.compiled = True
+
+        device = embeds.device
+
+        bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=device)
+        bos_embed = self.speech_emb(bos_token) # shape: (B, 1, embed_dim)
+        bos_embed = bos_embed + self.speech_pos_emb.get_fixed_embedding(0)
+
+        # batch_size=2 for CFG
+        # TODO -> If we allow for zero cfg_weight value this should be handled for that edge case
+        bos_embed = torch.cat([bos_embed, bos_embed])
+
+        # Combine condition and BOS token for the initial input
+        inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
+
+        # Track generated token ids; start with the BOS token
+        generated_ids = bos_token.clone()
+        predicted = [] # To store the predicted tokens
+        chunk_buffer = [] # to store chunk tokens
+
+        # Instantiate logits processors
+        top_p_warper = TopPLogitsWarper(top_p=top_p)
+        min_p_warper = MinPLogitsWarper(min_p=min_p)
+        top_p_warper = TopPLogitsWarper(top_p=top_p)
+        repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
+
+        # ---- Initial Forward Pass (no kv_cache yet) ----
+        output = self.patched_model(
+            inputs_embeds=inputs_embeds,
+            past_key_values=None,
+            use_cache=True,
+            output_attentions=True,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+        # Initialize kv_cache with the full context.
+        past = output.past_key_values
+
+        # ---- Generation Loop using kv_cache ----
+        for i in range(max_new_tokens):
+            logits_step = output.logits[:, -1, :]
+
+            # CFG combine -> (1, V)
+            cond   = logits_step[0:1, :]
+            uncond = logits_step[1:2, :]
+            cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
+            logits = cond + cfg * (cond - uncond)
+
+            # Apply alignment stream analyzer integrity checks
+            # NOTE -> Alignment stream analyzer shouldn't be initialized we're not using multilingual capabilities.
+            # if self.patched_model.alignment_stream_analyzer is not None:
+            #     if logits.dim() == 1:            # guard in case something upstream squeezed
+            #         logits = logits.unsqueeze(0) # (1, V)
+            #     # Pass the last generated token for repetition tracking
+            #     last_token = generated_ids[0, -1].item() if len(generated_ids[0]) > 0 else None
+            #     logits = self.patched_model.alignment_stream_analyzer.step(logits, next_token=last_token)  # (1, V)
+
+            # Apply repetition penalty
+            ids_for_proc = generated_ids[:1, ...]   # batch = 1
+            logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
+
+            # Apply temperature scaling
+            if temperature != 1.0:
+                logits = logits / temperature
+            
+            # Apply min_p and top_p filtering
+            logits = min_p_warper(ids_for_proc, logits)
+            logits = top_p_warper(ids_for_proc, logits)
+
+            # Convert logits to probabilities and sample the next token
+            probs = torch.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1) # shape: (B, 1)
+
+            predicted.append(next_token)
+            chunk_buffer.append(next_token)
+            generated_ids = torch.cat([generated_ids, next_token], dim=1)
+
+            # Check for EOS token
+            if next_token.view(-1) == self.hp.stop_speech_token:
+                # Yield final chunk if buffer has tokens
+                if chunk_buffer:
+                    yield torch.cat(chunk_buffer, dim=1)
+                break
+
+            # Yield chunk when buffer is full
+            if len(chunk_buffer) >= chunk_size:
+                yield torch.cat(chunk_buffer, dim=1)
+                chunk_buffer = []
+
+            # Get embedding for the new token
+            next_token_embed = self.speech_emb(next_token)
+            next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
+
+            # For CFG
+            next_token_embed = torch.cat([next_token_embed, next_token_embed])
+
+            # Forward pass with only the new token and the cached past.
+            output = self.patched_model(
+                inputs_embeds=next_token_embed,
+                past_key_values=past,
+                output_attentions=True,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            
+            # Update the kv_cache.
+            past = output.past_key_values
+

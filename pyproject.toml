@@ -22,7 +22,7 @@ dependencies = [
     "spacy-pkuseg",
     "pykakasi==2.3.0",
     "gradio==5.44.1",
-    "russian-text-stresser @ git+https://github.com/Vuizur/add-stress-to-epub",
+    #"russian-text-stresser @ git+https://github.com/Vuizur/add-stress-to-epub",
 
 ]
 
