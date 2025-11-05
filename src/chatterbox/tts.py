@@ -296,7 +296,6 @@ class ChatterboxTTS:
         context_window,
         start_time,
         metrics,
-        print_metrics,
     ):
         # Combine buffered chunks of tokens
         new_tokens = torch.cat(token_buffer, dim=-1)
@@ -476,3 +475,4 @@ class ChatterboxTTS:
         metrics.total_audio_duration = total_audio_length
         if total_audio_length > 0:
             metrics.rtf = metrics.total_generation_time / total_audio_length
+    
