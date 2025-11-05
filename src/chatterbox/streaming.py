@@ -125,7 +125,7 @@ class ChatterboxStreamer:
                 # Shutdown signal
                 break
         
-            for chunk, metrics in self._model.generate_stream(text=text):
+            for chunk in self._model.generate_stream(text=text):
                 # Terminates tts generation if thread is stopped
                 if not self._running:
                     break

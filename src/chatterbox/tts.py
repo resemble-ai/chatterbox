@@ -294,8 +294,6 @@ class ChatterboxTTS:
         token_buffer,
         all_tokens_so_far,
         context_window,
-        start_time,
-        metrics,
     ):
         # Combine buffered chunks of tokens
         new_tokens = torch.cat(token_buffer, dim=-1)
@@ -358,11 +356,11 @@ class ChatterboxTTS:
         # audio_tensor = torch.from_numpy(watermarked_chunk).unsqueeze(0)
 
         # Update first‐chunk latency metric
-        if metrics.chunk_count == 0:
-            metrics.latency_to_first_chunk = time.time() - start_time
+        # if metrics.chunk_count == 0:
+        #     metrics.latency_to_first_chunk = time.time() - start_time
 
-        metrics.chunk_count += 1
-        return audio_chunk, audio_duration, True
+        # metrics.chunk_count += 1
+        return audio_chunk, audio_duration
 
 
 
@@ -396,13 +394,13 @@ class ChatterboxTTS:
             Tuple of (audio_chunk, metrics) where audio_chunk is a torch.Tensor
             and metrics contains timing information
         """
-        start_time = time.time()
-        metrics = StreamingMetrics()
+        # start_time = time.time()
+        # metrics = StreamingMetrics()
 
-        if audio_prompt_path:
-            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
-        else:
-            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+        # if audio_prompt_path:
+        #     self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
+        # else:
+        #     assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
         # Update exaggeration if needed
         if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
@@ -454,14 +452,12 @@ class ChatterboxTTS:
                     token_chunk = token_chunk[0]
 
                     # Process each chunk immediately
-                    audio_tensor, audio_duration, success = self._process_token_buffer(
-                        [token_chunk], all_tokens_processed, context_window, 
-                        start_time, metrics
+                    audio_tensor, audio_duration = self._process_token_buffer(
+                        [token_chunk], all_tokens_processed, context_window
                     )
 
-                    if success:
-                        total_audio_length += audio_duration
-                        yield audio_tensor, metrics
+                    total_audio_length += audio_duration
+                    yield audio_tensor
 
                     # Update all_tokens_processed with the new tokens
                     # TODO -> all_tokens_processed
@@ -470,9 +466,9 @@ class ChatterboxTTS:
                     else:
                         all_tokens_processed = torch.cat([all_tokens_processed, token_chunk], dim=-1)
 
-        # Final metrics calculation
-        metrics.total_generation_time = time.time() - start_time
-        metrics.total_audio_duration = total_audio_length
-        if total_audio_length > 0:
-            metrics.rtf = metrics.total_generation_time / total_audio_length
+        # # Final metrics calculation
+        # metrics.total_generation_time = time.time() - start_time
+        # metrics.total_audio_duration = total_audio_length
+        # if total_audio_length > 0:
+        #     metrics.rtf = metrics.total_generation_time / total_audio_length
     
