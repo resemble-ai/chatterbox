@@ -29,9 +29,32 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
 
 # Supported Languages 
 Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • Spanish (es) • Finnish (fi) • French (fr) • Hebrew (he) • Hindi (hi) • Italian (it) • Japanese (ja) • Korean (ko) • Malay (ms) • Dutch (nl) • Norwegian (no) • Polish (pl) • Portuguese (pt) • Russian (ru) • Swedish (sv) • Swahili (sw) • Turkish (tr) • Chinese (zh)
+# ⚡ Performance Optimizations
+
+**NEW: Optimized inference for production use!** Achieve **2-4x faster** inference with our optimized implementation:
+
+```python
+from chatterbox.optimized_tts import OptimizedChatterboxTTS
+
+model = OptimizedChatterboxTTS.from_pretrained(
+    device="cuda",
+    enable_compilation=True,      # torch.compile for speed
+    use_mixed_precision=True,     # BF16 for efficiency
+    enable_watermark=False,       # Disable for max speed
+)
+
+wav = model.generate(text, verbose=False)
+```
+
+**Performance on RTX 4090:**
+- Baseline: 10s audio in ~4-5s (RTF: 0.4-0.5x)
+- Optimized: 10s audio in **~1-1.5s** (RTF: 0.1-0.15x) 🚀
+
+See [OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md) for details and benchmarks.
+
 # Tips
 - **General Use (TTS and Voice Agents):**
-  - Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip’s language. To mitigate this, set `cfg_weight` to `0`.
+  - Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip's language. To mitigate this, set `cfg_weight` to `0`.
   - The default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts across all languages.
   - If the reference speaker has a fast speaking style, lowering `cfg_weight` to around `0.3` can improve pacing.
 

@@ -9,3 +9,11 @@ __version__ = version("chatterbox-tts")
 from .tts import ChatterboxTTS
 from .vc import ChatterboxVC
 from .mtl_tts import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
+
+# Optimized models for production inference
+try:
+    from .optimized_tts import OptimizedChatterboxTTS
+    __all__ = ["ChatterboxVC", "ChatterboxTTS", "ChatterboxMultilingualTTS", "OptimizedChatterboxTTS", "SUPPORTED_LANGUAGES"]
+except ImportError:
+    # Fallback if optimization dependencies are missing
+    __all__ = ["ChatterboxVC", "ChatterboxTTS", "ChatterboxMultilingualTTS", "SUPPORTED_LANGUAGES"]
