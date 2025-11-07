@@ -4,6 +4,7 @@ import threading
 from chatterbox import ChatterboxTTS
 import time
 import soundfile as sf
+import socket
 
 class AudioBuffer:
     def __init__(
@@ -102,7 +103,7 @@ class ChatterboxStreamer:
         self.request_queue = queue.Queue()
         self.audio_queue = queue.Queue(maxsize=10)
 
-        self.buffer = AudioBuffer(
+        self.audio_buffer = AudioBuffer(
             fade_duration=fade_duration,
             sample_rate=sample_rate,
             dtype=dtype
@@ -110,10 +111,16 @@ class ChatterboxStreamer:
         self.target_buffer_samples = int(1.0 * sample_rate)
 
         # Creates tts generation thread and starts
-        self._running = True
+        self._running = False
         self._tts_thread = threading.Thread(
             target=self._tts_loop, daemon=True
         )
+
+    def start(self):
+        """
+        Starts TTS generation thread
+        """
+        self._running = True
         self._tts_thread.start()
 
     def _tts_loop(self):
@@ -191,10 +198,38 @@ class ChatterboxStreamer:
 
 
 def main():
+    test_request = "Hi, I'm Delta's AI assistant! How can I help you today?"
+
     sample_rate = 24000
     frame_size = 210
     frame_duration = frame_size / sample_rate
     dtype = np.float32
+
+    HOST = "0.0.0.0"
+    PORT = 9000
+    server.bind((HOST, PORT))
+    server.listen(1)
+
+    while True:
+        print("waiting for connection...")
+        client, addr = server.accept()
+        print("client connected to server!\n")
+        
+        # initializing and starting chatterbox stream
+        stream = ChatterboxStreamer(
+            sample_rate = sample_rate,
+            fade_duration = 0.02,
+            dtype=dtype
+        )
+        stream.start()
+        
+        # making test request
+        start_time = time.time()
+        stream.make_request((test_request, start_time))
+        
+
+        client.sendall("Hello".encode())
+        client.close()
 
     streamer = ChatterboxStreamer(
         sample_rate = sample_rate,
@@ -202,33 +237,33 @@ def main():
         dtype=dtype
     )
 
-    # text = [
-    #     "Active-duty U.S. military personnel get special baggage allowances with Delta. When traveling on orders or for personal travel, you’ll receive baggage fee exceptions and extra checked bag benefits. These allowances apply to all branches, including the Marine Corps, Army, Air Force, Space Force, Navy, and Coast Guard. There may be some regional weight or embargo restrictions. Would you like me to text you a link with the full details for military baggage policies?", 
-    #     "Yes, there are specific restrictions for minors and unaccompanied minors traveling internationally with Delta Air Lines. For international travel, Delta requires that all passengers under the age of fifteen use the Unaccompanied Minor Service. This service provides supervision from boarding until the child is met at their destination."
-    # ]
+    # # text = [
+    # #     "Active-duty U.S. military personnel get special baggage allowances with Delta. When traveling on orders or for personal travel, you’ll receive baggage fee exceptions and extra checked bag benefits. These allowances apply to all branches, including the Marine Corps, Army, Air Force, Space Force, Navy, and Coast Guard. There may be some regional weight or embargo restrictions. Would you like me to text you a link with the full details for military baggage policies?", 
+    # #     "Yes, there are specific restrictions for minors and unaccompanied minors traveling internationally with Delta Air Lines. For international travel, Delta requires that all passengers under the age of fifteen use the Unaccompanied Minor Service. This service provides supervision from boarding until the child is met at their destination."
+    # # ]
 
-    request = "Hi, I'm Delta's AI assistant! How can I help you today?"
 
-    audio = np.zeros(0, dtype=dtype)
-    start_time = time.time()
-    streamer.make_request((request, start_time))
-    terminate = False
 
-    while True:
-        frame, request_finished = streamer.get_frame(frame_size)
-        audio = np.concatenate([audio, frame])
-        time.sleep(frame_duration)
+    # audio = np.zeros(0, dtype=dtype)
+    # start_time = time.time()
+    # streamer.make_request((request, start_time))
+    # terminate = False
 
-        if request_finished: 
-            print(f"Total generation time: {time.time() - start_time}")
-            terminate = True
+    # while True:
+    #     frame, request_finished = streamer.get_frame(frame_size)
+    #     audio = np.concatenate([audio, frame])
+    #     time.sleep(frame_duration)
+
+    #     if request_finished: 
+    #         print(f"Total generation time: {time.time() - start_time}")
+    #         terminate = True
         
-        if streamer.available_samples() == 0 and terminate:
-            break
+    #     if streamer.available_samples() == 0 and terminate:
+    #         break
         
     
-    print(f"Total audio play time: {time.time() - start_time}")
-    sf.write("stream_snapshot.wav", audio, sample_rate)
+    # print(f"Total audio play time: {time.time() - start_time}")
+    # sf.write("stream_snapshot.wav", audio, sample_rate)
 
 if __name__ == "__main__":
     main()

@@ -333,7 +333,7 @@ class ChatterboxTTS:
             audio_chunk = wav[skip_samples:]
         else:
             audio_chunk = wav
-
+    
         # TODO -> This may also be necessary considering that we are processing chunks instead all speech tokens, however, it seems redundant due to the previous check at line 456.
         if len(audio_chunk) == 0:
             return None, 0.0, False
@@ -360,7 +360,7 @@ class ChatterboxTTS:
         #     metrics.latency_to_first_chunk = time.time() - start_time
 
         # metrics.chunk_count += 1
-        return audio_chunk, audio_duration
+        return audio_chunk, audio_duration, True
 
 
 
@@ -452,12 +452,13 @@ class ChatterboxTTS:
                     token_chunk = token_chunk[0]
 
                     # Process each chunk immediately
-                    audio_tensor, audio_duration = self._process_token_buffer(
+                    audio_tensor, audio_duration, success = self._process_token_buffer(
                         [token_chunk], all_tokens_processed, context_window
                     )
 
-                    total_audio_length += audio_duration
-                    yield audio_tensor
+                    if success:
+                        total_audio_length += audio_duration
+                        yield audio_tensor
 
                     # Update all_tokens_processed with the new tokens
                     # TODO -> all_tokens_processed
