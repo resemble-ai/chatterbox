@@ -959,7 +959,7 @@ def main():
     print("\nTo load the LoRA adapter:")
     print(f"  lora_layers = load_lora_adapter(model, '{final_adapter_path}')")
 
-def load_audio_samples(audio_dir: str, gemini_client=None) -> List[AudioSample]:
+def load_audio_samples(audio_dir: str) -> List[AudioSample]:
     """
     Load audio samples from metadata.csv file
     
