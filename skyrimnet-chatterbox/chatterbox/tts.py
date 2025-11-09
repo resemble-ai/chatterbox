@@ -1,28 +1,25 @@
 from dataclasses import dataclass
 from pathlib import Path
-import os
+
+from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file
 
 import torch
-from safetensors.torch import load_file
-from huggingface_hub import snapshot_download
 
 from .models.t3 import T3
-from .models.t3.modules.t3_config import T3Config
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
 from .models.s3gen import S3GEN_SR, S3Gen
-from .models.tokenizers import MTLTokenizer
+from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 from .tensor_utils import (
     load_t3_state_dict_safe,
-    load_s3gen_safe,
-    load_voice_encoder_safe, 
+    load_s3gen_safe, 
+    load_voice_encoder_safe,
     load_conditionals_safe
 )
 from .shared_utils import (
-    check_exaggeration_update_needed,
     check_mps_availability,
-    get_map_location,
     validate_audio_file,
     load_and_preprocess_audio,
     drop_bad_tokens,
@@ -31,7 +28,6 @@ from .shared_utils import (
     validate_exaggeration,
     check_exaggeration_update_needed,
     validate_text_input,
-    validate_language_id,
     validate_float_parameter,
     validate_audio_prompt_path,
     smart_text_splitter,
@@ -41,33 +37,6 @@ from .shared_utils import (
 
 
 REPO_ID = "ResembleAI/chatterbox"
-
-# Supported languages for the multilingual model
-SUPPORTED_LANGUAGES = {
-  "ar": "Arabic",
-  "da": "Danish",
-  "de": "German",
-  "el": "Greek",
-  "en": "English",
-  "es": "Spanish",
-  "fi": "Finnish",
-  "fr": "French",
-  "he": "Hebrew",
-  "hi": "Hindi",
-  "it": "Italian",
-  "ja": "Japanese",
-  "ko": "Korean",
-  "ms": "Malay",
-  "nl": "Dutch",
-  "no": "Norwegian",
-  "pl": "Polish",
-  "pt": "Portuguese",
-  "ru": "Russian",
-  "sv": "Swedish",
-  "sw": "Swahili",
-  "tr": "Turkish",
-  "zh": "Chinese",
-}
 
 
 @dataclass
@@ -93,9 +62,36 @@ class Conditionals:
     def to(self, device):
         self.t3 = self.t3.to(device=device)
         for k, v in self.gen.items():
-            if torch.is_tensor(v):
-                self.gen[k] = v.to(device=device)
+            self.gen[k] = v.to(device) if torch.is_tensor(v) else v
         return self
+
+    def clone(self):
+        """Create a deep copy of the Conditionals object with proper tensor cloning"""
+        # Clone T3Cond - create new instance with cloned tensors
+        t3_clone = T3Cond(
+            speaker_emb=self.t3.speaker_emb.clone().detach() if self.t3.speaker_emb is not None else None,
+            clap_emb=self.t3.clap_emb.clone().detach() if hasattr(self.t3, 'clap_emb') and self.t3.clap_emb is not None else None,
+            cond_prompt_speech_tokens=self.t3.cond_prompt_speech_tokens.clone().detach() if self.t3.cond_prompt_speech_tokens is not None else None,
+            cond_prompt_speech_emb=self.t3.cond_prompt_speech_emb.clone().detach() if hasattr(self.t3, 'cond_prompt_speech_emb') and self.t3.cond_prompt_speech_emb is not None else None,
+            emotion_adv=self.t3.emotion_adv.clone().detach() if self.t3.emotion_adv is not None else None
+        )
+        
+        # Clone gen dict with proper tensor handling
+        gen_clone = {}
+        for k, v in self.gen.items():
+            if torch.is_tensor(v):
+                gen_clone[k] = v.clone().detach()
+            elif isinstance(v, (list, tuple)):
+                # Handle list/tuple of tensors
+                gen_clone[k] = type(v)(
+                    item.clone().detach() if torch.is_tensor(item) else item 
+                    for item in v
+                )
+            else:
+                # For non-tensor values, use regular copy
+                gen_clone[k] = v
+        
+        return Conditionals(t3=t3_clone, gen=gen_clone)
 
     def save(self, fpath: Path):
         arg_dict = dict(
@@ -106,13 +102,12 @@ class Conditionals:
 
     @classmethod
     def load(cls, fpath, map_location="cpu"):
-        if isinstance(map_location, str):
-            map_location = torch.device(map_location)
-        kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
-        return cls(T3Cond(**kwargs['t3']), kwargs['gen'])
+        states = torch.load(fpath, map_location=map_location)
+        t3 = T3Cond(**states["t3"])  # type: ignore[arg-type]
+        return cls(t3=t3, gen=states["gen"])  # type: ignore[arg-type]
 
 
-class ChatterboxMultilingualTTS:
+class ChatterboxTTS:
     ENC_COND_LEN = 6 * S3_SR
     DEC_COND_LEN = 10 * S3GEN_SR
 
@@ -121,7 +116,7 @@ class ChatterboxMultilingualTTS:
         t3: T3,
         s3gen: S3Gen,
         ve: VoiceEncoder,
-        tokenizer: MTLTokenizer,
+        tokenizer: EnTokenizer,
         device: str,
         conds: Conditionals = None,
     ):
@@ -134,57 +129,46 @@ class ChatterboxMultilingualTTS:
         self.conds = conds
 
     @classmethod
-    def get_supported_languages(cls):
-        """Return dictionary of supported language codes and names."""
-        return SUPPORTED_LANGUAGES.copy()
-
-    @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxMultilingualTTS':
+    def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
 
         # Load voice encoder
-        ve = load_voice_encoder_safe(ckpt_dir, device, is_multilingual=True)
+        ve = load_voice_encoder_safe(ckpt_dir, device, is_multilingual=False)
 
-        # Load T3 model with multilingual config
-        t3 = T3(T3Config.multilingual())
-        load_t3_state_dict_safe(t3, ckpt_dir / "t3_23lang.safetensors", device)
+        # Load T3 model
+        t3 = T3()
+        load_t3_state_dict_safe(t3, ckpt_dir / "t3_cfg.safetensors", device)
 
         # Load S3Gen model
-        s3gen = load_s3gen_safe(ckpt_dir, device, is_multilingual=True)
+        s3gen = load_s3gen_safe(ckpt_dir, device, is_multilingual=False)
 
         # Load tokenizer
-        tokenizer = MTLTokenizer(str(ckpt_dir / "mtl_tokenizer.json"))
+        tokenizer = EnTokenizer(str(ckpt_dir / "tokenizer.json"))
 
         # Load conditionals if they exist
-        conds = load_conditionals_safe(ckpt_dir, device, is_multilingual=True)
+        conds = load_conditionals_safe(ckpt_dir, device, is_multilingual=False)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device: torch.device) -> 'ChatterboxMultilingualTTS':
+    def from_pretrained(cls, device) -> 'ChatterboxTTS':
         # Use shared MPS checking utility
         device = check_mps_availability(device)
 
-        ckpt_dir = Path(
-            snapshot_download(
-                repo_id=REPO_ID,
-                repo_type="model",
-                revision="main",
-                allow_patterns=["ve.pt", "t3_23lang.safetensors", "s3gen.pt", "mtl_tokenizer.json", "conds.pt", "Cangjie5_TC.json"],
-                token=os.getenv("HF_TOKEN"),
-            )
-        )
-        return cls.from_local(ckpt_dir, device)
+        for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
+            local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath,  cache_dir="models",)
+
+        return cls.from_local(Path(local_path).parent, device)
+    
+    def set_conditionals(self, conds: Conditionals):
+        """
+        Set the conditionals for T3 and S3Gen.
+        """
+        if conds is not None:
+            self.conds = conds.to(self.device)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
-        """
-        Prepare conditioning data from a reference audio file.
-        
-        Args:
-            wav_fpath: Path to the reference audio file
-            exaggeration: Float between 0.0 and 2.0 for emotion control
-        """
-        # Use shared validation utilities
+        # Validate inputs
         validate_audio_file(wav_fpath)
         exaggeration = validate_exaggeration(exaggeration)
         
@@ -214,18 +198,19 @@ class ChatterboxMultilingualTTS:
         ).to(device=self.device)
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
 
-    def set_conditionals(self, conds: Conditionals):
-        """Set conditionals for the TTS model."""
-        self.conds = conds
-
     def generate(
         self,
         text,
-        language_id,
+        language_id=None,
         audio_prompt_path=None,
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
+        # stream - left for API compatibility
+        tokens_per_slice=None,
+        remove_milliseconds=None,
+        remove_milliseconds_start=None,
+        chunk_overlap_method=None,
         # cache optimization params
         max_new_tokens=750, 
         max_cache_len=1050, # Affects the T3 speed, hence important
@@ -235,25 +220,24 @@ class ChatterboxMultilingualTTS:
         top_p=1.0,
         t3_params={},
     ):
-        # Enhanced input validation using shared utilities
+        # Validate inputs using shared utilities
         text = validate_text_input(text)
-        language_id = validate_language_id(language_id, SUPPORTED_LANGUAGES)
-        
-        # Validate numerical parameters using shared validation
         exaggeration = validate_float_parameter(exaggeration, "exaggeration", 0.0, 2.0)
         cfg_weight = validate_float_parameter(cfg_weight, "cfg_weight", 0.0, 1.0)
         temperature = validate_float_parameter(temperature, "temperature", allow_zero=False)
         min_p = validate_float_parameter(min_p, "min_p", 0.0, 1.0)
         top_p = validate_float_parameter(top_p, "top_p", 0.0, 1.0)
         repetition_penalty = validate_float_parameter(repetition_penalty, "repetition_penalty", allow_zero=False)
-        
-        # Handle audio prompt path
+
+        if tokens_per_slice is not None or remove_milliseconds is not None or remove_milliseconds_start is not None or chunk_overlap_method is not None:
+            print("Streaming by token slices has been discontinued due to audio clipping. Continuing with full generation.")
+
         if audio_prompt_path:
             validate_audio_prompt_path(audio_prompt_path)
+            print(f"cond size before preparing: {self.conds}")
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
-            if self.conds is None:
-                raise ValueError("Please `prepare_conditionals` first or specify `audio_prompt_path`")
+            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
         # Update exaggeration if needed using shared utility
         if self.conds is not None:
@@ -269,26 +253,26 @@ class ChatterboxMultilingualTTS:
                 ).to(device=self.device, dtype=self.conds.t3.speaker_emb.dtype)
 
         # Normalize and check if text needs chunking
-        text = punc_norm(text, multilingual=True)
+        text = punc_norm(text)
         
         # Check if text needs to be chunked based on token count
-        estimated_tokens = estimate_token_count(text, self.tokenizer, language_id)
+        estimated_tokens = estimate_token_count(text, self.tokenizer)
+        #print(f"Estimated token count: {estimated_tokens}")
         # Set chunk limit based on cache constraints: max_cache_len - max_new_tokens
         # This prevents the "max_cache_len too small" warning and ensures optimal performance
         max_chunk_tokens = max(200, max_cache_len - max_new_tokens - 75)  # 75 token safety margin
-
+        #print(f"Using max chunk token limit: {max_chunk_tokens}")
         if estimated_tokens <= max_chunk_tokens:
             # Text is small enough - process normally without chunking
             return self._generate_single_chunk(
-                text, language_id, cfg_weight, max_new_tokens, temperature,
+                text, cfg_weight, max_new_tokens, temperature, 
                 max_cache_len, repetition_penalty, min_p, top_p, t3_params
             )
         else:
             # Text is too large - split into chunks and process separately
             #print(f"Text too large ({estimated_tokens} tokens), splitting into chunks...")
             #print(f"Using cache-aware chunk limit: {max_chunk_tokens} tokens (cache_len={max_cache_len}, max_new={max_new_tokens})")
-            text_chunks = smart_text_splitter(text, max_chunk_tokens, self.tokenizer, language_id)
-            #print(f"Split into {len(text_chunks)} chunks")
+            text_chunks = smart_text_splitter(text, max_chunk_tokens, self.tokenizer)
             
             # Store original conditionals for reuse
             original_conds = self.conds.clone()
@@ -296,12 +280,12 @@ class ChatterboxMultilingualTTS:
             audio_chunks = []
             for i, chunk in enumerate(text_chunks):
                 #print(f"Processing chunk {i+1}/{len(text_chunks)}")
-                
+                #print(f"Chunk : {chunk}")
                 # Reset conditionals for each chunk to ensure consistency
                 self.conds = original_conds.clone()
                 
                 chunk_audio = self._generate_single_chunk(
-                    chunk, language_id, cfg_weight, max_new_tokens, temperature,
+                    chunk, cfg_weight, max_new_tokens, temperature,
                     max_cache_len, repetition_penalty, min_p, top_p, t3_params
                 )
                 audio_chunks.append(chunk_audio)
@@ -312,7 +296,6 @@ class ChatterboxMultilingualTTS:
     def _generate_single_chunk(
         self, 
         text, 
-        language_id,
         cfg_weight, 
         max_new_tokens, 
         temperature, 
@@ -323,7 +306,7 @@ class ChatterboxMultilingualTTS:
         t3_params
     ):
         """Generate audio for a single text chunk."""
-        text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id).to(self.device)
+        text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
 
         # Use shared text token preparation
         text_tokens = prepare_text_tokens(
@@ -354,14 +337,11 @@ class ChatterboxMultilingualTTS:
                 speech_tokens = drop_invalid_tokens(speech_tokens)
                 speech_tokens = drop_bad_tokens(speech_tokens)
                 
-                if len(speech_tokens) == 0:
-                    raise RuntimeError("No valid speech tokens generated")
-                
                 wav, _ = self.s3gen.inference(
                     speech_tokens=speech_tokens,
                     ref_dict=self.conds.gen,
                 )
 
                 return wav
-                
             return speech_to_wav(speech_tokens)
+

@@ -51,7 +51,9 @@ class T3(nn.Module):
             different PE embedding space for speech.
     """
 
-    def __init__(self, hp=T3Config()):
+    def __init__(self, hp=None):
+        if hp is None:
+            hp = T3Config.english_only() 
         super().__init__()
         self.hp = hp
         self.cfg = LlamaConfig(**LLAMA_CONFIGS[hp.llama_config_name])

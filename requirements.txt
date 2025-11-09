@@ -14,7 +14,6 @@ diffusers
 omegaconf
 conformer
 safetensors
-peft
 
 psutil
 loguru
@@ -22,6 +21,7 @@ gradio
 setuptools<81.0
 
 #For multilingual TTS
-dicta_onnx
-spacy_pkuseg
-pykakasi
+#russian-text-stresser @ git+https://github.com/Vuizur/add-stress-to-epub # For Russian text stress
+#dicta_onnx # For Hebrew diacritics
+spacy_pkuseg # For Chinese segmentation
+pykakasi # For Japanese text normalization

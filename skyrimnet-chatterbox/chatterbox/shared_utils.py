@@ -333,14 +333,16 @@ def validate_language_id(language_id: str, supported_languages: dict) -> str:
     if not isinstance(language_id, str):
         raise TypeError(f"language_id must be a string, got {type(language_id)}")
     
-    if language_id.lower() not in supported_languages:
+    normalized = language_id.split("-")[0].lower()
+
+    if normalized not in supported_languages:
         supported_langs = ", ".join(supported_languages.keys())
         raise ValueError(
-            f"Unsupported language_id '{language_id}'. "
+            f"Unsupported language_id '{language_id}' or '{normalized}'. "
             f"Supported languages: {supported_langs}"
         )
     
-    return language_id.lower()
+    return normalized
 
 
 def validate_float_parameter(value, name: str, min_val: float = None, max_val: float = None, allow_zero: bool = True) -> float:
@@ -453,6 +455,7 @@ def estimate_token_count(text: str, tokenizer, language_id: str = None) -> int:
 def smart_text_splitter(text: str, max_tokens: int = 220, tokenizer=None, language_id: str = None) -> List[str]:
     """
     Split text into chunks that don't exceed the maximum token count.
+    Keeps quoted segments intact and tries to keep them with adjacent context.
     
     Args:
         text: Input text to split
@@ -469,22 +472,65 @@ def smart_text_splitter(text: str, max_tokens: int = 220, tokenizer=None, langua
         if total_tokens <= max_tokens:
             return [text]
     
-    # Define the sentence splitting pattern
-    # This pattern splits on sentence endings (.!?) but avoids splitting on:
-    # - Abbreviations with periods followed by lowercase
-    # - Numbers with periods
-    # - Quoted text
-    # - Exclamation marks in contractions
-    sentence_pattern = r'(?<=[.?!])\s*(?![.\w"\'\d]|[,!]|\*)'
+    # Extract quoted segments and replace with placeholders
+    quote_pattern = r'"[^"]*"'
+    quotes = re.findall(quote_pattern, text)
+    text_with_placeholders = text
+    
+    # Replace quotes with unique placeholders
+    for i, quote in enumerate(quotes):
+        placeholder = f"__QUOTE_{i}__"
+        text_with_placeholders = text_with_placeholders.replace(quote, placeholder, 1)
+    
+    # Now split on sentence boundaries (without worrying about quotes)
+    # Split on .!? followed by whitespace, but avoid common abbreviations
+    sentence_pattern = r'(?<=[.?!。？！])\s+(?![a-z])'
     
     # Split into sentences
-    sentences = re.split(sentence_pattern, text.strip())
+    raw_sentences = re.split(sentence_pattern, text_with_placeholders.strip())
+    if not raw_sentences:
+        # Restore quotes and return original text
+        return [text]
+    
+    # Further split sentences that have quotes followed by new sentences
+    # (e.g., "...quote." New sentence here.)
+    refined_sentences = []
+    for sentence in raw_sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        
+        # Check if this sentence has a quote followed by text that starts with capital letter
+        # This indicates a new sentence after the quote
+        parts = re.split(r'(__QUOTE_\d+__)\s+(?=[A-Z])', sentence)
+        
+        if len(parts) > 1:
+            # We found quote(s) followed by new sentences
+            for part in parts:
+                part = part.strip()
+                if part:
+                    refined_sentences.append(part)
+        else:
+            refined_sentences.append(sentence)
+    
+    # Restore quotes in sentences
+    sentences = []
+    for sentence in refined_sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        
+        # Replace placeholders with original quotes
+        for i, quote in enumerate(quotes):
+            placeholder = f"__QUOTE_{i}__"
+            sentence = sentence.replace(placeholder, quote)
+        
+        sentences.append(sentence)
+    
     if not sentences:
         return [text]
     
-    # Remove empty sentences
-    sentences = [s.strip() for s in sentences if s.strip()]
-    
+    # Now chunk the sentences respecting token limits
     chunks = []
     current_chunk = ""
     
@@ -514,31 +560,64 @@ def smart_text_splitter(text: str, max_tokens: int = 220, tokenizer=None, langua
         chunks.append(current_chunk.strip())
     
     # Handle edge case where a single sentence is too long
+    # In this case, we need to split more aggressively but still preserve quotes
     final_chunks = []
     for chunk in chunks:
         if tokenizer:
             token_count = estimate_token_count(chunk, tokenizer, language_id)
             if token_count > max_tokens:
-                # Split long sentence by words as fallback
-                words = chunk.split()
+                # This sentence is too long - need to split it
+                # First, extract quotes again from this chunk
+                chunk_quotes = re.findall(quote_pattern, chunk)
+                chunk_with_placeholders = chunk
+                
+                for i, quote in enumerate(chunk_quotes):
+                    placeholder = f"__CHUNKQUOTE_{i}__"
+                    chunk_with_placeholders = chunk_with_placeholders.replace(quote, placeholder, 1)
+                
+                # Split by words, but treat placeholders as atomic units
+                words = chunk_with_placeholders.split()
                 temp_chunk = ""
+                
                 for word in words:
                     test_temp = temp_chunk + (" " if temp_chunk else "") + word
+                    
+                    # Restore quotes for token counting
+                    test_restored = test_temp
+                    for i, quote in enumerate(chunk_quotes):
+                        placeholder = f"__CHUNKQUOTE_{i}__"
+                        test_restored = test_restored.replace(placeholder, quote)
+                    
                     if tokenizer:
-                        test_tokens = estimate_token_count(test_temp, tokenizer, language_id)
+                        test_tokens = estimate_token_count(test_restored, tokenizer, language_id)
                         if test_tokens > max_tokens and temp_chunk:
-                            final_chunks.append(temp_chunk.strip())
+                            # Restore quotes before appending
+                            restored = temp_chunk
+                            for i, quote in enumerate(chunk_quotes):
+                                placeholder = f"__CHUNKQUOTE_{i}__"
+                                restored = restored.replace(placeholder, quote)
+                            final_chunks.append(restored.strip())
                             temp_chunk = word
                         else:
                             temp_chunk = test_temp
                     else:
-                        if len(test_temp.split()) * 0.75 > max_tokens and temp_chunk:
-                            final_chunks.append(temp_chunk.strip())
+                        if len(test_restored.split()) * 0.75 > max_tokens and temp_chunk:
+                            restored = temp_chunk
+                            for i, quote in enumerate(chunk_quotes):
+                                placeholder = f"__CHUNKQUOTE_{i}__"
+                                restored = restored.replace(placeholder, quote)
+                            final_chunks.append(restored.strip())
                             temp_chunk = word
                         else:
                             temp_chunk = test_temp
+                
                 if temp_chunk.strip():
-                    final_chunks.append(temp_chunk.strip())
+                    # Restore quotes before appending
+                    restored = temp_chunk
+                    for i, quote in enumerate(chunk_quotes):
+                        placeholder = f"__CHUNKQUOTE_{i}__"
+                        restored = restored.replace(placeholder, quote)
+                    final_chunks.append(restored.strip())
             else:
                 final_chunks.append(chunk)
         else:

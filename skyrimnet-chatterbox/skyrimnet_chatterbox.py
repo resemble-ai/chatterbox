@@ -1,167 +1,60 @@
-import functools
-import gradio as gr
-import torch
-
 from argparse import ArgumentParser
 from pathlib import Path
+import random
 from time import perf_counter_ns
-from src.cache_utils import (
-    load_conditionals_cache,
-    save_conditionals_cache,
-    get_cache_key,
-    save_torchaudio_wav,
-    init_conditional_memory_cache,
-    clear_output_directories,
-    clear_cache_files
-)
-from src.chatterbox.tensor_utils import initialize_model_dtype, safe_conditional_to_dtype
 
+import gradio as gr
 from loguru import logger
+import numpy as np
+import torch
+
+try:
+    from cache_utils import (
+        load_conditionals_cache,
+        save_conditionals_cache,
+        get_cache_key,
+        save_torchaudio_wav,
+        init_conditional_memory_cache,
+        clear_output_directories,
+        clear_cache_files
+    )
+    from chatterbox.shared_utils import validate_language_id
+    from chatterbox.tensor_utils import initialize_model_dtype, safe_conditional_to_dtype
+    from shared_config import get_tts_params, DEFAULT_CACHE_CONFIG, DEFAULT_TTS_PARAMS, SUPPORTED_LANGUAGE_CODES
+except ImportError:
+    from .cache_utils import (
+        load_conditionals_cache,
+        save_conditionals_cache,
+        get_cache_key,
+        save_torchaudio_wav,
+        init_conditional_memory_cache,
+        clear_output_directories,
+        clear_cache_files
+    )
+    from .chatterbox.shared_utils import validate_language_id
+    from .chatterbox.tensor_utils import initialize_model_dtype, safe_conditional_to_dtype
+    from .shared_config import get_tts_params, DEFAULT_CACHE_CONFIG, DEFAULT_TTS_PARAMS, SUPPORTED_LANGUAGE_CODES
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
 MODEL = None
 MULTILINGUAL = False
+IGNORE_PING = None
+SILENCE_AUDIO_PATH = "assets/silence_100ms.wav"
 # Cache flags - defaults that can be overridden by skyrimnet_config.txt
-ENABLE_DISK_CACHE = True
-ENABLE_MEMORY_CACHE = True
-_CONFIG_CACHE = None
-_CONFIG_FILE_PATH = "skyrimnet_config.txt"
+ENABLE_DISK_CACHE = DEFAULT_CACHE_CONFIG["ENABLE_DISK_CACHE"]
+ENABLE_MEMORY_CACHE = DEFAULT_CACHE_CONFIG["ENABLE_MEMORY_CACHE"]
 # Testing flag - when True, bypasses config loading and uses all API values
-_USE_API_MODE = False
-
-def load_skyrimnet_config():
-    """Load configuration from skyrimnet_config.txt with error handling"""
-    global _CONFIG_CACHE, ENABLE_MEMORY_CACHE, ENABLE_DISK_CACHE
-    
-    if _CONFIG_CACHE is not None:
-        return _CONFIG_CACHE
-    
-    # Default configuration
-    default_config = {
-        'temperature': 0.8,
-        'min_p': 0.07, 
-        'top_p': 1.0,
-        'repetition_penalty': 2.0,
-        'cfg_weight': 0.0,  # Speed optimized default
-        'exaggeration': 0.7
-    }
-    
-    global_flags = {
-        'enable_memory_cache': ENABLE_MEMORY_CACHE,
-        'enable_disk_cache': ENABLE_DISK_CACHE
-    }
-    
-    config_mode = {
-        'temperature': 'default',
-        'min_p': 'default',
-        'top_p': 'default', 
-        'repetition_penalty': 'default',
-        'cfg_weight': 'default',
-        'exaggeration': 'default'
-    }
-    
-    try:
-        config_path = Path(_CONFIG_FILE_PATH)
-        if not config_path.exists():
-            logger.warning(f"Config file {_CONFIG_FILE_PATH} not found, using hardcoded defaults")
-            _CONFIG_CACHE = (default_config, config_mode, global_flags)
-            return _CONFIG_CACHE
-            
-        with open(config_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            
-        for line in lines:
-            line = line.strip()
-            # Skip comments and empty lines
-            if not line or line.startswith('#'):
-                continue
-                
-            if '=' in line:
-                key, value = line.split('=', 1)
-                key = key.strip()
-                value = value.strip()
-                
-                # Handle global boolean flags
-                if key in global_flags:
-                    if value.lower() in ['true', 'yes', '1', 'on']:
-                        global_flags[key] = True
-                        # Update global variables
-                        if key == 'enable_memory_cache':
-                            ENABLE_MEMORY_CACHE = True
-                        elif key == 'enable_disk_cache':
-                            ENABLE_DISK_CACHE = True
-                        logger.info(f"Setting {key} to True")
-                    elif value.lower() in ['false', 'no', '0', 'off']:
-                        global_flags[key] = False
-                        # Update global variables
-                        if key == 'enable_memory_cache':
-                            ENABLE_MEMORY_CACHE = False
-                        elif key == 'enable_disk_cache':
-                            ENABLE_DISK_CACHE = False
-                        logger.info(f"Setting {key} to False")
-                    else:
-                        logger.warning(f"Invalid boolean value '{value}' for {key}, using default")
-                
-                # Handle parameter modes
-                elif key in config_mode:
-                    if value.lower() == 'default':
-                        config_mode[key] = 'default'
-                    elif value.lower() == 'api':
-                        config_mode[key] = 'api'
-                    else:
-                        try:
-                            custom_value = float(value)
-                            config_mode[key] = 'custom'
-                            default_config[key] = custom_value
-                            logger.info(f"Using custom {key} value: {custom_value}")
-                        except ValueError:
-                            logger.warning(f"Invalid value '{value}' for {key}, using default")
-                            
-        logger.info(f"Loaded config: {config_mode}")
-        logger.info(f"Global flags: {global_flags}")
-        _CONFIG_CACHE = (default_config, config_mode, global_flags)
-        return _CONFIG_CACHE
-        
-    except Exception as e:
-        logger.error(f"Error reading config file {_CONFIG_FILE_PATH}: {e}, using hardcoded defaults")
-        _CONFIG_CACHE = (default_config, config_mode, global_flags)
-        return _CONFIG_CACHE
-
-def get_config_value(param_name, api_value, defaults, modes, bypass_config=False):
-    """Get the appropriate value based on configuration mode"""
-    if bypass_config:
-        # API mode: use API value with fallback to reasonable defaults
-        fallback_defaults = {
-            'temperature': 0.9,
-            'min_p': 0.05,
-            'top_p': 1.0,
-            'repetition_penalty': 2.0,
-            'cfg_weight': 0.0,
-            'exaggeration': 0.55
-        }
-        return api_value if api_value is not None else fallback_defaults.get(param_name, 0.0)
-    
-    mode = modes.get(param_name, 'default')
-    
-    if mode == 'api':
-        return api_value if api_value is not None else defaults[param_name]
-    else:  # 'default' or 'custom'
-        return defaults[param_name]
-
-
-def reload_config():
-    """Force reload of configuration file"""
-    global _CONFIG_CACHE
-    _CONFIG_CACHE = None
-    return load_skyrimnet_config()
+_FROM_GRADIO = False
 
 def set_seed(seed: int):
-    """
-    Set random seeds for reproducible generation.
-    """
+    """Sets the random seed for reproducibility across torch, numpy, and random."""
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+    if DEVICE == "cuda":
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    random.seed(seed)
+    np.random.seed(seed)
 
 
 def load_model():
@@ -169,19 +62,30 @@ def load_model():
     if MODEL is None:
         if MULTILINGUAL:
             logger.info("Loading Multilingual Model")
-            from src.chatterbox.mtl_tts import ChatterboxMultilingualTTS as Chatterbox
+            try:
+                from chatterbox.mtl_tts import ChatterboxMultilingualTTS as Chatterbox
+            except ImportError:
+                from .chatterbox.mtl_tts import ChatterboxMultilingualTTS as Chatterbox
         else:
             logger.info("Loading English Model")
-            from src.chatterbox.tts import ChatterboxTTS as Chatterbox
+            try:
+                from chatterbox.tts import ChatterboxTTS as Chatterbox
+            except ImportError:
+                from .chatterbox.tts import ChatterboxTTS as Chatterbox
         MODEL = Chatterbox.from_pretrained(DEVICE)
         initialize_model_dtype(MODEL, DTYPE)
+        init_conditional_memory_cache(MODEL, DEVICE, DTYPE, supported_languages=SUPPORTED_LANGUAGE_CODES)
         torch.cuda.empty_cache()
     return MODEL
 
 
-def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration=0.5, temperature=0.8, seed_num=0, cfgw=0, min_p=0.05, top_p=1.0, repetition_penalty=1.2,cache_uuid=0):
+def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration=0.5, temperature=0.8, seed_num=0, cfgw=0, min_p=0.05, top_p=1.0, repetition_penalty=1.2):
+    global MODEL, MULTILINGUAL
+    
+    language_id = validate_language_id(language_id, SUPPORTED_LANGUAGE_CODES)
 
-    logger.info(f'generate called for: "{text}", {Path(audio_prompt_path).stem if audio_prompt_path else "No ref audio"}, uuid: {cache_uuid}, exaggeration: {exaggeration}')  
+    
+    logger.info(f'generate called for: "{text}", {Path(audio_prompt_path).stem if audio_prompt_path else "No ref audio"}, exaggeration: {exaggeration}')  
     logger.info(f"Parameters - temp: {temperature}, min_p: {min_p}, top_p: {top_p}, rep_penalty: {repetition_penalty}, cfg_weight: {cfgw}")
 
     enable_memory_cache = ENABLE_MEMORY_CACHE
@@ -189,11 +93,15 @@ def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration
     device = DEVICE
     dtype = DTYPE
 
-    if model is None:
+    # Check if we need to switch to multilingual model
+    if not language_id.startswith("en") and not MULTILINGUAL:
+        logger.info(f"Non-English language '{language_id}' detected, switching to multilingual model")
+        MULTILINGUAL = True
+        MODEL = None
+    
+    if MODEL is None or model is None:
         model = load_model()
 
-    if seed_num != 0:
-        set_seed(int(seed_num))
 
     exaggeration = float(exaggeration)
     temperature = float(temperature)
@@ -205,19 +113,19 @@ def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration
     func_start_time = perf_counter_ns()
 
     if audio_prompt_path is not None:
-        cache_key = get_cache_key(audio_prompt_path, cache_uuid, exaggeration)
+        cache_key = get_cache_key(audio_prompt_path, exaggeration)
         conditionals_loaded = False
         if cache_key and (enable_memory_cache or enable_disk_cache):
-            if load_conditionals_cache(cache_key, model, device, dtype, enable_memory_cache, enable_disk_cache):
+            if load_conditionals_cache(language_id, cache_key, model, device=device, dtype=dtype, enable_memory_cache=enable_memory_cache, enable_disk_cache=enable_disk_cache):
                 conditionals_loaded = True
         if not conditionals_loaded:
             model.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
             if dtype != torch.float32:
                 safe_conditional_to_dtype(model, dtype)
             if cache_key and (enable_memory_cache or enable_disk_cache):
-                save_conditionals_cache(cache_key, model.conds, enable_memory_cache, enable_disk_cache)
-    conditional_start_time = perf_counter_ns()
-    logger.info(f"Conditionals prepared. Time: {(conditional_start_time - func_start_time) / 1_000_000:.4f}ms")
+                save_conditionals_cache(language_id, cache_key, model.conds, enable_memory_cache, enable_disk_cache)
+    #conditional_start_time = perf_counter_ns()
+    #logger.info(f"Conditionals prepared. Time: {(conditional_start_time - func_start_time) / 1_000_000:.4f}ms")
     #generate_start_time = perf_counter_ns()
     
     t3_params={
@@ -258,7 +166,7 @@ def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration
     wav_length = wav.shape[-1]   / model.sr
 
     logger.info(f"Generated audio: {wav_length:.2f}s {model.sr/1000:.2f}kHz in {total_duration_s:.2f}s. Speed: {wav_length / total_duration_s:.2f}x")
-    wave_file = str(save_torchaudio_wav(wav.cpu(), model.sr, audio_path=audio_prompt_path, uuid=cache_uuid))
+    wave_file = str(save_torchaudio_wav(wav.cpu(), model.sr, audio_path=audio_prompt_path))
     del wav
     torch.cuda.empty_cache()
     return wave_file
@@ -266,15 +174,7 @@ def generate(model, text,  language_id="en",audio_prompt_path=None, exaggeration
     #return (model.sr, wav.squeeze(0).cpu().numpy())
 
 
-### SkyrimNet Zonos Emulated
-@functools.cache
-def cpp_uuid_to_seed(uuid_64: int) -> int:
-    """
-    Convert a 64-bit UUID to a valid PyTorch seed (0 to 2^32 - 1).
-    Uses hash() for better distribution across the seed space.
-    """
-    return abs(hash(uuid_64)) % (2**32)
-    
+### SkyrimNet Zonos Emulated   
 
 def generate_audio(
     model_choice = None,
@@ -303,53 +203,55 @@ def generate_audio(
     linear= None,
     confidence= None,
     quadratic= None,
-    uuid= -1,
+    job_id= -1,
     randomize_seed: bool = False,
     unconditional_keys: list = None
     ):
     """Generate audio using configurable parameter system"""
+    global IGNORE_PING
+
+    if isinstance(speaker_audio, dict) and 'path' in speaker_audio:
+        speaker_audio = speaker_audio['path']
+    logger.info(f"inputs: text={text}, language={language}, speaker_audio={Path(speaker_audio).stem if speaker_audio else 'None'}, seed={job_id}")
+
+    if text == "ping":
+       if IGNORE_PING is None:
+          IGNORE_PING = "pending"
+       else:
+          logger.info("Ping request received, sending silence audio.")
+          return SILENCE_AUDIO_PATH, job_id
+
+    # Build payload with API values (map SkyrimNet UI names to our parameter names)
+    # Note: linear->temperature, confidence->repetition_penalty, quadratic->exaggeration, cfg_scale->cfg_weight
+    payload_params = {
+        'temperature': linear,
+        'min_p': min_p,
+        'top_p': top_p,
+        'repetition_penalty': confidence,
+        'cfg_weight': cfg_scale,
+        'exaggeration': quadratic
+    }
     
-    # Load config (or use empty values for API mode)
-    if _USE_API_MODE:
-        defaults, modes = {}, {}
-    else:
-        defaults, modes, flags = load_skyrimnet_config()
+    # Use shared config function to resolve final parameters
+    # override_flag=True when from Gradio web UI
+    inference_kwargs = get_tts_params(payload_params=payload_params, override_flag=_FROM_GRADIO)
     
-    # Map API parameters to our config system
-    # Note: confidence maps to repetition_penalty in SkyrimNet UI
-    api_temperature = linear if linear is not None else None
-    api_min_p = min_p if min_p is not None else None
-    api_top_p = top_p if top_p is not None else None  
-    api_repetition_penalty = confidence if confidence is not None else None
-    api_cfg_weight = cfg_scale if cfg_scale is not None else None
-    api_exaggeration = quadratic if quadratic is not None else None
+    logger.debug(f"Final parameters - temp: {inference_kwargs['temperature']}, min_p: {inference_kwargs['min_p']}, top_p: {inference_kwargs['top_p']}, rep_penalty: {inference_kwargs['repetition_penalty']}, cfg_weight: {inference_kwargs['cfg_weight']}, exaggeration: {inference_kwargs['exaggeration']}")
     
-    # Get final values using unified config system
-    final_temperature = get_config_value('temperature', api_temperature, defaults, modes, _USE_API_MODE)
-    final_min_p = get_config_value('min_p', api_min_p, defaults, modes, _USE_API_MODE)
-    final_top_p = get_config_value('top_p', api_top_p, defaults, modes, _USE_API_MODE)
-    final_repetition_penalty = get_config_value('repetition_penalty', api_repetition_penalty, defaults, modes, _USE_API_MODE)
-    final_cfg_weight = get_config_value('cfg_weight', api_cfg_weight, defaults, modes, _USE_API_MODE)
-    final_exaggeration = get_config_value('exaggeration', api_exaggeration, defaults, modes, _USE_API_MODE)
-    
-    logger.debug(f"Final parameters - temp: {final_temperature}, min_p: {final_min_p}, top_p: {final_top_p}, rep_penalty: {final_repetition_penalty}, cfg_weight: {final_cfg_weight}, exaggeration: {final_exaggeration}")
-    
-    seed_num = cpp_uuid_to_seed(uuid)
 
     return generate(
         model=MODEL, 
         text=text, 
         language_id=language, 
         audio_prompt_path=speaker_audio, 
-        seed_num=seed_num, 
-        cache_uuid=uuid,
-        exaggeration=final_exaggeration,
-        temperature=final_temperature,
-        cfgw=final_cfg_weight,
-        min_p=final_min_p,
-        top_p=final_top_p,
-        repetition_penalty=final_repetition_penalty
-    ), uuid
+        seed_num=job_id, 
+        exaggeration=inference_kwargs['exaggeration'],
+        temperature=inference_kwargs['temperature'],
+        cfgw=inference_kwargs['cfg_weight'],
+        min_p=inference_kwargs['min_p'],
+        top_p=inference_kwargs['top_p'],
+        repetition_penalty=inference_kwargs['repetition_penalty'],
+    ), job_id
 
 with gr.Blocks() as demo:
     model_state = gr.State(None)  # Loaded once per session/user
@@ -364,14 +266,14 @@ with gr.Blocks() as demo:
             ref_wav = gr.Audio(sources=["upload", "microphone"], type="filepath", label="Reference Audio File", value=None)
 
             exaggeration = gr.Slider(0.25, 2, step=.05, label="Exaggeration (Neutral = 0.5, extreme values can be unstable)", value=0.55)
-            cfg_weight = gr.Slider(0.0, 1, step=.05, label="CFG/Pace", value=0.0)
+            cfg_weight = gr.Slider(0.0, 1, step=.05, label="CFG/Pace", value=DEFAULT_TTS_PARAMS['CFG_WEIGHT'])
 
             with gr.Accordion("More options", open=False):
-                seed_num = gr.Number(value=0, label="Random seed (0 for random)")
-                temp = gr.Slider(0.05, 5, step=.05, label="temperature", value=.8)
-                min_p = gr.Slider(0.00, 1.00, step=0.01, label="min_p || Newer Sampler. Recommend 0.02 > 0.1. Handles Higher Temperatures better. 0.00 Disables", value=0.05)
-                top_p = gr.Slider(0.00, 1.00, step=0.01, label="top_p || Original Sampler. 1.0 Disables(recommended). Original 0.8", value=1.00)
-                repetition_penalty = gr.Slider(1.00, 2.00, step=0.1, label="repetition_penalty", value=2.0)
+                seed_num = gr.Number(value=20250527, label="Random seed (0 for random)")
+                temp = gr.Slider(0.05, 5, step=.05, label="temperature", value=DEFAULT_TTS_PARAMS['TEMPERATURE'])
+                min_p = gr.Slider(0.00, 1.00, step=0.01, label="min_p || Newer Sampler. Recommend 0.02 > 0.1. Handles Higher Temperatures better. 0.00 Disables", value=DEFAULT_TTS_PARAMS['MIN_P'])
+                top_p = gr.Slider(0.00, 1.00, step=0.01, label="top_p || Original Sampler. 1.0 Disables(recommended). Original 0.8", value=DEFAULT_TTS_PARAMS['TOP_P'])
+                repetition_penalty = gr.Slider(1.00, 2.00, step=0.1, label="repetition_penalty", value=DEFAULT_TTS_PARAMS['REPETITION_PENALTY'])
             language_id = gr.Dropdown([
                 "ar",
                 "da",
@@ -513,13 +415,11 @@ if __name__ == "__main__":
         exit(0)
     
     MULTILINGUAL = args.multilingual
-    
-    # Load configuration at startup
-    logger.info("Loading SkyrimNet configuration...")
-    load_skyrimnet_config()
-    
+    set_seed(20250527)
     model = load_model()
-    init_conditional_memory_cache(model, DEVICE, DTYPE)
+    
+    # Determine supported languages based on model type
+
     demo.queue(
         max_size=50,
         default_concurrency_limit=1,

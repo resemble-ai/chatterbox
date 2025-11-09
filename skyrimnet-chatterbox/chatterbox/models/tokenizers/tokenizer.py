@@ -1,12 +1,12 @@
 import logging
 import json
-import re
 
 import torch
 from pathlib import Path
-from unicodedata import category
+from unicodedata import category, normalize
 from tokenizers import Tokenizer
 from huggingface_hub import hf_hub_download
+
 
 # Special tokens
 SOT = "[START]"
@@ -32,7 +32,7 @@ class EnTokenizer:
         text_tokens = torch.IntTensor(text_tokens).unsqueeze(0)
         return text_tokens
 
-    def encode( self, txt: str, verbose=False):
+    def encode( self, txt: str):
         """
         clean_text > (append `lang_id`) > replace SPACE > encode text using Tokenizer
         """
@@ -46,8 +46,7 @@ class EnTokenizer:
             # Keep tensor operations on device - no CPU transfer needed
             seq = seq.tolist()
 
-        txt: str = self.tokenizer.decode(seq,
-        skip_special_tokens=False)
+        txt: str = self.tokenizer.decode(seq, skip_special_tokens=False)
         txt = txt.replace(' ', '')
         txt = txt.replace(SPACE, ' ')
         txt = txt.replace(EOT, '')
@@ -247,12 +246,26 @@ class MTLTokenizer:
         assert SOT in voc
         assert EOT in voc
 
-    def text_to_tokens(self, text: str, language_id: str = None):
-        text_tokens = self.encode(text, language_id=language_id)
+    def preprocess_text(self, raw_text: str, language_id: str = None, lowercase: bool = True, nfkd_normalize: bool = True):
+        """
+        Text preprocessor that handles lowercase conversion and NFKD normalization.
+        """
+        preprocessed_text = raw_text
+        if lowercase:
+            preprocessed_text = preprocessed_text.lower()
+        if nfkd_normalize:
+            preprocessed_text = normalize("NFKD", preprocessed_text)
+        
+        return preprocessed_text
+
+    def text_to_tokens(self, text: str, language_id: str = None, lowercase: bool = True, nfkd_normalize: bool = True):
+        text_tokens = self.encode(text, language_id=language_id, lowercase=lowercase, nfkd_normalize=nfkd_normalize)
         text_tokens = torch.IntTensor(text_tokens).unsqueeze(0)
         return text_tokens
 
-    def encode(self, txt: str, language_id: str = None):
+    def encode(self, txt: str, language_id: str = None, lowercase: bool = True, nfkd_normalize: bool = True):
+        txt = self.preprocess_text(txt, language_id=language_id, lowercase=lowercase, nfkd_normalize=nfkd_normalize)
+        
         # Language-specific text processing
         if language_id == 'zh':
             txt = self.cangjie_converter(txt)

@@ -298,8 +298,6 @@ def _tts_generator(
     use_compilation=None,
     max_new_tokens=1000,
     max_cache_len=1500,
-    # New parameter for disk caching
-    cache_uuid=None,
     # Additional parameters
     min_p=0.05,
     top_p=1.0,
@@ -328,7 +326,7 @@ def _tts_generator(
         # Enhanced conditional preparation with disk caching
         if audio_prompt_path is not None:
             # Generate cache key
-            cache_key = get_cache_key(audio_prompt_path, cache_uuid, exaggeration)
+            cache_key = get_cache_key(audio_prompt_path, exaggeration)
             conditionals_loaded = False
 
             # Try to load from disk cache first

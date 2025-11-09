@@ -51,3 +51,4 @@ checkpoints/
 /.idea
 /cache
 memory.json
+/models
