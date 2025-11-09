@@ -66,13 +66,8 @@ def validate_language(language: str) -> str:
     Raises:
         ValueError: If language is not supported
     """
-    language = language.lower()
-    if language is None:
-        normalized = "en"
-    elif language in ["zh-cn", "zh", "cn"]:
-        normalized = "zh-cn"
-    else:
-        normalized = language.split("-")[0] if language else "en"
+    
+    normalized = language.split("-")[0].lower() if language else "en"
     
     if normalized not in SUPPORTED_LANGUAGE_CODES:
         raise ValueError(f"Language '{language}' not supported. "

@@ -7,16 +7,7 @@ from loguru import logger
 
 if __name__ == "__main__":
     try:
-        from skyrimnet_chatterbox import (
-            parse_arguments,
-            set_seed,
-            load_model,
-            demo,
-            clear_output_directories,
-            clear_cache_files,
-            MULTILINGUAL
-    )
-    except ImportError:
+        # Try relative import first (when run as module: python -m skyrimnet-chatterbox)
         from .skyrimnet_chatterbox import (
             parse_arguments,
             set_seed,
@@ -25,7 +16,20 @@ if __name__ == "__main__":
             clear_output_directories,
             clear_cache_files,
             MULTILINGUAL
-    )
+        )
+        from . import skyrimnet_chatterbox as _module
+    except ImportError:
+        # Fallback to absolute import (when run from PyInstaller frozen executable)
+        from skyrimnet_chatterbox import (
+            parse_arguments,
+            set_seed,
+            load_model,
+            demo,
+            clear_output_directories,
+            clear_cache_files,
+            MULTILINGUAL
+        )
+        import skyrimnet_chatterbox as _module
 
     
     args = parse_arguments()
@@ -44,8 +48,7 @@ if __name__ == "__main__":
         exit(0)
     
     # Set multilingual flag
-    from . import skyrimnet_chatterbox
-    skyrimnet_chatterbox.MULTILINGUAL = args.multilingual
+    _module.MULTILINGUAL = args.multilingual
     
     set_seed(20250527)
     model = load_model()

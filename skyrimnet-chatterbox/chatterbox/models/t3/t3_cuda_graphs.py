@@ -87,7 +87,7 @@ class T3StepCUDAGraphWrapper:
         max_position: Optional[int] = None,
     ) -> None:
         """Capture the CUDA graph for a specific bucket."""
-        logger.debug(f"Capturing CUDA graph for bucket {bucket_key} (max_position: {max_position})")
+        #logger.debug(f"Capturing CUDA graph for bucket {bucket_key} (max_position: {max_position})")
 
         # Create new graph for this bucket
         self._bucket_graphs[bucket_key] = torch.cuda.CUDAGraph()

@@ -52,3 +52,4 @@ checkpoints/
 /cache
 memory.json
 /models
+/archive

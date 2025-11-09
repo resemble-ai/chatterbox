@@ -5,6 +5,7 @@ torchaudio
 
 scipy
 numpy
+
 soundfile
 s3tokenizer
 
@@ -25,3 +26,4 @@ setuptools<81.0
 #dicta_onnx # For Hebrew diacritics
 spacy_pkuseg # For Chinese segmentation
 pykakasi # For Japanese text normalization
+pydub-ng

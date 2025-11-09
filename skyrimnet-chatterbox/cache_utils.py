@@ -85,7 +85,7 @@ def _save_pt_to_disk(language: str, cache_key: str, cond_cls):
             gen=cond_cls.gen
         )
         torch.save(arg_dict, cache_file)
-        logger.info(f"Saved conditionals to disk cache: {cache_key}")
+        #logger.info(f"Saved conditionals to disk cache: {cache_key}")
     except Exception as e:
         logger.error(f"Failed to save conditionals to disk cache: {e}")
 
@@ -126,7 +126,7 @@ def save_conditionals_cache(language: str, cache_key: str, cond_cls, enable_memo
     try:
         if enable_memory_cache:
             _cache_manager.set(language, cache_key, cond_cls.clone())
-            logger.info(f"Saved conditionals to memory cache: {language}/{cache_key}")
+            #logger.info(f"Saved conditionals to memory cache: {language}/{cache_key}")
         
         # Queue disk save (non-blocking)
         if enable_disk_cache:
@@ -137,6 +137,9 @@ def save_conditionals_cache(language: str, cache_key: str, cond_cls, enable_memo
                 name=f"DiskCacheSave-{cache_key}"
             ).start()
         
+        if enable_memory_cache or enable_disk_cache:
+            logger.info(f"Saved conditionals to cache: {language}/{cache_key}")
+
         return True
         
     except Exception as e:
@@ -163,7 +166,7 @@ def load_conditionals_cache(language: str, cache_key: str, model, device, dtype,
                     cached.t3.speaker_emb = cached.t3.speaker_emb.to(dtype=dtype)
                 
                 model.set_conditionals(cached)
-                logger.info(f"Loaded conditionals from memory cache: {language}/{cache_key}")
+                logger.info(f"Conditionals from cache: {language}/{cache_key}")
                 return True
         
         # Try disk cache
