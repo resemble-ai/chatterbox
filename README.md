@@ -87,6 +87,288 @@ ta.save("test-2.wav", wav, model.sr)
 ```
 See `example_tts.py` and `example_vc.py` for more examples.
 
+# Fine-tuning Guide
+
+This repository includes tools for fine-tuning Chatterbox Multilingual TTS using LoRA (Low-Rank Adaptation). Follow this guide to train the model on your custom dataset.
+
+## Overview
+
+The fine-tuning process involves three main scripts:
+- **`download_dataset.py`** - Downloads and prepares datasets from Hugging Face
+- **`lora.py`** - Main training script with LoRA fine-tuning
+- **`fix_merged_model.py`** - Converts the trained model to the correct format
+
+## Step 1: Prepare Your Dataset
+
+### Option A: Use a Hugging Face Dataset
+
+If your dataset is on Hugging Face, use the download script:
+
+```python
+python download_dataset.py
+```
+
+**Configuration:**
+Edit the following variables in `download_dataset.py`:
+```python
+REPO_NAME = "MrEzzat/arabic-tts-dataset"  # Your HF dataset repo
+OUTPUT_DIR = "audio_data"                  # Output directory
+USE_AUTH_TOKEN = False                     # Set True for private datasets
+```
+
+The script will:
+- Download the dataset from Hugging Face
+- Extract audio files to `audio_data/audio/`
+- Generate `metadata.csv` with transcriptions
+
+### Option B: Prepare Your Own Dataset
+
+Create the following directory structure:
+```
+audio_data/
+├── metadata.csv
+└── audio/
+    ├── utterance_0001.wav
+    ├── utterance_0002.wav
+    └── ...
+```
+
+**metadata.csv format:**
+```csv
+file_name,transcription,duration_seconds
+audio/utterance_0001.wav,Your transcription text here,3.45
+audio/utterance_0002.wav,Another transcription,2.87
+```
+
+**Required columns:**
+- `file_name` - Relative path to audio file (e.g., `audio/utterance_0001.wav`)
+- `transcription` - Text transcription of the audio
+- `duration_seconds` - (Optional) Duration in seconds for faster loading
+
+**Audio requirements:**
+- Format: WAV files
+- Duration: Between 1-400 seconds (configurable)
+- Sample rate: Any (will be resampled automatically)
+- Quality: Clean speech with accurate transcriptions
+
+## Step 2: Configure Training Parameters
+
+Edit the configuration section at the top of `lora.py`:
+
+```python
+# Data and paths
+AUDIO_DATA_DIR = "./audio_data"           # Path to your dataset
+CHECKPOINT_DIR = "checkpoints_lora"       # Where to save checkpoints
+
+# Training hyperparameters
+BATCH_SIZE = 1                            # Batch size (1 for most GPUs)
+EPOCHS = 50                               # Number of training epochs
+LEARNING_RATE = 2e-5                      # Learning rate
+GRADIENT_ACCUMULATION_STEPS = 8           # Accumulate gradients over N steps
+
+# LoRA parameters
+LORA_RANK = 32                            # LoRA rank (lower = fewer parameters)
+LORA_ALPHA = 64                           # LoRA alpha (scaling factor)
+LORA_DROPOUT = 0.05                       # Dropout rate
+
+# Audio constraints
+MAX_AUDIO_LENGTH = 400.0                  # Max audio length in seconds
+MIN_AUDIO_LENGTH = 1.0                    # Min audio length in seconds
+MAX_TEXT_LENGTH = 1000                    # Max text length in characters
+
+# Checkpointing
+SAVE_EVERY_N_STEPS = 200                  # Save checkpoint every N steps
+VALIDATION_SPLIT = 0.1                    # 10% of data for validation
+```
+
+**Language Configuration:**
+By default, the script trains on Arabic (`language_id='ar'`). To change the language, edit line 1079 in `lora.py`:
+```python
+language_id='ar'  # Change to: 'en', 'fr', 'zh', 'es', etc.
+```
+
+## Step 3: Run Training
+
+Start the training process:
+
+```bash
+python lora.py
+```
+
+**What happens during training:**
+1. Loads the Chatterbox Multilingual TTS model
+2. Injects LoRA adapters into transformer layers
+3. Trains only the LoRA parameters (efficient fine-tuning)
+4. Saves checkpoints every 200 steps
+5. Generates real-time training metrics visualization (`training_metrics.png`)
+6. Creates a merged model at the end
+
+**Training outputs:**
+- `checkpoints_lora/checkpoint_epochX_stepY.pt` - Training checkpoints
+- `checkpoints_lora/final_lora_adapter.pt` - Final LoRA weights
+- `checkpoints_lora/merged_model/` - Merged model (base + LoRA)
+- `training_metrics.png` - Real-time training visualization
+
+**Training metrics:**
+The script generates a live dashboard showing:
+- Training and validation loss
+- Learning rate schedule
+- Gradient norms
+- Recent batch losses
+- Loss variance
+- Time per training step
+
+**GPU requirements:**
+- Minimum: 16GB VRAM (NVIDIA GPU)
+- Recommended: 24GB+ VRAM for faster training
+- CPU training is supported but significantly slower
+
+## Step 4: Convert the Merged Model
+
+After training completes, convert the model to the correct format:
+
+```bash
+python fix_merged_model.py
+```
+
+This converts the PyTorch `.pt` files to `.safetensors` format required by `ChatterboxMultilingualTTS.from_local()`.
+
+**Output:**
+```
+checkpoints_lora/merged_model/
+├── ve.pt
+├── t3_mtl23ls_v2.pt
+├── t3_mtl23ls_v2.safetensors  ← Created by fix_merged_model.py
+├── s3gen.pt
+├── grapheme_mtl_merged_expanded_v1.json
+└── conds.pt
+```
+
+## Step 5: Test Your Fine-tuned Model
+
+### Option A: Load the Merged Model
+
+```python
+import torchaudio as ta
+from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+
+# Load your fine-tuned model
+model = ChatterboxMultilingualTTS.from_local(
+    "./checkpoints_lora/merged_model",
+    device="cuda"
+)
+
+# Generate speech with your fine-tuned voice
+text = "مرحبا، هذا نموذج الصوت المخصص الخاص بي"  # Arabic example
+wav = model.generate(text, language_id="ar")
+ta.save("finetuned_output.wav", wav, model.sr)
+```
+
+### Option B: Load Base Model + LoRA Adapter
+
+```python
+from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+from lora import load_lora_adapter
+
+# Load base model
+model = ChatterboxMultilingualTTS.from_pretrained(device="cuda")
+
+# Load your LoRA adapter
+lora_layers = load_lora_adapter(
+    model,
+    "./checkpoints_lora/final_lora_adapter.pt",
+    device="cuda"
+)
+
+# Generate speech
+text = "Your text here"
+wav = model.generate(text, language_id="ar")
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**"No valid audio samples found"**
+- Check that `AUDIO_DATA_DIR` in `lora.py` matches your dataset location
+- Verify `metadata.csv` exists and has the correct format
+- Ensure audio files are in the `audio/` subdirectory
+
+**"CUDA out of memory"**
+- Reduce `BATCH_SIZE` to 1
+- Reduce `MAX_AUDIO_LENGTH` to 200 or less
+- Reduce `LORA_RANK` to 16 or 8
+- Use gradient checkpointing (advanced)
+
+**"Loss is NaN or not decreasing"**
+- Lower `LEARNING_RATE` (try 1e-5)
+- Check that transcriptions match audio content
+- Ensure audio quality is good (no noise/corruption)
+- Increase `WARMUP_STEPS` to 1000
+
+**"Training is very slow"**
+- Reduce `MAX_AUDIO_LENGTH` to filter long samples
+- Use a GPU instead of CPU
+- Increase `GRADIENT_ACCUMULATION_STEPS` and `BATCH_SIZE`
+
+### Dataset Quality Tips
+
+For best results:
+- **Accurate transcriptions** - Ensure text exactly matches spoken audio
+- **Clean audio** - Remove background noise, music, and overlapping speech
+- **Consistent speaker** - Use recordings from the same speaker
+- **Sufficient data** - Aim for at least 30-60 minutes of audio
+- **Diverse content** - Include varied vocabulary and sentence structures
+
+## Advanced Configuration
+
+### Target Modules
+
+LoRA is applied to these transformer layers (line 745 in `lora.py`):
+```python
+target_modules = ["q_proj", "v_proj", "k_proj", "o_proj",
+                  "gate_proj", "up_proj", "down_proj"]
+```
+
+To fine-tune fewer layers (faster, less overfitting):
+```python
+target_modules = ["q_proj", "v_proj"]  # Only query and value projections
+```
+
+### Resume Training from Checkpoint
+
+To resume training from a checkpoint, modify line 741 in `lora.py`:
+```python
+# Replace:
+model = ChatterboxMultilingualTTS.from_pretrained(device=DEVICE)
+
+# With:
+model = ChatterboxMultilingualTTS.from_local(
+    "./checkpoints_lora/merged_model",
+    device=DEVICE
+)
+```
+
+### Multi-Language Fine-tuning
+
+To train on multiple languages, modify the `load_audio_samples()` function to read language IDs from `metadata.csv`:
+
+1. Add a `language_id` column to `metadata.csv`:
+```csv
+file_name,transcription,duration_seconds,language_id
+audio/file1.wav,Hello world,2.5,en
+audio/file2.wav,Bonjour monde,2.3,fr
+```
+
+2. Update line 1079 in `lora.py`:
+```python
+# Replace:
+language_id='ar'
+
+# With:
+language_id=row.get('language_id', 'ar')  # Read from metadata
+```
+
 # Acknowledgements
 - [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)
 - [Real-Time-Voice-Cloning](https://github.com/CorentinJ/Real-Time-Voice-Cloning)
