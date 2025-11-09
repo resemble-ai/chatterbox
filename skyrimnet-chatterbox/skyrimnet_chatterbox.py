@@ -8,6 +8,7 @@ from loguru import logger
 import numpy as np
 import torch
 
+
 try:
     from cache_utils import (
         load_conditionals_cache,
@@ -35,6 +36,7 @@ except ImportError:
     from .chatterbox.tensor_utils import initialize_model_dtype, safe_conditional_to_dtype
     from .shared_config import get_tts_params, DEFAULT_CACHE_CONFIG, DEFAULT_TTS_PARAMS, SUPPORTED_LANGUAGE_CODES
 
+START_DIRECTORY = Path(__file__).parent.absolute()
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
 MODEL = None
@@ -46,6 +48,7 @@ ENABLE_DISK_CACHE = DEFAULT_CACHE_CONFIG["ENABLE_DISK_CACHE"]
 ENABLE_MEMORY_CACHE = DEFAULT_CACHE_CONFIG["ENABLE_MEMORY_CACHE"]
 # Testing flag - when True, bypasses config loading and uses all API values
 _FROM_GRADIO = False
+
 
 def set_seed(seed: int):
     """Sets the random seed for reproducibility across torch, numpy, and random."""
@@ -238,8 +241,7 @@ def generate_audio(
     
     logger.debug(f"Final parameters - temp: {inference_kwargs['temperature']}, min_p: {inference_kwargs['min_p']}, top_p: {inference_kwargs['top_p']}, rep_penalty: {inference_kwargs['repetition_penalty']}, cfg_weight: {inference_kwargs['cfg_weight']}, exaggeration: {inference_kwargs['exaggeration']}")
     
-
-    return generate(
+    wavout =  generate(
         model=MODEL, 
         text=text, 
         language_id=language, 
@@ -251,9 +253,13 @@ def generate_audio(
         min_p=inference_kwargs['min_p'],
         top_p=inference_kwargs['top_p'],
         repetition_penalty=inference_kwargs['repetition_penalty'],
-    ), job_id
-
+    )
+    wavout_path = Path(wavout).relative_to(START_DIRECTORY.parent)
+    logger.debug(f"Generated audio file at: {wavout_path} for job_id: {job_id}")
+    return wavout_path, job_id
 with gr.Blocks() as demo:
+    
+    gr.set_static_paths(["assets", "cache"])
     model_state = gr.State(None)  # Loaded once per session/user
 
     with gr.Row():

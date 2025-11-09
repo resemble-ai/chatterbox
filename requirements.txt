@@ -11,6 +11,7 @@ s3tokenizer
 
 transformers
 huggingface_hub
+hf-xet
 diffusers
 omegaconf
 conformer

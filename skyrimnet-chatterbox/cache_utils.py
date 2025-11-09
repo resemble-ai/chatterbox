@@ -342,7 +342,7 @@ def clear_cache_files(language: Optional[str] = None):
     Args:
         language: If specified, only clear cache for that language. Otherwise clear all languages.
     """
-    cache_base = Path("cache").joinpath("conditionals")
+    cache_base = CACHE_DIR.joinpath("conditionals")
     if not cache_base.exists():
         logger.info(f"Cache directory {cache_base} does not exist, nothing to clear")
         return 0
