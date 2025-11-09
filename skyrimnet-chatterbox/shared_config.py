@@ -37,13 +37,13 @@ DEFAULT_CACHE_CONFIG = {
 
 # Default TTS inference parameters
 DEFAULT_TTS_PARAMS = {
-            'TEMPERATURE': 0.7,
+            'TEMPERATURE': 1.0,
             'MIN_P': 0.05,
             'TOP_P': 1.0,
             'SPEED': 1.0,
             'REPETITION_PENALTY': 1.2,
-            'CFG_WEIGHT': 0.5,
-            'EXAGGERATION': 0.45
+            'CFG_WEIGHT': 0.35,
+            'EXAGGERATION': 0.9
         }
 # Config file path
 _CONFIG_FILE_PATH = "skyrimnet_config.txt"
