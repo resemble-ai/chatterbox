@@ -93,35 +93,11 @@ This repository includes tools for fine-tuning Chatterbox Multilingual TTS using
 
 ## Overview
 
-The fine-tuning process involves three main scripts:
-- **`download_dataset.py`** - Downloads and prepares datasets from Hugging Face
+The fine-tuning process involves two main scripts:
 - **`lora.py`** - Main training script with LoRA fine-tuning
 - **`fix_merged_model.py`** - Converts the trained model to the correct format
 
 ## Step 1: Prepare Your Dataset
-
-### Option A: Use a Hugging Face Dataset
-
-If your dataset is on Hugging Face, use the download script:
-
-```python
-python download_dataset.py
-```
-
-**Configuration:**
-Edit the following variables in `download_dataset.py`:
-```python
-REPO_NAME = "MrEzzat/arabic-tts-dataset"  # Your HF dataset repo
-OUTPUT_DIR = "audio_data"                  # Output directory
-USE_AUTH_TOKEN = False                     # Set True for private datasets
-```
-
-The script will:
-- Download the dataset from Hugging Face
-- Extract audio files to `audio_data/audio/`
-- Generate `metadata.csv` with transcriptions
-
-### Option B: Prepare Your Own Dataset
 
 Create the following directory structure:
 ```
