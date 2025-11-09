@@ -124,6 +124,6 @@ try {
 if (Get-Command -ErrorAction SilentlyContinue Deactivate) { Deactivate }
 
 Write-Header "Done"
-Write-Host "If all succeeded you can run 2_Start.bat or 2_Start_ML.bat" -ForegroundColor Green
+Write-Host "If all succeeded you can run 2_Start.bat or 2_Start_ML.bat (for multilingual)" -ForegroundColor Green
 
 exit 0

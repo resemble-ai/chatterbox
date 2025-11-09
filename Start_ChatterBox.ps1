@@ -101,12 +101,7 @@ if (Test-Path $venvPython) {
 }
 
 # Script to run (relative to repo root)
-$scriptToRun = Join-Path $scriptRoot 'skyrimnet-chatterbox.py'
-if (-not (Test-Path $scriptToRun)) {
-    Write-Host "Could not find script: $scriptToRun" -ForegroundColor Red
-    Read-Host -Prompt "Press Enter to exit"
-    exit 1
-}
+$scriptToRun = '-m skyrimnet-chatterbox'
 
 # Build Python script arguments
 $pythonArgs = ""
@@ -123,7 +118,7 @@ if ($pythonArgs) {
 }
 
 # Build the command to run inside the new PowerShell instance. Escape $Host so it's evaluated by the child PowerShell.
-$psCommand = "`$Host.UI.RawUI.WindowTitle = 'SkyrimNet ChatterBox'; $vsInitCommand & '$pythonPath' '$scriptToRun' $pythonArgs"
+$psCommand = "`$Host.UI.RawUI.WindowTitle = 'SkyrimNet ChatterBox'; $vsInitCommand & '$pythonPath' $scriptToRun $pythonArgs"
 
 # Launch PowerShell in a new window and keep it open (-NoExit) so errors remain visible.
 $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoExit','-Command',$psCommand) -WorkingDirectory $scriptRoot -PassThru
@@ -136,5 +131,5 @@ try {
 }
 
 Write-Host "`nSkyrimNet ChatterBox should start in another window." -ForegroundColor Green
-Write-Host "If that window closes immediately, run $scriptToRun to capture errors." -ForegroundColor Yellow
+# Write-Host "If that window closes immediately, run $scriptToRun to capture errors." -ForegroundColor Yellow
 Any_Key_Wait -msg "Otherwise, you may close this window if it does not close itself.`n" -wait_sec 20

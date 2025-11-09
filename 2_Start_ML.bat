@@ -1,2 +1,2 @@
 @echo off
-call powershell -ExecutionPolicy Bypass -File 2_Start_ChatterBox.ps1 -Multilingual
+call powershell -ExecutionPolicy Bypass -File Start_ChatterBox.ps1 -Multilingual
