@@ -8,6 +8,7 @@ from types import MethodType
 
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 LLAMA_ALIGNED_HEADS = [(12, 15), (13, 11), (9, 2)]
@@ -30,7 +31,7 @@ class AlignmentAnalysisResult:
 
 
 class AlignmentStreamAnalyzer:
-    def __init__(self, tfmr, queue, text_tokens_slice, alignment_layer_idx=9, eos_idx=0):
+    def __init__(self, tfmr, queue, text_tokens_slice, alignment_layer_idx=9, eos_idx=0, debug: bool = False):
         """
         Some transformer TTS models implicitly solve text-speech alignment in one or more of their self-attention
         activation maps. This module exploits this to perform online integrity checks which streaming.
@@ -55,14 +56,27 @@ class AlignmentStreamAnalyzer:
         
         # Track generated tokens for repetition detection
         self.generated_tokens = []
+        # Debug flag: when True we enable eager attention and hooks for alignment visualization
+        self.debug = debug
 
         # Using `output_attentions=True` is incompatible with optimized attention kernels, so
         # using it for all layers slows things down too much. We can apply it to just one layer
         # by intercepting the kwargs and adding a forward hook (credit: jrm)
         self.last_aligned_attns = []
-        for i, (layer_idx, head_idx) in enumerate(LLAMA_ALIGNED_HEADS):
-            self.last_aligned_attns += [None]
-            self._add_attention_spy(tfmr, i, layer_idx, head_idx)
+
+        if self.debug:
+            logger.info("🔍 Alignment debugging enabled (eager attention mode).")
+            if hasattr(tfmr.config, "attn_implementation"):
+                tfmr.config.attn_implementation = "eager"
+            if hasattr(tfmr.config, "output_attentions"):
+                tfmr.config.output_attentions = True
+
+            for i, (layer_idx, head_idx) in enumerate(LLAMA_ALIGNED_HEADS):
+                self.last_aligned_attns += [None]
+                self._add_attention_spy(tfmr, i, layer_idx, head_idx)
+        else:
+            logger.info("⚡ Alignment analyzer disabled (SDPA fast mode).")
+            self.alignment_disabled = True
 
     def _add_attention_spy(self, tfmr, buffer_idx, layer_idx, head_idx):
         """
@@ -79,17 +93,21 @@ class AlignmentStreamAnalyzer:
                 step_attention = output[1].cpu()  # (B, n_heads, T0, Ti)
                 self.last_aligned_attns[buffer_idx] = step_attention[0, head_idx]  # (T0, Ti)
 
-        target_layer = tfmr.layers[layer_idx].self_attn
-        # Register hook and store the handle
-        target_layer.register_forward_hook(attention_forward_hook)
-        if hasattr(tfmr, 'config') and hasattr(tfmr.config, 'output_attentions'):
-            self.original_output_attentions = tfmr.config.output_attentions
-            tfmr.config.output_attentions = True
+        try:
+            target_layer = tfmr.layers[layer_idx].self_attn
+            # Register hook and store the handle
+            target_layer.register_forward_hook(attention_forward_hook)
+        except Exception as e:
+            logger.warning(f"⚠️ Could not attach attention spy at layer {layer_idx}: {e}")
 
     def step(self, logits, next_token=None):
         """
         Emits an AlignmentAnalysisResult into the output queue, and potentially modifies the logits to force an EOS.
         """
+        # If alignment hooks were disabled (fast SDPA mode), skip all alignment work
+        if getattr(self, "alignment_disabled", False):
+            # Just return logits unchanged for fast SDPA inference
+            return logits
         # extract approximate alignment matrix chunk (1 frame at a time after the first chunk)
         aligned_attn = torch.stack(self.last_aligned_attns).mean(dim=0) # (N, N)
         i, j = self.text_tokens_slice
