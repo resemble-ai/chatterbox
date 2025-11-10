@@ -145,7 +145,9 @@ class ChatterboxTTS:
         t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
-        t3.load_state_dict(t3_state)
+        # Use strict=False for backward compatibility with older checkpoints
+        # that don't have the new norm_out layer in Perceiver
+        t3.load_state_dict(t3_state, strict=False)
         t3.to(device).eval()
 
         s3gen = S3Gen()

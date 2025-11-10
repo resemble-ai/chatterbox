@@ -6,6 +6,7 @@ import math
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.nn.attention import sdpa_kernel
 from einops import rearrange
 
 
@@ -42,9 +43,11 @@ class RelativePositionBias(nn.Module):
 
     def forward(self, qk_dots):
         i, j, device = *qk_dots.shape[-2:], qk_dots.device
-        q_pos = torch.arange(i, dtype=torch.long, device=device)
-        k_pos = torch.arange(j, dtype=torch.long, device=device)
+        q_pos = torch.arange(i, device=device)
+        k_pos = torch.arange(j, device=device)
         rel_pos = k_pos[None, :] - q_pos[:, None]
+        # Clamp to prevent overflow in log calculations
+        rel_pos = torch.clamp(rel_pos, min=-self.max_distance, max=self.max_distance)
         rp_bucket = self._relative_position_bucket(rel_pos, causal=self.causal, num_buckets=self.num_buckets,
                                                    max_distance=self.max_distance)
         values = self.relative_attention_bias(rp_bucket)
@@ -64,12 +67,18 @@ class AttentionQKV(nn.Module):
         self.flash_config = self.setup_flash_config() if flash else None
 
     def setup_flash_config(self):
-        # Setup flash attention configuration
-        flash_config = {
-            'enable_flash': True,
-            'enable_math': True,
-            'enable_mem_efficient': True
-        }
+        # Setup flash attention configuration for torch.nn.attention.sdpa_kernel
+        # PyTorch 2.4+ uses: SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH
+        try:
+            from torch.nn.attention import SDPBackend
+            flash_config = [
+                SDPBackend.FLASH_ATTENTION,
+                SDPBackend.EFFICIENT_ATTENTION,
+                SDPBackend.MATH
+            ]
+        except (ImportError, AttributeError):
+            # Fallback for older PyTorch versions
+            flash_config = None
         return flash_config
 
     def forward(self, q, k, v, mask=None):
@@ -85,18 +94,42 @@ class AttentionQKV(nn.Module):
         sim = torch.einsum("bhlt,bhls->bhts", q, k) * self.scale
         if mask is not None:
             sim = sim.masked_fill(mask == 0, float('-inf'))
-        attn = torch.softmax(sim, dim=-1)
+        # Use float32 for numerical stability and add NaN guard
+        attn = torch.softmax(sim, dim=-1, dtype=torch.float32)
+        attn = attn.masked_fill(torch.isnan(attn), 0)
         attn = self.dropout(attn)
         return torch.einsum("bhts,bhls->bhlt", attn, v)
 
     def flash_attention(self, q, k, v, mask=None):
-        config = self.flash_config if self.flash_config else {}
-        with torch.backends.cuda.sdp_kernel(**config):
+        # Store original dtype to restore after computation
+        original_dtype = q.dtype
+        
+        # Ensure Q/K/V are contiguous and use appropriate dtype for SDPA kernels
+        target_dtype = torch.float16 if q.is_cuda else torch.float32
+        q, k, v = [t.contiguous().to(dtype=target_dtype) for t in (q, k, v)]
+        
+        # Use sdpa_kernel context manager if config is available
+        if self.flash_config is not None:
+            with sdpa_kernel(self.flash_config):
+                out = F.scaled_dot_product_attention(
+                    q, k, v,
+                    attn_mask=mask,
+                    dropout_p=self.dropout_rate if self.training else 0.0,
+                    scale=self.scale,
+                )
+        else:
+            # Direct call without context manager
             out = F.scaled_dot_product_attention(
                 q, k, v,
                 attn_mask=mask,
-                dropout_p=self.dropout_rate if self.training else 0.
+                dropout_p=self.dropout_rate if self.training else 0.0,
+                scale=self.scale,
             )
+        
+        # Convert back to original dtype if changed
+        if out.dtype != original_dtype:
+            out = out.to(dtype=original_dtype)
+        
         return out
 
     def split_heads(self, x):
@@ -157,6 +190,10 @@ class AttentionBlock2(nn.Module):
         b1, c1, *spatial1 = x1.shape
         b2, c2, *spatial2 = x2.shape
 
+        # Ensure spatial dimensions match for cross-attention
+        assert x1.shape[-1] == x2.shape[-1], \
+            f"Mismatched spatial dims: x1={x1.shape}, x2={x2.shape}"
+
         x1_norm = self.norm(x1)
         x2_norm = self.norm(x2)
 
@@ -172,7 +209,7 @@ class AttentionBlock2(nn.Module):
 
 class Perceiver(nn.Module):
     """Inspired by https://arxiv.org/abs/2103.03206"""
-    def __init__(self, pre_attention_query_token=32, pre_attention_query_size=1024, embedding_dim=1024, num_attn_heads=4):
+    def __init__(self, pre_attention_query_token=32, pre_attention_query_size=1024, embedding_dim=1024, num_attn_heads=4, use_output_norm=True):
         """
         Initialize the perceiver module.
 
@@ -180,6 +217,7 @@ class Perceiver(nn.Module):
         :param pre_attention_query_size: Size of each query token
         :param embedding_dim: Dimension of the embedding space
         :param num_attn_heads: Number of attention heads
+        :param use_output_norm: Whether to use output normalization (for backward compatibility)
         """
         super().__init__()
 
@@ -188,14 +226,21 @@ class Perceiver(nn.Module):
             torch.empty(1, pre_attention_query_token, pre_attention_query_size)
         )
 
-        # Calculate the variance for uniform initialization
-        query_variance = math.sqrt(3.0) * math.sqrt(2.0 / (pre_attention_query_token + pre_attention_query_token))
+        # Calculate the variance for uniform initialization (simplified)
+        query_variance = math.sqrt(3.0) * math.sqrt(1.0 / pre_attention_query_token)
 
         # Initialize the pre-attention query with uniform distribution
         self.pre_attention_query.data.uniform_(-query_variance, query_variance)
 
         # Initialize the attention block
         self.attn = AttentionBlock2(embedding_dim, num_attn_heads)
+        
+        # Add output normalization for training stability (optional for backward compatibility)
+        self.use_output_norm = use_output_norm
+        if use_output_norm:
+            self.norm_out = nn.LayerNorm(embedding_dim)
+        else:
+            self.norm_out = None
 
     def forward(self, h):
         """
@@ -209,4 +254,7 @@ class Perceiver(nn.Module):
         pre_att = self.attn(query_, h)
         # Apply the second attention mechanism (self-attention)
         attn = self.attn(pre_att, pre_att)
+        # Apply output normalization for stability (if enabled)
+        if self.use_output_norm and self.norm_out is not None:
+            return self.norm_out(attn)
         return attn
