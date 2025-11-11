@@ -252,8 +252,6 @@ class T3(nn.Module):
         # In order to use the standard HF generate method, we need to extend some methods to inject our custom logic
         # Note the llama-specific logic. Other tfmr types can be added later.
 
-        self.compiled = False
-
         # TODO? synchronize the expensive compile function
         # with self.compile_lock:
         if not self.compiled:
@@ -266,6 +264,7 @@ class T3(nn.Module):
                     text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
                     alignment_layer_idx=9, # TODO: hparam or something?
                     eos_idx=self.hp.stop_speech_token,
+                    debug=True,  # Enable alignment-based EOS forcing for multilingual
                 )
                 assert alignment_stream_analyzer.eos_idx == self.hp.stop_speech_token
 
@@ -278,6 +277,12 @@ class T3(nn.Module):
             )
             self.patched_model = patched_model
             self.compiled = True
+        else:
+            # Reset the alignment analyzer state for the new generation
+            if self.hp.is_multilingual and self.patched_model.alignment_stream_analyzer is not None:
+                self.patched_model.alignment_stream_analyzer.reset(
+                    text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1))
+                )
 
         # # Run normal generate method, which calls our custom extended methods
         # return self.patched_model.generate(

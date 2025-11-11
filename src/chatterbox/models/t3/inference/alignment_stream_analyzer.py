@@ -66,10 +66,14 @@ class AlignmentStreamAnalyzer:
 
         if self.debug:
             logger.info("🔍 Alignment debugging enabled (eager attention mode).")
+            # Bypass validation by setting internal attributes directly
+            if hasattr(tfmr.config, "_attn_implementation"):
+                object.__setattr__(tfmr.config, "_attn_implementation", "eager")
             if hasattr(tfmr.config, "attn_implementation"):
-                tfmr.config.attn_implementation = "eager"
-            if hasattr(tfmr.config, "output_attentions"):
-                tfmr.config.output_attentions = True
+                object.__setattr__(tfmr.config, "attn_implementation", "eager")
+            if hasattr(tfmr.config, "_attn_implementation_internal"):
+                object.__setattr__(tfmr.config, "_attn_implementation_internal", "eager")
+            object.__setattr__(tfmr.config, "output_attentions", True)
 
             for i, (layer_idx, head_idx) in enumerate(LLAMA_ALIGNED_HEADS):
                 self.last_aligned_attns += [None]
@@ -99,6 +103,24 @@ class AlignmentStreamAnalyzer:
             target_layer.register_forward_hook(attention_forward_hook)
         except Exception as e:
             logger.warning(f"⚠️ Could not attach attention spy at layer {layer_idx}: {e}")
+
+    def reset(self, text_tokens_slice=None):
+        """Reset the analyzer state for a new generation."""
+        if text_tokens_slice is not None:
+            self.text_tokens_slice = (i, j) = text_tokens_slice
+            self.alignment = torch.zeros(0, j-i)
+        else:
+            i, j = self.text_tokens_slice
+            self.alignment = torch.zeros(0, j-i)
+        
+        self.curr_frame_pos = 0
+        self.text_position = 0
+        self.started = False
+        self.started_at = None
+        self.complete = False
+        self.completed_at = None
+        self.generated_tokens = []
+        logger.info("🔄 Alignment analyzer state reset for new generation")
 
     def step(self, logits, next_token=None):
         """
