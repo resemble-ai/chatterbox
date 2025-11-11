@@ -28,7 +28,7 @@ class T3Config:
     
     @property
     def is_multilingual(self):
-        return self.text_tokens_dict_size == 2352
+        return self.text_tokens_dict_size == 2454
 
     @classmethod
     def english_only(cls):
@@ -38,4 +38,4 @@ class T3Config:
     @classmethod 
     def multilingual(cls):
         """Create configuration for multilingual TTS model."""
-        return cls(text_tokens_dict_size=2352)
+        return cls(text_tokens_dict_size=2454)

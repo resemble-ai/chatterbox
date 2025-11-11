@@ -1,10 +1,9 @@
 import logging
 import json
-import re
 
 import torch
 from pathlib import Path
-from unicodedata import category
+from unicodedata import category, normalize
 from tokenizers import Tokenizer
 from huggingface_hub import hf_hub_download
 
@@ -33,7 +32,7 @@ class EnTokenizer:
         text_tokens = torch.IntTensor(text_tokens).unsqueeze(0)
         return text_tokens
 
-    def encode( self, txt: str, verbose=False):
+    def encode(self, txt: str):
         """
         clean_text > (append `lang_id`) > replace SPACE > encode text using Tokenizer
         """
@@ -46,8 +45,7 @@ class EnTokenizer:
         if isinstance(seq, torch.Tensor):
             seq = seq.cpu().numpy()
 
-        txt: str = self.tokenizer.decode(seq,
-        skip_special_tokens=False)
+        txt: str = self.tokenizer.decode(seq, skip_special_tokens=False)
         txt = txt.replace(' ', '')
         txt = txt.replace(SPACE, ' ')
         txt = txt.replace(EOT, '')
@@ -61,6 +59,7 @@ REPO_ID = "ResembleAI/chatterbox"
 # Global instances for optional dependencies
 _kakasi = None
 _dicta = None
+_russian_stresser = None
 
 
 def is_kanji(c: str) -> bool:
@@ -191,7 +190,7 @@ class ChineseCangjieConverter:
     def _init_segmenter(self):
         """Initialize pkuseg segmenter."""
         try:
-            from pkuseg import pkuseg
+            from spacy_pkuseg import pkuseg
             self.segmenter = pkuseg()
         except ImportError:
             logger.warning("pkuseg not available - Chinese segmentation will be skipped")
@@ -235,6 +234,25 @@ class ChineseCangjieConverter:
         return "".join(output)
 
 
+def add_russian_stress(text: str) -> str:
+    """Russian text normalization: adds stress marks to Russian text."""
+    global _russian_stresser
+    
+    try:
+        if _russian_stresser is None:
+            from russian_text_stresser.text_stresser import RussianTextStresser
+            _russian_stresser = RussianTextStresser()
+        
+        return _russian_stresser.stress_text(text)
+        
+    except ImportError:
+        logger.warning("russian_text_stresser not available - Russian stress labeling skipped")
+        return text
+    except Exception as e:
+        logger.warning(f"Russian stress labeling failed: {e}")
+        return text
+
+
 class MTLTokenizer:
     def __init__(self, vocab_file_path):
         self.tokenizer: Tokenizer = Tokenizer.from_file(vocab_file_path)
@@ -247,12 +265,26 @@ class MTLTokenizer:
         assert SOT in voc
         assert EOT in voc
 
-    def text_to_tokens(self, text: str, language_id: str = None):
-        text_tokens = self.encode(text, language_id=language_id)
+    def preprocess_text(self, raw_text: str, language_id: str = None, lowercase: bool = True, nfkd_normalize: bool = True):
+        """
+        Text preprocessor that handles lowercase conversion and NFKD normalization.
+        """
+        preprocessed_text = raw_text
+        if lowercase:
+            preprocessed_text = preprocessed_text.lower()
+        if nfkd_normalize:
+            preprocessed_text = normalize("NFKD", preprocessed_text)
+        
+        return preprocessed_text
+
+    def text_to_tokens(self, text: str, language_id: str = None, lowercase: bool = True, nfkd_normalize: bool = True):
+        text_tokens = self.encode(text, language_id=language_id, lowercase=lowercase, nfkd_normalize=nfkd_normalize)
         text_tokens = torch.IntTensor(text_tokens).unsqueeze(0)
         return text_tokens
 
-    def encode(self, txt: str, language_id: str = None):
+    def encode(self, txt: str, language_id: str = None, lowercase: bool = True, nfkd_normalize: bool = True):
+        txt = self.preprocess_text(txt, language_id=language_id, lowercase=lowercase, nfkd_normalize=nfkd_normalize)
+        
         # Language-specific text processing
         if language_id == 'zh':
             txt = self.cangjie_converter(txt)
@@ -262,6 +294,8 @@ class MTLTokenizer:
             txt = add_hebrew_diacritics(txt)
         elif language_id == 'ko':
             txt = korean_normalize(txt)
+        elif language_id == 'ru':
+            txt = add_russian_stress(txt)
         
         # Prepend language token
         if language_id:
