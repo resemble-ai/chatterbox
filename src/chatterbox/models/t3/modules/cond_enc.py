@@ -59,7 +59,9 @@ class T3CondEnc(nn.Module):
         # perceiver resampler
         self.perceiver = None
         if hp.use_perceiver_resampler:
-            self.perceiver = Perceiver()
+            # Use use_norm_out=False for backward compatibility with pretrained checkpoints
+            # The original checkpoint was trained without the norm_out layer
+            self.perceiver = Perceiver(use_norm_out=False)
 
     def forward(self, cond: T3Cond):
         # Validate

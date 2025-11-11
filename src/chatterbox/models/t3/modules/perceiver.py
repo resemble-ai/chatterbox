@@ -208,8 +208,18 @@ class AttentionBlock2(nn.Module):
 
 
 class Perceiver(nn.Module):
-    """Inspired by https://arxiv.org/abs/2103.03206"""
-    def __init__(self, pre_attention_query_token=32, pre_attention_query_size=1024, embedding_dim=1024, num_attn_heads=4, use_output_norm=True):
+    """
+    Compatible Perceiver, backward-load-safe.
+    Inspired by https://arxiv.org/abs/2103.03206
+    """
+    def __init__(
+        self,
+        pre_attention_query_token=32,
+        pre_attention_query_size=1024,
+        embedding_dim=1024,
+        num_attn_heads=4,
+        use_norm_out: bool = False  # Default False for checkpoint compatibility
+    ):
         """
         Initialize the perceiver module.
 
@@ -217,7 +227,7 @@ class Perceiver(nn.Module):
         :param pre_attention_query_size: Size of each query token
         :param embedding_dim: Dimension of the embedding space
         :param num_attn_heads: Number of attention heads
-        :param use_output_norm: Whether to use output normalization (for backward compatibility)
+        :param use_norm_out: Whether to use output normalization (set False for pretrained checkpoint compatibility)
         """
         super().__init__()
 
@@ -235,12 +245,9 @@ class Perceiver(nn.Module):
         # Initialize the attention block
         self.attn = AttentionBlock2(embedding_dim, num_attn_heads)
         
-        # Add output normalization for training stability (optional for backward compatibility)
-        self.use_output_norm = use_output_norm
-        if use_output_norm:
-            self.norm_out = nn.LayerNorm(embedding_dim)
-        else:
-            self.norm_out = None
+        # Add output normalization only if explicitly requested (for new training)
+        # For backward compatibility with pretrained checkpoints, default is nn.Identity()
+        self.norm_out = nn.LayerNorm(embedding_dim) if use_norm_out else nn.Identity()
 
     def forward(self, h):
         """
@@ -254,7 +261,5 @@ class Perceiver(nn.Module):
         pre_att = self.attn(query_, h)
         # Apply the second attention mechanism (self-attention)
         attn = self.attn(pre_att, pre_att)
-        # Apply output normalization for stability (if enabled)
-        if self.use_output_norm and self.norm_out is not None:
-            return self.norm_out(attn)
-        return attn
+        # Apply output normalization (nn.Identity() by default for compatibility)
+        return self.norm_out(attn)

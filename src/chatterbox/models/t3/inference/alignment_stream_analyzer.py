@@ -184,6 +184,16 @@ class AlignmentStreamAnalyzer:
         if cur_text_posn < S - 3 and S > 5:  # Only suppress if text is longer than 5 tokens
             logits[..., self.eos_idx] = -2**15
 
+        # Safety fallback: stop if long tail beyond 2× text length
+        # This prevents runaway generation even if the model's internal EOS logic misfires
+        max_reasonable_length = 2 * (j - i)
+        if not self.complete and self.curr_frame_pos > max_reasonable_length:
+            logger.warning(f"⚠️ Fallback EOS triggered: frame {self.curr_frame_pos} exceeds 2× text length ({max_reasonable_length})")
+            logits = -(2**15) * torch.ones_like(logits)
+            logits[..., self.eos_idx] = 2**15
+            self.curr_frame_pos += 1
+            return logits
+
         # If a bad ending is detected, force emit EOS by modifying logits
         # NOTE: this means logits may be inconsistent with latents!
         if long_tail or alignment_repetition or token_repetition:
