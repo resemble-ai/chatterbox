@@ -9,6 +9,12 @@ import torch.nn.functional as F
 from safetensors.torch import load_file as load_safetensors
 from huggingface_hub import snapshot_download
 
+try:
+    import bitsandbytes as bnb
+    BNB_AVAILABLE = True
+except ImportError:
+    BNB_AVAILABLE = False
+
 from .models.t3 import T3
 from .models.t3.modules.t3_config import T3Config
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -158,8 +164,19 @@ class ChatterboxMultilingualTTS:
         return SUPPORTED_LANGUAGES.copy()
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxMultilingualTTS':
+    def from_local(cls, ckpt_dir, device, use_bnb_quantization=False) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(ckpt_dir)
+
+        # Validate BNB quantization requirements
+        if use_bnb_quantization:
+            if not BNB_AVAILABLE:
+                raise ImportError(
+                    "bitsandbytes is not installed. Please install it with: pip install bitsandbytes"
+                )
+            if device not in ["cuda"]:
+                raise ValueError(
+                    f"BNB quantization is only supported on CUDA devices, but got device: {device}"
+                )
 
         ve = VoiceEncoder()
         ve.load_state_dict(
@@ -174,6 +191,11 @@ class ChatterboxMultilingualTTS:
         # Use strict=False for backward compatibility with older checkpoints
         # that don't have the new norm_out layer in Perceiver
         t3.load_state_dict(t3_state, strict=False)
+        
+        # Apply BNB quantization if requested
+        if use_bnb_quantization:
+            t3 = cls._quantize_model_bnb(t3)
+        
         t3.to(device).eval()
 
         s3gen = S3Gen()
@@ -192,8 +214,34 @@ class ChatterboxMultilingualTTS:
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
+    @staticmethod
+    def _quantize_model_bnb(model):
+        """Apply BNB 8-bit quantization to Linear layers in the model."""
+        for name, module in model.named_children():
+            if isinstance(module, torch.nn.Linear):
+                # Replace Linear layer with quantized version
+                layer = bnb.nn.Linear8bitLt(
+                    module.in_features,
+                    module.out_features,
+                    bias=module.bias is not None,
+                    has_fp16_weights=False,
+                )
+                # Copy weights
+                layer.weight = bnb.nn.Int8Params(
+                    module.weight.data,
+                    requires_grad=False,
+                    has_fp16_weights=False,
+                )
+                if module.bias is not None:
+                    layer.bias = module.bias
+                setattr(model, name, layer)
+            elif len(list(module.children())) > 0:
+                # Recursively quantize child modules
+                setattr(model, name, ChatterboxMultilingualTTS._quantize_model_bnb(module))
+        return model
+
     @classmethod
-    def from_pretrained(cls, device: torch.device) -> 'ChatterboxMultilingualTTS':
+    def from_pretrained(cls, device: torch.device, use_bnb_quantization=False) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(
             snapshot_download(
                 repo_id=REPO_ID,
@@ -203,7 +251,7 @@ class ChatterboxMultilingualTTS:
                 token=os.getenv("HF_TOKEN"),
             )
         )
-        return cls.from_local(ckpt_dir, device)
+        return cls.from_local(ckpt_dir, device, use_bnb_quantization=use_bnb_quantization)
     
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
