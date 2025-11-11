@@ -423,7 +423,7 @@ class T3(nn.Module):
     
         # Validate / sanitize inputs
         # assert prepend_prompt_speech_tokens is None, "not implemented" NOTE -> Doesn't seem to be implemented.
-        # _ensure_BOT_EOT(text_tokens, self.hp) # TODO This was intentionally not included in the original chatterbox streaming repo, so we should determine it's purpose before adding it.
+        _ensure_BOT_EOT(text_tokens, self.hp) # TODO This was intentionally not included in the original chatterbox streaming repo, so we should determine it's purpose before adding it.
         text_tokens = torch.atleast_2d(text_tokens).to(dtype=torch.long, device=self.device)
 
         # Default initial speech to a single start-of-speech token
@@ -534,20 +534,22 @@ class T3(nn.Module):
             next_token = torch.multinomial(probs, num_samples=1) # shape: (B, 1)
 
             predicted.append(next_token)
-            chunk_buffer.append(next_token)
+            #chunk_buffer.append(next_token)
+            yield next_token 
             generated_ids = torch.cat([generated_ids, next_token], dim=1)
 
             # Check for EOS token
             if next_token.view(-1) == self.hp.stop_speech_token:
                 # Yield final chunk if buffer has tokens
-                if chunk_buffer:
-                    yield torch.cat(chunk_buffer, dim=1)
+                # if chunk_buffer:
+                #     #yield torch.cat(chunk_buffer, dim=1)
                 break
 
-            # Yield chunk when buffer is full
-            if len(chunk_buffer) >= chunk_size:
-                yield torch.cat(chunk_buffer, dim=1)
-                chunk_buffer = []
+            # # Yield chunk when buffer is full
+            # if len(chunk_buffer) >= chunk_size:
+            #     #yield torch.cat(chunk_buffer, dim=1)
+            #     yield chunk_buffer
+            #     chunk_buffer = []
 
             # Get embedding for the new token
             next_token_embed = self.speech_emb(next_token)

@@ -1,9 +1,16 @@
-import numpy as np
+# streamer imports
 import queue
 import threading
-from chatterbox import ChatterboxTTS
-import time
 import soundfile as sf
+
+# tts generation imports
+import time
+import torch
+import numpy as np
+from chatterbox import ChatterboxTTS
+
+# server imports
+import struct
 import socket
 
 class AudioBuffer:
@@ -67,6 +74,7 @@ class AudioBuffer:
             return out
             
         # num_samples is greater than the number of samples in buffer
+        print(f"WARNING: {num_samples - available_samples} more samples requested than were available")
         out = self.buffer.copy()
         self.buffer = np.zeros(0, dtype=self.dtype)
         pad = np.zeros(num_samples - available_samples, dtype=self.dtype)
@@ -93,22 +101,18 @@ class ChatterboxStreamer:
     def __init__(
         self, 
         sample_rate: int = 24000,
-        fade_duration: float = 0.02,
+        context_window: int = 50,
         dtype = np.float32
     ):
         self._model = self.load_model()
         self.sr = sample_rate
         self.dtype = np.float32
 
+        self.context_window = context_window
+
         self.request_queue = queue.Queue()
         self.audio_queue = queue.Queue(maxsize=10)
-
-        self.audio_buffer = AudioBuffer(
-            fade_duration=fade_duration,
-            sample_rate=sample_rate,
-            dtype=dtype
-        )
-        self.target_buffer_samples = int(1.0 * sample_rate)
+        self.all_tokens_processed = []
 
         # Creates tts generation thread and starts
         self._running = False
@@ -122,26 +126,24 @@ class ChatterboxStreamer:
         """
         self._running = True
         self._tts_thread.start()
+        self._model.setup_stream()
 
     def _tts_loop(self):
         while self._running:
-            text, start_time = self.request_queue.get()
-            latency_to_first_chunk = None
+            # retrieve request
+            text = self.request_queue.get()
 
+            # check for shutdown signal
             if text is None:
-                # Shutdown signal
                 break
         
+            # Perform tts generation
             for chunk in self._model.generate_stream(text=text):
-                # Terminates tts generation if thread is stopped
+                # Terminates if thread is stopped
                 if not self._running:
                     break
-            
-                if latency_to_first_chunk is None:
-                    latency_to_first_chunk = time.time() - start_time
-                    print(f"Latency to first chunk: {latency_to_first_chunk}")
 
-                # blocks if audio queue is full
+                # Blocks if audio queue is full
                 self.audio_queue.put(chunk)
             
             self.audio_queue.put(self._EOS)
@@ -152,27 +154,54 @@ class ChatterboxStreamer:
         """
         self.request_queue.put(request)
 
-    def get_frame(self, num_samples: int) -> np.ndarray:
+    def process_queue(self):
         """
-        Called from audio streaming side.
+        Drain queue and process all chunks.
         """
-        req_finished = False
+
+        request_complete = False
+
+        speech_tokens: List[torch.Tensor] = []
+
+        while self.audio_queue.empty():
+            time.sleep(0.1)
 
         while True:
             try:
-                chunk = self.audio_queue.get_nowait()
+                token = self.audio_queue.get_nowait() # chunk: List[torch.Tensor]
             except queue.Empty:
                 break
                 
-            if chunk is self._EOS:
+            if token is self._EOS:
                 # TODO Add end of utterance logic here
-                req_finished = True
-                continue
+                request_complete = True
+                break
             
-            self.buffer.add_chunk(chunk)
+            speech_tokens.append(token)
         
-        # Return audio frame
-        return self.buffer.get_samples(num_samples), req_finished
+        
+        with torch.no_grad():
+            speech_tokens = torch.cat(speech_tokens, dim=1)    
+        
+        # Extract only the conditional batch
+        speech_tokens = speech_tokens[0]
+
+        # Process each chunk immediately
+        audio, success = self._model._process_token_buffer(
+            [speech_tokens], self.all_tokens_processed, self.context_window
+        )
+
+        # Reset all_tokens_processed if request complete, otherwise update with new tokens
+        if request_complete == True:
+            self.all_tokens_processed = []
+        elif len(self.all_tokens_processed) == 0:
+            self.all_tokens_processed = speech_tokens
+        else:
+            self.all_tokens_processed = torch.cat([self.all_tokens_processed, speech_tokens], dim=-1)
+
+        if success == False:
+            raise ValueError("Failed chunk generation.")
+        return audio, request_complete
 
     def stop(self):
         """
@@ -181,9 +210,6 @@ class ChatterboxStreamer:
         self._running = False
         self.request_queue.put(None)
         self._tts_thread.join(timeout=1.0)
-
-    def available_samples(self) -> int:
-        return self.buffer.available_samples()
 
     def load_model(self):
         """Loads chatterbox model for tts generation"""
@@ -198,72 +224,65 @@ class ChatterboxStreamer:
 
 
 def main():
-    test_request = "Hi, I'm Delta's AI assistant! How can I help you today?"
+    request = "Active-duty U S military personnel get special baggage allowances with Delta. When traveling on orders or for personal travel, you’ll receive baggage fee exceptions and extra checked bag benefits. These allowances apply to all branches, including the Marine Corps, Army, Air Force, Space Force, Navy, and Coast Guard. There may be some regional weight or embargo restrictions. Would you like me to text you a link with the full details for military baggage policies?" 
 
+    # stream configs
     sample_rate = 24000
     frame_size = 210
     frame_duration = frame_size / sample_rate
     dtype = np.float32
 
+    # server configs
     HOST = "0.0.0.0"
     PORT = 9000
+
+    # Setup Server
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((HOST, PORT))
     server.listen(1)
+    print("waiting for connection...")
+    client, addr = server.accept()
+    print(f"client {addr} connected to port {PORT}\n")
 
-    while True:
-        print("waiting for connection...")
-        client, addr = server.accept()
-        print("client connected to server!\n")
-        
+    with client:
         # initializing and starting chatterbox stream
         stream = ChatterboxStreamer(
-            sample_rate = sample_rate,
-            fade_duration = 0.02,
+            sample_rate=sample_rate,
+            context_window=50,
             dtype=dtype
         )
         stream.start()
         
         # making test request
         start_time = time.time()
-        stream.make_request((test_request, start_time))
+        latency_to_first_chunk = None
+        stream.make_request(request)
         
+        while True:
+            chunk, request_complete = stream.process_queue()
 
-        client.sendall("Hello".encode())
-        client.close()
+            if latency_to_first_chunk is None:
+                latency_to_first_chunk = time.time() - start_time
+                print(f"Latency to first chunk: {latency_to_first_chunk}")
+            
+            # Turn the array into raw bytes
+            payload = chunk.tobytes(order="C")
 
-    streamer = ChatterboxStreamer(
-        sample_rate = sample_rate,
-        fade_duration = 0.02,
-        dtype=dtype
-    )
+            # 4 byte big-endian length header
+            header = struct.pack("!I", len(payload))
 
-    # # text = [
-    # #     "Active-duty U.S. military personnel get special baggage allowances with Delta. When traveling on orders or for personal travel, you’ll receive baggage fee exceptions and extra checked bag benefits. These allowances apply to all branches, including the Marine Corps, Army, Air Force, Space Force, Navy, and Coast Guard. There may be some regional weight or embargo restrictions. Would you like me to text you a link with the full details for military baggage policies?", 
-    # #     "Yes, there are specific restrictions for minors and unaccompanied minors traveling internationally with Delta Air Lines. For international travel, Delta requires that all passengers under the age of fifteen use the Unaccompanied Minor Service. This service provides supervision from boarding until the child is met at their destination."
-    # # ]
+            # loops internally until all data is sent
+            client.sendall(header + payload)
 
-
-
-    # audio = np.zeros(0, dtype=dtype)
-    # start_time = time.time()
-    # streamer.make_request((request, start_time))
-    # terminate = False
-
-    # while True:
-    #     frame, request_finished = streamer.get_frame(frame_size)
-    #     audio = np.concatenate([audio, frame])
-    #     time.sleep(frame_duration)
-
-    #     if request_finished: 
-    #         print(f"Total generation time: {time.time() - start_time}")
-    #         terminate = True
-        
-    #     if streamer.available_samples() == 0 and terminate:
-    #         break
-        
+            if request_complete:
+                print(f"Toal audio playtime: {len(audio) / sample_rate}")
+                print(f"Total generation time: {time.time() - start_time}")
+                break  
     
-    # print(f"Total audio play time: {time.time() - start_time}")
-    # sf.write("stream_snapshot.wav", audio, sample_rate)
+    stream.stop()
+    client.close()
+        
+    sf.write("stream_snapshot.wav", audio, sample_rate)
 
 if __name__ == "__main__":
     main()

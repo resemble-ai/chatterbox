@@ -307,16 +307,18 @@ class ChatterboxTTS:
             tokens_to_process = new_tokens
             context_length = 0
 
-        # Drop any invalid tokens and move to the correct device
-        speech_tokens = drop_invalid_tokens(tokens_to_process)
 
-        speech_tokens = speech_tokens[speech_tokens < 6561]
+        # Drop any invalid tokens and move to the correct device
+        # TODO -> Check if the next two lines of code are redundant, we may only need one
+        speech_tokens = tokens_to_process[tokens_to_process < 6561]
+
+        speech_tokens = drop_invalid_tokens(speech_tokens)
 
         speech_tokens = speech_tokens.to(self.device)
 
         # NOTE -> I believe this exists since we're not processing all speech tokens so we might recieve no speech tokens within the streaming process
         if len(speech_tokens) == 0:
-            return None, 0.0, False
+            return None, False
 
         # Run S3Gen inference to get a waveform (1 × T)
         wav, _ = self.s3gen.inference(
@@ -336,7 +338,7 @@ class ChatterboxTTS:
     
         # TODO -> This may also be necessary considering that we are processing chunks instead all speech tokens, however, it seems redundant due to the previous check at line 456.
         if len(audio_chunk) == 0:
-            return None, 0.0, False
+            return None, False
 
         # Apply a short linear fade-in on the new chunk to smooth boundaries
         # TODO -> change to cross fading as opposed to a simple fade in
@@ -355,13 +357,27 @@ class ChatterboxTTS:
         # NOTE -> Why convert back into a tensor? I'm removing this for now so that we can create a audio buffer that manages the audio as a numpy array.
         # audio_tensor = torch.from_numpy(watermarked_chunk).unsqueeze(0)
 
-        # Update first‐chunk latency metric
-        # if metrics.chunk_count == 0:
-        #     metrics.latency_to_first_chunk = time.time() - start_time
+        #return audio_chunk, audio_duration, True
+        return audio_chunk, True
 
-        # metrics.chunk_count += 1
-        return audio_chunk, audio_duration, True
+    def setup_stream(
+        self,
+        audio_prompt_path: Optional[str] = None,
+        exaggeration: float = 0.5
+    ):
+        if audio_prompt_path:
+            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
+        else:
+            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
+        # Update exaggeration if needed
+        if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
+            _cond: T3Cond = self.conds.t3
+            self.conds.t3 = T3Cond(
+                speaker_emb=_cond.speaker_emb,
+                cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
+                emotion_adv=exaggeration * torch.ones(1, 1, 1),
+            ).to(device=self.device)
 
 
     def generate_stream(
@@ -370,8 +386,6 @@ class ChatterboxTTS:
         repetition_penalty=1.2,
         min_p=0.05,
         top_p=1.0,
-        audio_prompt_path: Optional[str] = None,
-        exaggeration: float = 0.5,
         cfg_weight: float = 0.5,
         temperature: float = 0.8,
         chunk_size: int = 25,  # Tokens per chunk
@@ -394,34 +408,16 @@ class ChatterboxTTS:
             Tuple of (audio_chunk, metrics) where audio_chunk is a torch.Tensor
             and metrics contains timing information
         """
-        # start_time = time.time()
-        # metrics = StreamingMetrics()
-
-        # if audio_prompt_path:
-        #     self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
-        # else:
-        #     assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
-
-        # Update exaggeration if needed
-        if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
-            _cond: T3Cond = self.conds.t3
-            self.conds.t3 = T3Cond(
-                speaker_emb=_cond.speaker_emb,
-                cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
-                emotion_adv=exaggeration * torch.ones(1, 1, 1),
-            ).to(device=self.device)
-        
         # chunk text by sentence to avoid token limit
         sentences = re.split(r'(?<=[.!?])\s+', text)
         sentences = [s.strip() for s in sentences]
 
-        total_audio_length = 0.0
+        # total_audio_length = 0.0
     
         for s in sentences:
             # Norm and tokenize text
             sentence = punc_norm(s)
             text_tokens = self.tokenizer.text_to_tokens(sentence).to(self.device)
-
             
             # While cfg_weight is not essential to TTS generation it improves quality of the output and adherence to conditions. For the purposes of this repository we will require it to be set to a non-zero value.
             if not cfg_weight > 0.0:
@@ -433,7 +429,7 @@ class ChatterboxTTS:
             text_tokens = F.pad(text_tokens, (1, 0), value=sot)
             text_tokens = F.pad(text_tokens, (0, 1), value=eot)
 
-            all_tokens_processed = []  # Keep track of all tokens processed so far
+            # all_tokens_processed = []  # Keep track of all tokens processed so far
 
             with torch.inference_mode():
                 # Stream speech tokens
@@ -448,28 +444,25 @@ class ChatterboxTTS:
                     min_p=min_p,
                     top_p=top_p,
                 ):
+                    yield token_chunk
                     # Extract only the conditional batch
-                    token_chunk = token_chunk[0]
+                    # token_chunk = token_chunk[0]
 
-                    # Process each chunk immediately
-                    audio_tensor, audio_duration, success = self._process_token_buffer(
-                        [token_chunk], all_tokens_processed, context_window
-                    )
+                    # # Process each chunk immediately
+                    # audio_tensor, audio_duration, success = self._process_token_buffer(
+                    #     [token_chunk], all_tokens_processed, context_window
+                    # )
 
-                    if success:
-                        total_audio_length += audio_duration
-                        yield audio_tensor
+                    # if success:
+                    #     total_audio_length += audio_duration
+                    #     yield audio_tensor
 
-                    # Update all_tokens_processed with the new tokens
-                    # TODO -> all_tokens_processed
-                    if len(all_tokens_processed) == 0:
-                        all_tokens_processed = token_chunk
-                    else:
-                        all_tokens_processed = torch.cat([all_tokens_processed, token_chunk], dim=-1)
+                    # # Update all_tokens_processed with the new tokens
+                    # # TODO -> all_tokens_processed
+                    # if len(all_tokens_processed) == 0:
+                    #     all_tokens_processed = token_chunk
+                    # else:
+                    #     all_tokens_processed = torch.cat([all_tokens_processed, token_chunk], dim=-1)
 
-        # # Final metrics calculation
-        # metrics.total_generation_time = time.time() - start_time
-        # metrics.total_audio_duration = total_audio_length
-        # if total_audio_length > 0:
-        #     metrics.rtf = metrics.total_generation_time / total_audio_length
+        #print(f"Total audio duration: {total_audio_length}")
     
