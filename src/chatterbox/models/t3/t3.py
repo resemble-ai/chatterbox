@@ -12,6 +12,13 @@ from torch import nn, Tensor
 from transformers import LlamaModel, LlamaConfig
 from transformers.generation.logits_process import TopPLogitsWarper, RepetitionPenaltyLogitsProcessor, MinPLogitsWarper
 
+try:
+    import xformers
+    import xformers.ops
+    XFORMERS_AVAILABLE = True
+except ImportError:
+    XFORMERS_AVAILABLE = False
+
 from .modules.learned_pos_emb import LearnedPositionEmbeddings
 
 from .modules.cond_enc import T3CondEnc, T3Cond
@@ -47,6 +54,15 @@ class T3(nn.Module):
         super().__init__()
         self.hp = hp
         self.cfg = LlamaConfig(**LLAMA_CONFIGS[hp.llama_config_name])
+        
+        # Enable memory-efficient attention using SDPA (scaled_dot_product_attention)
+        # This will automatically use xFormers if available, otherwise fall back to PyTorch's native implementation
+        self.cfg.attn_implementation = "sdpa"
+        if XFORMERS_AVAILABLE:
+            logger.info("Using SDPA with xFormers backend")
+        else:
+            logger.info("Using SDPA with PyTorch native backend")
+        
         self.tfmr = LlamaModel(self.cfg)
         self.dim = self.cfg.hidden_size
         self.deepspeed_patch_applied = False

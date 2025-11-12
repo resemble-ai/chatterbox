@@ -151,17 +151,14 @@ def stream_tts(
 # --- Example Usage ---
 if __name__ == "__main__":
     text_input = """
-    في قديم الزمان، في قلب الصحراء العربية، كانت هناك قرية صغيرة لصيد السمك على شاطئ البحر، وكان اسمها دبي.
-    كان أهلها بسطاء ومجتهدين، يغوصون في أعماق البحر بحثًا عن اللؤلؤ الذي يلمع كالنجوم في الليل.
-    ومع مرور السنين، هبّت رياح التغيير على رمال الصحراء.
-    اكتُشف النفط، وبدأ معه حلم جديد — حلم ببناء مدينة لا تشبه أي مدينة في العالم.
+    Dubai is a city like no other, a shimmering jewel set between the golden sands of the Arabian Desert and the turquoise waves of the Persian Gulf, where the ancient rhythms of Bedouin life meet the pulse of twenty-first-century ambition. Once a modest fishing and pearl-diving village, Dubai has transformed within a single lifetime into a global symbol of innovation, wealth, and vision. Its story is not merely one of oil and opulence, but of determination, leadership, and imagination that dared to defy the limits of geography and expectation. When you first arrive, the skyline announces itself before anything else—towers of glass and steel reflecting the desert sun, each structure a statement of possibility. Rising above them all stands the Burj Khalifa, an engineering miracle that pierces the clouds at over eight hundred meters high, shimmering like a needle stitching the desert to the heavens. But Dubai’s spirit is not confined to its skyscrapers; it extends to the very ground beneath, where roads are lined with palm trees, fountains dance in synchronization with music, and the scent of oud and cardamom lingers in the air like a promise of something timeless.
     """
 
-    voice_clone_path = "Audio/WhatsApp Audio 2025-11-11 at 20.42.41.wav"
+    voice_clone_path = "Audio/PM Modi's speech at launch of Financing Facility under Agriculture Infrastructure Fund.wav"
 
     stream_tts(
         text=text_input,
         voice_path=voice_clone_path,
-        multilingual=True,
-        language_id="ar",
+        multilingual=False,
+        language_id="en",
     )
