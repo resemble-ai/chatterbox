@@ -288,7 +288,7 @@ class ChatterboxMultilingualTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
-        repetition_penalty=2.0,
+        repetition_penalty=1.2,
         min_p=0.05,
         top_p=1.0,
     ):
@@ -317,7 +317,9 @@ class ChatterboxMultilingualTTS:
         # Norm and tokenize text
         text = punc_norm(text)
         text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id.lower() if language_id else None).to(self.device)
-        text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
+
+        if cfg_weight > 0.0:
+            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
 
         sot = self.t3.hp.start_text_token
         eot = self.t3.hp.stop_text_token
@@ -328,7 +330,7 @@ class ChatterboxMultilingualTTS:
             speech_tokens = self.t3.inference(
                 t3_cond=self.conds.t3,
                 text_tokens=text_tokens,
-                max_new_tokens=1000,  # TODO: use the value in config
+                max_new_tokens=1000,  # Match TTS default
                 temperature=temperature,
                 cfg_weight=cfg_weight,
                 repetition_penalty=repetition_penalty,
@@ -342,6 +344,10 @@ class ChatterboxMultilingualTTS:
             speech_tokens = drop_invalid_tokens(speech_tokens)
             
             speech_tokens = speech_tokens[speech_tokens < 6561]
+            
+            # Discard first 2 and last 2 frames to remove potential noise artifacts
+            if len(speech_tokens) > 4:
+                speech_tokens = speech_tokens[2:-2]
 
             speech_tokens = speech_tokens.to(self.device)
 

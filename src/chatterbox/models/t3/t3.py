@@ -256,33 +256,29 @@ class T3(nn.Module):
         # with self.compile_lock:
         if not self.compiled:
             # Default to None for English models, only create for multilingual
-            alignment_stream_analyzer = None
-            if self.hp.is_multilingual:
-                alignment_stream_analyzer = AlignmentStreamAnalyzer(
-                    self.tfmr,
-                    None,
-                    text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
-                    alignment_layer_idx=9, # TODO: hparam or something?
-                    eos_idx=self.hp.stop_speech_token,
-                    debug=True,  # Enable alignment-based EOS forcing for multilingual
-                )
-                assert alignment_stream_analyzer.eos_idx == self.hp.stop_speech_token
+            # alignment_stream_analyzer = None
+            # if self.hp.is_multilingual:
+            #     alignment_stream_analyzer = AlignmentStreamAnalyzer(
+            #         self.tfmr,
+            #         None,
+            #         text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
+            #         alignment_layer_idx=9, # TODO: hparam or something?
+            #         eos_idx=self.hp.stop_speech_token,
+            #     )
+            #     assert alignment_stream_analyzer.eos_idx == self.hp.stop_speech_token
 
             patched_model = T3HuggingfaceBackend(
                 config=self.cfg,
                 llama=self.tfmr,
                 speech_enc=self.speech_emb,
                 speech_head=self.speech_head,
-                alignment_stream_analyzer=alignment_stream_analyzer,
+                # alignment_stream_analyzer=alignment_stream_analyzer,
             )
             self.patched_model = patched_model
             self.compiled = True
         else:
-            # Reset the alignment analyzer state for the new generation
-            if self.hp.is_multilingual and self.patched_model.alignment_stream_analyzer is not None:
-                self.patched_model.alignment_stream_analyzer.reset(
-                    text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1))
-                )
+            # Reset the internal state for the new generation
+            self.patched_model._added_cond = False
 
         # # Run normal generate method, which calls our custom extended methods
         # return self.patched_model.generate(
@@ -302,12 +298,14 @@ class T3(nn.Module):
         # )
 
         device = embeds.device
+        batch_size = embeds.size(0) // 2  # Actual batch size (embeds has CFG so it's doubled)
 
         bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=device)
+        bos_token = bos_token.repeat(batch_size, 1)  # Repeat for dynamic batch size
         bos_embed = self.speech_emb(bos_token)  # shape: (B, 1, embed_dim)
         bos_embed = bos_embed + self.speech_pos_emb.get_fixed_embedding(0)
 
-        # batch_size=2 for CFG
+        # Duplicate for CFG (batch_size * 2)
         bos_embed = torch.cat([bos_embed, bos_embed])
 
         # Combine condition and BOS token for the initial input
@@ -338,22 +336,30 @@ class T3(nn.Module):
         # ---- Generation Loop using kv_cache ----
         for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
             logits_step = output.logits[:, -1, :]                
-            # CFG combine  → (1, V)
-            cond   = logits_step[0:1, :]
-            uncond = logits_step[1:2, :]
+            # CFG combine  → (batch_size, V) - support dynamic batch size
+            cond   = logits_step[0:batch_size, :]
+            uncond = logits_step[batch_size:, :]
             cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
             logits = cond + cfg * (cond - uncond)
             
+            # Boost EOS token probability after generating sufficient tokens
+            # This helps prevent runaway generation without alignment stream analyzer
+            tokens_generated = len(predicted)
+            if tokens_generated > 30:  # Start encouraging EOS after 30 tokens (earlier than before)
+                eos_boost = min(5.0, (tokens_generated - 30) * 0.1)  # More aggressive boost
+                logits[:, self.hp.stop_speech_token] += eos_boost  # Apply to all batches
+            
             # Apply alignment stream analyzer integrity checks
-            if self.patched_model.alignment_stream_analyzer is not None:
-                if logits.dim() == 1:            # guard in case something upstream squeezed
-                    logits = logits.unsqueeze(0) # (1, V)
-                # Pass the last generated token for repetition tracking
-                last_token = generated_ids[0, -1].item() if len(generated_ids[0]) > 0 else None
-                logits = self.patched_model.alignment_stream_analyzer.step(logits, next_token=last_token)  # (1, V)
+            # Disabled for the EOS fix - alignment_stream_analyzer is set to None
+            # if self.patched_model.alignment_stream_analyzer is not None:
+            #     if logits.dim() == 1:            # guard in case something upstream squeezed
+            #         logits = logits.unsqueeze(0) # (1, V)
+            #     # Pass the last generated token for repetition tracking
+            #     last_token = generated_ids[0, -1].item() if len(generated_ids[0]) > 0 else None
+            #     logits = self.patched_model.alignment_stream_analyzer.step(logits, next_token=last_token)  # (1, V)
 
             # Apply repetition penalty
-            ids_for_proc = generated_ids[:1, ...]   # batch = 1
+            ids_for_proc = generated_ids[:batch_size, ...]   # Use dynamic batch size
             logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
             
             # Apply temperature scaling.
@@ -371,8 +377,8 @@ class T3(nn.Module):
             predicted.append(next_token)
             generated_ids = torch.cat([generated_ids, next_token], dim=1)
 
-            # Check for EOS token.
-            if next_token.view(-1) == self.hp.stop_speech_token:
+            # Check for EOS token (check if any batch element has EOS)
+            if (next_token == self.hp.stop_speech_token).any():
                 logger.info(f"✅ EOS token detected! Stopping generation at step {i+1}")
                 break
 
@@ -380,7 +386,7 @@ class T3(nn.Module):
             next_token_embed = self.speech_emb(next_token)
             next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
 
-            #  For CFG
+            # Duplicate for CFG
             next_token_embed = torch.cat([next_token_embed, next_token_embed])
 
             # Forward pass with only the new token and the cached past.

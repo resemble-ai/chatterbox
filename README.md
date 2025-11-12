@@ -56,6 +56,45 @@ pip install -e .
 ```
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
+## Installing Russian Text Stresser (Optional)
+
+For Russian language support with proper stress marking, you'll need to install the `russian-text-stresser` package. Since the original package may have compatibility issues with newer Python and PyTorch versions, follow these steps to install a modified version:
+
+```shell
+# Clone the repository
+git clone https://github.com/Vuizur/add-stress-to-epub.git
+cd add-stress-to-epub
+
+# Edit the pyproject.toml file to update dependencies for Python 3.12 and PyTorch 2.9+
+# You can use any text editor to modify the file
+# Update the following sections:
+# - Change python version requirement to: requires-python = ">=3.12"
+# - Update torch dependency to: torch>=2.9.0
+# - Update all other dependencies to their latest compatible versions
+
+# After editing pyproject.toml, install the package
+pip install -e .
+```
+
+### Example pyproject.toml modifications:
+
+Open `pyproject.toml` in the cloned `add-stress-to-epub` directory and update it with the latest dependencies:
+
+```toml
+[project]
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.9.0",
+    "numpy>=1.26.0",
+    "transformers>=4.40.0",
+    # Add other updated dependencies as needed
+]
+```
+
+After making these changes, save the file and run `pip install -e .` from within the `add-stress-to-epub` directory.
+
+**Note:** If you don't plan to use Russian language features, this installation is optional and the model will work without it.
+
 # Usage
 ```python
 import torchaudio as ta
