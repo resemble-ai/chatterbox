@@ -12,9 +12,9 @@ print(f"🚀 Running on device: {DEVICE}")
 # --- Custom T3 Model Configuration ---
 CUSTOM_T3_MODELS = {
     "Default": None,
-    "Czech (t3_cs)": "t3_cs",  # Path to your safetensors file
+    "Czech (t3_cs)": "C:/ChatterboxTraining/t3/t3_cs",  # Path to your safetensors file (no extension)
     # Add more custom models here:
-    # "Another Language": "path/to/model.safetensors",
+    # "Another Language": "C:/path/to/model",
 }
 
 # --- Global Model Initialization ---
@@ -177,19 +177,28 @@ def switch_t3_model(model_choice: str):
     custom_path = CUSTOM_T3_MODELS.get(model_choice)
     
     if custom_path:
-        # Check if path exists
-        if not os.path.exists(custom_path):
-            return f"❌ Error: Model path not found: {custom_path}"
+        # The path should point directly to the safetensors file
+        # Try with no extension first, then .safetensors
+        if not custom_path.endswith('.safetensors'):
+            safetensors_path = custom_path + '.safetensors' if os.path.exists(custom_path + '.safetensors') else custom_path
+        else:
+            safetensors_path = custom_path
+            
+        if not os.path.exists(safetensors_path):
+            return f"❌ Error: Model file not found: {safetensors_path}"
         
-        print(f"Loading custom T3 model from: {custom_path}")
+        print(f"Loading custom T3 model from: {safetensors_path}")
         try:
-            # Load the custom T3 state dict
-            t3_state = load_safetensors(custom_path, device="cpu")
+            # Load the custom T3 state dict (exactly like your friend's code)
+            t3_state = load_safetensors(safetensors_path, device="cpu")
             MODEL.t3.load_state_dict(t3_state)
             MODEL.t3.to(DEVICE).eval()
             print(f"✓ Loaded custom T3 model: {model_choice}")
-            return f"✓ Loaded: {model_choice}"
+            return f"✓ Loaded: {model_choice} from {safetensors_path}"
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Error details:\n{error_details}")
             return f"❌ Error loading model: {str(e)}"
     else:
         print("Reloading default T3 model...")
@@ -345,7 +354,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             
             **Custom T3 Models:**
             - Load your fine-tuned T3 models for new languages
-            - Place `.safetensors` files in the working directory
+            - Point directly to the `.safetensors` file (e.g., `C:/path/to/t3_cs` or `C:/path/to/t3_cs.safetensors`)
             - Switch between models without restarting
             
             **Voice Cloning:**
