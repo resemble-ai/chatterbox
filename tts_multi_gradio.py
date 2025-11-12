@@ -15,7 +15,7 @@ MAX_CHARS_PER_CHUNK = 400  # Adjust this based on testing
 # Custom Bark model configuration
 CUSTOM_BARK_MODELS = {
     "Default (suno/bark-small)": None,
-    "Fine-tuned": "C:/ChatterboxTraining/checkpoints/final_bark_model",
+    "czt3": "C:/ChatterboxTraining/t3",
     # Add more custom models here:
     # "My Voice Clone": "C:/path/to/another/model",
 }
@@ -228,7 +228,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 step=.05, 
                 label="CFG Weight / Pace",
                 info="Controls generation guidance",
-                value=0.5
+                value=0.3
             )
 
             # Advanced Options

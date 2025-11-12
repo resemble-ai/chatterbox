@@ -12,9 +12,9 @@ print(f"🚀 Running on device: {DEVICE}")
 # --- Custom T3 Model Configuration ---
 CUSTOM_T3_MODELS = {
     "Default": None,
-    "Czech (t3_cs)": "C:/ChatterboxTraining/t3/t3_cs",  # Path to your safetensors file (no extension)
+    "Czech (t3_cs)": "C:/ChatterboxTraining/t3/t3_cs.safetensors",  # FIXED: Full path with extension
     # Add more custom models here:
-    # "Another Language": "C:/path/to/model",
+    # "Another Language": "C:/path/to/model.safetensors",
 }
 
 # --- Global Model Initialization ---
@@ -115,7 +115,7 @@ LANGUAGE_CONFIG = {
     },
     "zh": {
         "audio": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/zh_f2.flac",
-        "text": "上个月，我们达到了一个新的里程碑. 我们的YouTube频道观看次数达到了二十亿次，这绝对令人难以置信。"
+        "text": "上个月,我们达到了一个新的里程碑. 我们的YouTube频道观看次数达到了二十亿次,这绝对令人难以置信。"
     },
 }
 
@@ -158,11 +158,33 @@ def get_or_load_model():
         print("Model not loaded, initializing...")
         try:
             MODEL = ChatterboxMultilingualTTS.from_pretrained(DEVICE)
-            if hasattr(MODEL, 'to') and str(MODEL.device) != DEVICE:
-                MODEL.to(DEVICE)
-            print(f"Model loaded successfully. Internal device: {getattr(MODEL, 'device', 'N/A')}")
+            # FIXED: Force model to device explicitly
+            if hasattr(MODEL, 'to'):
+                MODEL = MODEL.to(DEVICE)
+                print(f"✓ Model moved to {DEVICE}")
+            
+            # Also move submodules if they exist
+            if hasattr(MODEL, 't3') and hasattr(MODEL.t3, 'to'):
+                MODEL.t3 = MODEL.t3.to(DEVICE)
+            if hasattr(MODEL, 't2') and hasattr(MODEL.t2, 'to'):
+                MODEL.t2 = MODEL.t2.to(DEVICE)
+            if hasattr(MODEL, 't1') and hasattr(MODEL.t1, 'to'):
+                MODEL.t1 = MODEL.t1.to(DEVICE)
+                
+            print(f"✓ Model loaded successfully on {DEVICE}")
+            
+            # Print actual device locations for debugging
+            if hasattr(MODEL, 't3'):
+                try:
+                    t3_device = next(MODEL.t3.parameters()).device
+                    print(f"  T3 device: {t3_device}")
+                except:
+                    pass
+                    
         except Exception as e:
             print(f"Error loading model: {e}")
+            import traceback
+            traceback.print_exc()
             raise
     return MODEL
 
@@ -177,36 +199,43 @@ def switch_t3_model(model_choice: str):
     custom_path = CUSTOM_T3_MODELS.get(model_choice)
     
     if custom_path:
-        # The path should point directly to the safetensors file
-        # Try with no extension first, then .safetensors
-        if not custom_path.endswith('.safetensors'):
-            safetensors_path = custom_path + '.safetensors' if os.path.exists(custom_path + '.safetensors') else custom_path
-        else:
-            safetensors_path = custom_path
-            
-        if not os.path.exists(safetensors_path):
-            return f"❌ Error: Model file not found: {safetensors_path}"
+        # FIXED: Better path handling
+        if not os.path.exists(custom_path):
+            # Try adding .safetensors if not present
+            if not custom_path.endswith('.safetensors'):
+                alt_path = custom_path + '.safetensors'
+                if os.path.exists(alt_path):
+                    custom_path = alt_path
+                else:
+                    return f"❌ Error: Model file not found at {custom_path} or {alt_path}"
+            else:
+                return f"❌ Error: Model file not found: {custom_path}"
         
-        print(f"Loading custom T3 model from: {safetensors_path}")
+        print(f"Loading custom T3 model from: {custom_path}")
         try:
-            # Load the custom T3 state dict (exactly like your friend's code)
-            t3_state = load_safetensors(safetensors_path, device="cpu")
-            MODEL.t3.load_state_dict(t3_state)
+            # FIXED: Load directly to target device, not CPU first
+            t3_state = load_safetensors(custom_path, device=str(DEVICE))
+            MODEL.t3.load_state_dict(t3_state, strict=False)  # Added strict=False for safety
             MODEL.t3.to(DEVICE).eval()
-            print(f"✓ Loaded custom T3 model: {model_choice}")
-            return f"✓ Loaded: {model_choice} from {safetensors_path}"
+            
+            # Verify device
+            t3_device = next(MODEL.t3.parameters()).device
+            print(f"✓ Loaded custom T3 model: {model_choice} on {t3_device}")
+            return f"✓ Loaded: {model_choice}\n📍 Device: {t3_device}\n📁 From: {custom_path}"
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
             print(f"Error details:\n{error_details}")
-            return f"❌ Error loading model: {str(e)}"
+            return f"❌ Error loading model: {str(e)}\n\nFull traceback in console."
     else:
         print("Reloading default T3 model...")
         try:
             # Reload the entire model to get default T3
             MODEL = ChatterboxMultilingualTTS.from_pretrained(DEVICE)
+            MODEL = MODEL.to(DEVICE)
+            MODEL.t3.to(DEVICE).eval()
             print("✓ Loaded default T3 model")
-            return "✓ Loaded: Default T3 model"
+            return f"✓ Loaded: Default T3 model\n📍 Device: {DEVICE}"
         except Exception as e:
             return f"❌ Error loading model: {str(e)}"
 
@@ -248,6 +277,13 @@ def generate_tts_audio(
 
     print(f"Generating audio for text: '{text_input[:50]}...' in language: {language_id}")
     
+    # FIXED: Verify model is on correct device before generation
+    if hasattr(current_model, 't3'):
+        t3_device = next(current_model.t3.parameters()).device
+        print(f"  T3 currently on: {t3_device}")
+        if str(t3_device) != DEVICE and DEVICE == "cuda":
+            print(f"  ⚠️ WARNING: T3 is on {t3_device} but should be on {DEVICE}")
+    
     # Handle optional audio prompt
     chosen_prompt = audio_prompt_path_input or default_audio_for_ui(language_id)
 
@@ -268,7 +304,7 @@ def generate_tts_audio(
         **generate_kwargs
     )
     print("Audio generation complete.")
-    return (current_model.sr, wav.squeeze(0).numpy())
+    return (current_model.sr, wav.squeeze(0).cpu().numpy())  # FIXED: Added .cpu() before .numpy()
 
 
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
@@ -296,7 +332,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 label="Model Status",
                 value="Default model loaded",
                 interactive=False,
-                lines=1
+                lines=2
             )
             load_t3_btn = gr.Button("🔄 Load Selected T3 Model", variant="secondary", size="sm")
             
@@ -354,7 +390,8 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             
             **Custom T3 Models:**
             - Load your fine-tuned T3 models for new languages
-            - Point directly to the `.safetensors` file (e.g., `C:/path/to/t3_cs` or `C:/path/to/t3_cs.safetensors`)
+            - Use full path with `.safetensors` extension
+            - Example: `C:/ChatterboxTraining/t3/t3_cs.safetensors`
             - Switch between models without restarting
             
             **Voice Cloning:**
@@ -403,9 +440,16 @@ if __name__ == "__main__":
     print("🎙️  CHATTERBOX MULTILINGUAL TTS - CUSTOM T3 EDITION")
     print("="*60)
     print(f"Device: {DEVICE}")
+    if DEVICE == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA Version: {torch.version.cuda}")
     print(f"Available T3 models: {len(CUSTOM_T3_MODELS)}")
-    for model_name in CUSTOM_T3_MODELS.keys():
-        print(f"  - {model_name}")
+    for model_name, path in CUSTOM_T3_MODELS.items():
+        if path:
+            exists = "✓" if os.path.exists(path) or os.path.exists(path + ".safetensors") else "✗"
+            print(f"  {exists} {model_name}: {path}")
+        else:
+            print(f"  ✓ {model_name} (built-in)")
     print("="*60 + "\n")
     
     demo.queue(
