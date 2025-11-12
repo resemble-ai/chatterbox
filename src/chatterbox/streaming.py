@@ -1,10 +1,13 @@
+# metrics imports
+from dataclasses import dataclass
+import time
+from typing import Optional
+
 # streamer imports
 import queue
 import threading
-import soundfile as sf
 
 # tts generation imports
-import time
 import torch
 import numpy as np
 from chatterbox import ChatterboxTTS
@@ -12,6 +15,18 @@ from chatterbox import ChatterboxTTS
 # server imports
 import struct
 import socket
+
+@dataclass
+class StreamingMetrics:
+    """Metrics for streaming TTS generation"""
+    networking_cost: Optional[float] = None
+    text_processing_cost: Optional[float] = None
+    generation_cost: Optional[float] = None
+    speech_processing_cost: Optional[float] = None
+    total_time: Optional[float] = None
+    total_audio_duration: Optional[float] = None
+    rtf: Optional[float] = None
+    total_chunks = 0
 
 class AudioBuffer:
     def __init__(
@@ -102,19 +117,20 @@ class ChatterboxStreamer:
         self, 
         sample_rate: int = 24000,
         context_window: int = 50,
-        dtype = np.float32
+        dtype = np.float32,
+        metrics = None
     ):
         self._model = self.load_model()
         self.sr = sample_rate
         self.dtype = np.float32
-
         self.context_window = context_window
+
+        self.metrics = metrics
 
         self.request_queue = queue.Queue()
         self.audio_queue = queue.Queue(maxsize=10)
-        self.all_tokens_processed = []
 
-        # Creates tts generation thread and starts
+        # Creates tts generator thread
         self._running = False
         self._tts_thread = threading.Thread(
             target=self._tts_loop, daemon=True
@@ -130,7 +146,7 @@ class ChatterboxStreamer:
 
     def _tts_loop(self):
         while self._running:
-            # retrieve request
+            # Block for next request instead of polling
             text = self.request_queue.get()
 
             # check for shutdown signal
@@ -138,7 +154,7 @@ class ChatterboxStreamer:
                 break
         
             # Perform tts generation
-            for chunk in self._model.generate_stream(text=text):
+            for chunk in self._model.generate_stream(text=text, metrics=self.metrics):
                 # Terminates if thread is stopped
                 if not self._running:
                     break
@@ -146,6 +162,7 @@ class ChatterboxStreamer:
                 # Blocks if audio queue is full
                 self.audio_queue.put(chunk)
             
+            # singal end-of-request
             self.audio_queue.put(self._EOS)
     
     def make_request(self, request):
@@ -153,55 +170,18 @@ class ChatterboxStreamer:
         Makes requests for tts audio generation.
         """
         self.request_queue.put(request)
-
-    def process_queue(self):
+    
+    def get_frame(self) -> np.ndarray:
         """
-        Drain queue and process all chunks.
+        Called from audio streaming side.
         """
+        # Grabs chunk from queue (blocks until data arrives)
+        chunk = self.audio_queue.get()
 
-        request_complete = False
+        if chunk is self._EOS:
+            return None, True
 
-        speech_tokens: List[torch.Tensor] = []
-
-        while self.audio_queue.empty():
-            time.sleep(0.1)
-
-        while True:
-            try:
-                token = self.audio_queue.get_nowait() # chunk: List[torch.Tensor]
-            except queue.Empty:
-                break
-                
-            if token is self._EOS:
-                # TODO Add end of utterance logic here
-                request_complete = True
-                break
-            
-            speech_tokens.append(token)
-        
-        
-        with torch.no_grad():
-            speech_tokens = torch.cat(speech_tokens, dim=1)    
-        
-        # Extract only the conditional batch
-        speech_tokens = speech_tokens[0]
-
-        # Process each chunk immediately
-        audio, success = self._model._process_token_buffer(
-            [speech_tokens], self.all_tokens_processed, self.context_window
-        )
-
-        # Reset all_tokens_processed if request complete, otherwise update with new tokens
-        if request_complete == True:
-            self.all_tokens_processed = []
-        elif len(self.all_tokens_processed) == 0:
-            self.all_tokens_processed = speech_tokens
-        else:
-            self.all_tokens_processed = torch.cat([self.all_tokens_processed, speech_tokens], dim=-1)
-
-        if success == False:
-            raise ValueError("Failed chunk generation.")
-        return audio, request_complete
+        return chunk, False
 
     def stop(self):
         """
@@ -232,12 +212,11 @@ def main():
     frame_duration = frame_size / sample_rate
     dtype = np.float32
 
-    # server configs
+    # Setup Server
     HOST = "0.0.0.0"
     PORT = 9000
-
-    # Setup Server
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     server.bind((HOST, PORT))
     server.listen(1)
     print("waiting for connection...")
@@ -245,44 +224,70 @@ def main():
     print(f"client {addr} connected to port {PORT}\n")
 
     with client:
+        # Setup metrics
+        metrics = StreamingMetrics()
+
         # initializing and starting chatterbox stream
         stream = ChatterboxStreamer(
             sample_rate=sample_rate,
             context_window=50,
-            dtype=dtype
+            dtype=dtype,
+            metrics=metrics
         )
         stream.start()
-        
-        # making test request
+
+        # Setup main thread metrics
+        metrics.networking_cost = 0.0
+        metrics.total_audio_duration = 0.0
+        ref_time = time.time()
+
+        # make stream request
+        client.send("START".encode())
         start_time = time.time()
-        latency_to_first_chunk = None
         stream.make_request(request)
         
         while True:
-            chunk, request_complete = stream.process_queue()
+            # update networking cost metrics
+            metrics.networking_cost += time.time() - ref_time
 
-            if latency_to_first_chunk is None:
-                latency_to_first_chunk = time.time() - start_time
-                print(f"Latency to first chunk: {latency_to_first_chunk}")
+            # BLOCKS when no available chunks
+            chunk, request_complete = stream.get_frame()
             
-            # Turn the array into raw bytes
+            # Signal to terminate thread and close socket
+            if chunk is None:
+                time.sleep(5.0) # wait for audio to finish streaming
+                break
+
+            # set ref time for networking cost calculation
+            ref_time = time.time()
+
+            # Update total audio duration with duration of curr chunk
+            metrics.total_audio_duration += len(chunk) / sample_rate
+            
+            # Package and send all data
             payload = chunk.tobytes(order="C")
-
-            # 4 byte big-endian length header
             header = struct.pack("!I", len(payload))
-
-            # loops internally until all data is sent
             client.sendall(header + payload)
 
-            if request_complete:
-                print(f"Toal audio playtime: {len(audio) / sample_rate}")
-                print(f"Total generation time: {time.time() - start_time}")
-                break  
-    
+        
+        print("\nPROCESS SPECIFIC TIME COSTS")
+        print(f"Networking: {metrics.networking_cost}")
+        print(f"Text Processing: {metrics.text_processing_cost}")
+        print(f"Token Generation: {metrics.generation_cost}")
+        print(f"Speech Processing: {metrics.speech_processing_cost}")
+
+        print("\nPER CHUNK TIME COSTS")
+        print(f"Generation Cost Per Chunk: {metrics.generation_cost / metrics.total_chunks}")
+        print(f"Processing Cost Per Chunk: {metrics.speech_processing_cost / metrics.total_chunks}")
+        
+        print("\nTOTAL TIME COSTS")
+        total_time = metrics.networking_cost + metrics.text_processing_cost + metrics.generation_cost + metrics.speech_processing_cost
+        print(f"Calculated Total Time: {total_time}")
+        print(f"Actual Total Time: {time.time() - start_time - 5.0}")
+        print(f"Total Audio Duration: {metrics.total_audio_duration}")
+        print(f"RTF: {total_time / metrics.total_audio_duration}")
     stream.stop()
     client.close()
-        
-    sf.write("stream_snapshot.wav", audio, sample_rate)
 
 if __name__ == "__main__":
     main()

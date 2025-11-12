@@ -22,6 +22,7 @@ from .inference.alignment_stream_analyzer import AlignmentStreamAnalyzer
 from ..utils import AttrDict
 
 from typing import Generator, Tuple, Optional
+import time
 
 
 logger = logging.getLogger(__name__)
@@ -400,8 +401,6 @@ class T3(nn.Module):
         *,
         t3_cond: T3Cond,
         text_tokens: torch.Tensor,
-        # initial_speech_tokens: Optional[Tensor]=None, NOTE -> Removing input since it is not implemented
-
         # misc conditioning
         # prepend_prompt_speech_tokens: Optional[Tensor]=None,  NOTE -> Removing input since it doesn't seem to be implemented
 
@@ -436,6 +435,8 @@ class T3(nn.Module):
             speech_tokens=initial_speech_tokens,
             cfg_weight=cfg_weight
         )
+
+        self.compiled = False
 
         # Setup model if not compiled
         if not self.compiled:
@@ -477,7 +478,6 @@ class T3(nn.Module):
 
         # Track generated token ids; start with the BOS token
         generated_ids = bos_token.clone()
-        predicted = [] # To store the predicted tokens
         chunk_buffer = [] # to store chunk tokens
 
         # Instantiate logits processors
@@ -508,14 +508,7 @@ class T3(nn.Module):
             cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
             logits = cond + cfg * (cond - uncond)
 
-            # Apply alignment stream analyzer integrity checks
-            # NOTE -> Alignment stream analyzer shouldn't be initialized we're not using multilingual capabilities.
-            # if self.patched_model.alignment_stream_analyzer is not None:
-            #     if logits.dim() == 1:            # guard in case something upstream squeezed
-            #         logits = logits.unsqueeze(0) # (1, V)
-            #     # Pass the last generated token for repetition tracking
-            #     last_token = generated_ids[0, -1].item() if len(generated_ids[0]) > 0 else None
-            #     logits = self.patched_model.alignment_stream_analyzer.step(logits, next_token=last_token)  # (1, V)
+            # NOTE -> Removed alignment_stream_analyzer logic, since it is ommited for english models. 
 
             # Apply repetition penalty
             ids_for_proc = generated_ids[:1, ...]   # batch = 1
@@ -533,23 +526,19 @@ class T3(nn.Module):
             probs = torch.softmax(logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1) # shape: (B, 1)
 
-            predicted.append(next_token)
-            #chunk_buffer.append(next_token)
-            yield next_token 
+            chunk_buffer.append(next_token)
             generated_ids = torch.cat([generated_ids, next_token], dim=1)
-
             # Check for EOS token
             if next_token.view(-1) == self.hp.stop_speech_token:
                 # Yield final chunk if buffer has tokens
-                # if chunk_buffer:
-                #     #yield torch.cat(chunk_buffer, dim=1)
+                if chunk_buffer:
+                    yield torch.cat(chunk_buffer, dim=1)
                 break
 
-            # # Yield chunk when buffer is full
-            # if len(chunk_buffer) >= chunk_size:
-            #     #yield torch.cat(chunk_buffer, dim=1)
-            #     yield chunk_buffer
-            #     chunk_buffer = []
+            # Yield chunk when buffer is full
+            if len(chunk_buffer) >= chunk_size:
+                yield torch.cat(chunk_buffer, dim=1)
+                chunk_buffer = []
 
             # Get embedding for the new token
             next_token_embed = self.speech_emb(next_token)
@@ -570,3 +559,4 @@ class T3(nn.Module):
             # Update the kv_cache.
             past = output.past_key_values
 
+        
