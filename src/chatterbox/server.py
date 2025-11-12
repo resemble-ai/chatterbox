@@ -6,6 +6,7 @@ from typing import Optional
 # streamer imports
 import queue
 import threading
+from multiprocessing import process
 
 # tts generation imports
 import torch
