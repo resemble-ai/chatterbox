@@ -132,7 +132,15 @@ class ChatterboxTTS:
         self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
-    def from_local(cls, ckpt_dir, device, use_bnb_quantization=False) -> 'ChatterboxTTS':
+    def from_local(cls, ckpt_dir, device, use_bnb_quantization=False, quantization_bits=8) -> 'ChatterboxTTS':
+        """Load model from local checkpoint directory.
+        
+        Args:
+            ckpt_dir: Path to checkpoint directory
+            device: Device to load model on
+            use_bnb_quantization: Whether to use BNB quantization
+            quantization_bits: Quantization bits, either 4 or 8 (default: 8)
+        """
         ckpt_dir = Path(ckpt_dir)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
@@ -148,6 +156,13 @@ class ChatterboxTTS:
                     "bitsandbytes is not installed. Please install it with: pip install bitsandbytes"
                 )
             if device not in ["cuda"]:
+                raise ValueError(
+                    f"BNB quantization is only supported on CUDA devices, but got device: {device}"
+                )
+            if quantization_bits not in [4, 8]:
+                raise ValueError(
+                    f"quantization_bits must be either 4 or 8, but got: {quantization_bits}"
+                )
                 raise ValueError(
                     f"BNB quantization is only supported on CUDA devices, but got device: {device}"
                 )
@@ -168,7 +183,7 @@ class ChatterboxTTS:
         
         # Apply BNB quantization if requested
         if use_bnb_quantization:
-            t3 = cls._quantize_model_bnb(t3)
+            t3 = cls._quantize_model_bnb(t3, bits=quantization_bits)
         
         t3.to(device).eval()
 
@@ -189,33 +204,64 @@ class ChatterboxTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @staticmethod
-    def _quantize_model_bnb(model):
-        """Apply BNB 8-bit quantization to Linear layers in the model."""
+    def _quantize_model_bnb(model, bits=8):
+        """Apply BNB quantization to Linear layers in the model.
+        
+        Args:
+            model: The model to quantize
+            bits: Quantization bits, either 4 or 8 (default: 8)
+        """
         for name, module in model.named_children():
             if isinstance(module, torch.nn.Linear):
-                # Replace Linear layer with quantized version
-                layer = bnb.nn.Linear8bitLt(
-                    module.in_features,
-                    module.out_features,
-                    bias=module.bias is not None,
-                    has_fp16_weights=False,
-                )
-                # Copy weights
-                layer.weight = bnb.nn.Int8Params(
-                    module.weight.data,
-                    requires_grad=False,
-                    has_fp16_weights=False,
-                )
+                if bits == 4:
+                    # Replace Linear layer with 4-bit quantized version
+                    layer = bnb.nn.Linear4bit(
+                        module.in_features,
+                        module.out_features,
+                        bias=module.bias is not None,
+                        compute_dtype=torch.float16,
+                        compress_statistics=True,
+                        quant_type='nf4'
+                    )
+                    # Copy weights
+                    layer.weight = bnb.nn.Params4bit(
+                        module.weight.data,
+                        requires_grad=False,
+                        compress_statistics=True,
+                        quant_type='nf4'
+                    )
+                else:  # 8-bit
+                    # Replace Linear layer with 8-bit quantized version
+                    layer = bnb.nn.Linear8bitLt(
+                        module.in_features,
+                        module.out_features,
+                        bias=module.bias is not None,
+                        has_fp16_weights=False,
+                    )
+                    # Copy weights
+                    layer.weight = bnb.nn.Int8Params(
+                        module.weight.data,
+                        requires_grad=False,
+                        has_fp16_weights=False,
+                    )
+                
                 if module.bias is not None:
                     layer.bias = module.bias
                 setattr(model, name, layer)
             elif len(list(module.children())) > 0:
                 # Recursively quantize child modules
-                setattr(model, name, ChatterboxTTS._quantize_model_bnb(module))
+                setattr(model, name, ChatterboxTTS._quantize_model_bnb(module, bits))
         return model
 
     @classmethod
-    def from_pretrained(cls, device, use_bnb_quantization=False) -> 'ChatterboxTTS':
+    def from_pretrained(cls, device, use_bnb_quantization=False, quantization_bits=8) -> 'ChatterboxTTS':
+        """Load model from HuggingFace Hub.
+        
+        Args:
+            device: Device to load model on
+            use_bnb_quantization: Whether to use BNB quantization
+            quantization_bits: Quantization bits, either 4 or 8 (default: 8)
+        """
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -227,7 +273,7 @@ class ChatterboxTTS:
         for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 
-        return cls.from_local(Path(local_path).parent, device, use_bnb_quantization=use_bnb_quantization)
+        return cls.from_local(Path(local_path).parent, device, use_bnb_quantization=use_bnb_quantization, quantization_bits=quantization_bits)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav

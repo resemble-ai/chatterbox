@@ -43,7 +43,7 @@ model = ChatterboxTTS.from_pretrained(device=device, use_bnb_quantization=True)
 print("✅ ChatterboxTTS loaded successfully")
 
 print("\n🔧 Loading ChatterboxMultilingualTTS with BNB quantization...")
-multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device, use_bnb_quantization=True)
+#multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device, use_bnb_quantization=True)
 print("✅ ChatterboxMultilingualTTS loaded successfully")
 
 def save_wav(path, wav, sr):
@@ -82,8 +82,8 @@ print("✅ Saved to test-quantized-1.wav")
 # Generate multilingual speech (French)
 print("\n🎙️ Generating French speech...")
 text = "Bonjour, comment ça va? Ceci est le modèle de synthèse vocale multilingue Chatterbox, il prend en charge 23 langues."
-wav = multilingual_model.generate(text, language_id="fr")
-save_wav("test-quantized-2.wav", wav, multilingual_model.sr)
+#wav = multilingual_model.generate(text, language_id="fr")
+#save_wav("test-quantized-2.wav", wav, multilingual_model.sr)
 print("✅ Saved to test-quantized-2.wav")
 
 # If you want to synthesize with a different voice, specify the audio prompt
