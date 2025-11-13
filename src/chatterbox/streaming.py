@@ -6,34 +6,18 @@ from typing import Optional
 # streamer imports
 import queue
 import threading
-import multiprocessing
 
-
-# audio imports
+# tts generation imports
 import torch
 import numpy as np
 from chatterbox import ChatterboxTTS
-from pathlib import Path
 
 # server imports
 import struct
 import socket
 
-SAMPLE_RATE = 24000
-
-FADE_DURATION = 0.001
-CONTEXT_WINDOW = 50
-
-EXAGGERATION = 0.5
-CFG_WEIGHT = 0.5
-TEMPERATURE = 0.8
-CHUNK_SIZE = 50
-
-HOST = "0.0.0.0"
-PORT = 9000
-
 @dataclass
-class Metrics:
+class StreamingMetrics:
     """Metrics for streaming TTS generation"""
     networking_cost: Optional[float] = None
     text_processing_cost: Optional[float] = None
@@ -51,17 +35,16 @@ class AudioBuffer:
         sample_rate: int,
         dtype=np.float32
     ):
-        self.buffer = np.zeros(0, dtype=dtype)
+        self.fade_duration = fade_duration
         self.sample_rate = sample_rate
-        self.fade_samples = int(round(fade_duration * self.sample_rate))
+        self.fade_samples = int(round(self.fade_duration * self.sample_rate))
+        if self.fade_samples == 0:
+            raise ValueError("fade_samples must be > 0")
         self.dtype = dtype
-        self.lock = threading.Lock()
+        self.buffer = np.zeros(0, dtype=dtype)
 
     
     def add_chunk(self, chunk: np.ndarray):
-        """
-        Adds processed chunks to 
-        """
         # No previous audio in buffer
         if self.buffer.size == 0:
             self.buffer = chunk.copy()
@@ -219,48 +202,19 @@ class ChatterboxStreamer:
         
         return model
 
-def generate_chunks(
-    request_queue: queue.Queue, 
-    chunk_queue: queue.Queue
-):
-    # Load chatterbox model and perform setup
-    model = ChatterboxTTS.from_pretrained(device = "cuda")
-    prompt_file_name = "1_0.5_1.0_0.5_True_0.9.wav"
-    prompt_path = Path(__file__).resolve().parents[4] / f"inputs/audio_prompts/{prompt_file_name}"
-    model.setup_stream(audio_prompt_path=prompt_path, exaggeration=EXAGGERATION, fade_duration=FADE_DURATION)
 
-    while True:
-        # BLOCKS until request is available
-        request = request_queue.get()
+def main():
+    request = "Active-duty U S military personnel get special baggage allowances with Delta. When traveling on orders or for personal travel, you’ll receive baggage fee exceptions and extra checked bag benefits. These allowances apply to all branches, including the Marine Corps, Army, Air Force, Space Force, Navy, and Coast Guard. There may be some regional weight or embargo restrictions. Would you like me to text you a link with the full details for military baggage policies?" 
 
-        start_time = time.time()
-
-        # Checks for shutdown signal
-        if request is None:
-            break
-
-        # Perform tts generation
-        for chunk in model.generate_stream(
-            text=request,
-            cfg_weight=CFG_WEIGHT,
-            temperature=TEMPERATURE,
-            chunk_size = CHUNK_SIZE,
-        ):
-            # Blocks if audio queue is full
-            chunk_queue.put(chunk)
-        
-        # Puts end-of-request signal onto chunk
-        print(f"Generation Time Cost: {time.time() - start_time}")
-        chunk_queue.put(None)
-
-def process_chunks(chunk_queue: queue.Queue):
-    # Load chatterbox model and perform setup
-    model = ChatterboxTTS.from_pretrained(device = "cuda")
-    prompt_file_name = "1_0.5_1.0_0.5_True_0.9.wav"
-    prompt_path = Path(__file__).resolve().parents[4] / f"inputs/audio_prompts/{prompt_file_name}"
-    model.setup_stream(audio_prompt_path=prompt_path, exaggeration=EXAGGERATION, fade_duration=FADE_DURATION)
+    # stream configs
+    sample_rate = 24000
+    frame_size = 210
+    frame_duration = frame_size / sample_rate
+    dtype = np.float32
 
     # Setup Server
+    HOST = "0.0.0.0"
+    PORT = 9000
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     server.bind((HOST, PORT))
@@ -269,75 +223,71 @@ def process_chunks(chunk_queue: queue.Queue):
     client, addr = server.accept()
     print(f"client {addr} connected to port {PORT}\n")
 
-    all_tokens_processed = []
+    with client:
+        # Setup metrics
+        metrics = StreamingMetrics()
 
-    prev_tail = None
-
-    while True:
-        # TODO -> if processing time is slow enough maybe we could process multiple chunks together if there are multiple in the queue
-        token_chunk = chunk_queue.get()
-
-        # Check for end-of-request signal
-        if token_chunk is None:
-            # TODO end-of-request logic
-            all_tokens_passed = []
-            prev_tail = None
-            break
-
-        # Extract only the conditional batch
-        token_chunk = token_chunk[0]
-
-        # Process each chunk immediately
-        # TODO switch to saving only the previous chunk, to cut down on torch cat operations
-        audio_chunk, tail, success = model._process_token_buffer(
-            token_buffer=[token_chunk],
-            all_tokens_so_far=all_tokens_processed, 
-            context_window=CONTEXT_WINDOW,
-            prev_tail=prev_tail
+        # initializing and starting chatterbox stream
+        stream = ChatterboxStreamer(
+            sample_rate=sample_rate,
+            context_window=50,
+            dtype=dtype,
+            metrics=metrics
         )
+        stream.start()
 
-        if success:
-            prev_tail = tail
+        # Setup main thread metrics
+        metrics.networking_cost = 0.0
+        metrics.total_audio_duration = 0.0
+        ref_time = time.time()
 
-            # Package and send audio chunk
-            payload = audio_chunk.tobytes()
+        # make stream request
+        client.send("START".encode())
+        start_time = time.time()
+        stream.make_request(request)
+        
+        while True:
+            # update networking cost metrics
+            metrics.networking_cost += time.time() - ref_time
+
+            # BLOCKS when no available chunks
+            chunk, request_complete = stream.get_frame()
+            
+            # Signal to terminate thread and close socket
+            if chunk is None:
+                time.sleep(5.0) # wait for audio to finish streaming
+                break
+
+            # set ref time for networking cost calculation
+            ref_time = time.time()
+
+            # Update total audio duration with duration of curr chunk
+            metrics.total_audio_duration += len(chunk) / sample_rate
+            
+            # Package and send all data
+            payload = chunk.tobytes(order="C")
             header = struct.pack("!I", len(payload))
             client.sendall(header + payload)
 
-        # Update all_tokens_processed with the new tokens
-        # TODO switch to saving only the previous chunk, to cut down on torch cat operations 
-        # TODO also check that that this shouldn't only be applied when processing is a sucess
-        if len(all_tokens_processed) == 0:
-            all_tokens_processed = token_chunk
-        else:
-            all_tokens_processed = torch.cat([all_tokens_processed, token_chunk], dim=-1)
+        
+        print("\nPROCESS SPECIFIC TIME COSTS")
+        print(f"Networking: {metrics.networking_cost}")
+        print(f"Text Processing: {metrics.text_processing_cost}")
+        print(f"Token Generation: {metrics.generation_cost}")
+        print(f"Speech Processing: {metrics.speech_processing_cost}")
 
-    client.close
-
-
-
-def main():
-    request = "Active-duty U S military personnel get special baggage allowances with Delta. When traveling on orders or for personal travel, you’ll receive baggage fee exceptions and extra checked bag benefits. These allowances apply to all branches, including the Marine Corps, Army, Air Force, Space Force, Navy, and Coast Guard. There may be some regional weight or embargo restrictions. Would you like me to text you a link with the full details for military baggage policies?" 
-
-
-    request_queue = multiprocessing.Queue()
-    chunk_queue = multiprocessing.Queue()
-
-    generation = torch.multiprocessing.Process(target=generate_chunks, args=(request_queue, chunk_queue))
-    processing = torch.multiprocessing.Process(target=process_chunks, args=(chunk_queue,))
-
-    generation.start()
-    processing.start()
-
-    # make stream request
-    request_queue.put(request)
-
-    # terminate stream
-    request_queue.put(None)
-
-    generation.join()
-    processing.join()
+        print("\nPER CHUNK TIME COSTS")
+        print(f"Generation Cost Per Chunk: {metrics.generation_cost / metrics.total_chunks}")
+        print(f"Processing Cost Per Chunk: {metrics.speech_processing_cost / metrics.total_chunks}")
+        
+        print("\nTOTAL TIME COSTS")
+        total_time = metrics.networking_cost + metrics.text_processing_cost + metrics.generation_cost + metrics.speech_processing_cost
+        print(f"Calculated Total Time: {total_time}")
+        print(f"Actual Total Time: {time.time() - start_time - 5.0}")
+        print(f"Total Audio Duration: {metrics.total_audio_duration}")
+        print(f"RTF: {total_time / metrics.total_audio_duration}")
+    stream.stop()
+    client.close()
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method('spawn', force=True)
     main()
