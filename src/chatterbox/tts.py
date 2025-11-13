@@ -143,11 +143,6 @@ class ChatterboxTTS:
         self.conds = conds
         self.watermarker = perth.PerthImplicitWatermarker()
 
-        # Added
-        self.fade_samples = None
-        self.fade_in = None
-        self.fade_out = None
-
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
@@ -299,7 +294,6 @@ class ChatterboxTTS:
         token_buffer,
         all_tokens_so_far,
         context_window,
-        prev_tail
     ):
         # Combine buffered chunks of tokens
         # TODO -> This is most likely redundant
@@ -344,21 +338,8 @@ class ChatterboxTTS:
         if len(audio_chunk) == 0:
             return None, False
         
-
-        # Apply cross fading to chunk on the new chunk to smooth boundaries
-        if self.fade_samples > int(len(audio_chunk)/2):
-            raise ValueError("Fade samples to large")
-
-        audio_chunk, tail = np.split(audio_chunk, [-self.fade_samples]) # split tail from chunk
-
-        if prev_tail:
-            # Cross fade previous chunk tail and new chunk head
-            head = audio_chunk[:self.fade_samples]
-            fade_chunk = prev_tail * fade_out + head * fade_in
-            audio_chunk = np.concatenate([fade_chunk, audio_chunk[self.fade_samples:]])
-
         # TODO -> Currently the tail of the last chunk will not be sent, add logic to send tail when last chunk (chunk_size)
-        return audio_chunk, tail, True
+        return audio_chunk, True
 
     def setup_stream(
         self,
@@ -379,11 +360,6 @@ class ChatterboxTTS:
                 cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
-
-        self.fade_samples = int(fade_duration * self.sr)
-        self.fade_out = np.linspace(1.0, 0, self.fade_samples, endpoint=True, dtype=np.float32)
-        self.fade_in = 1.0 - self.fade_samples
-
 
     def generate_stream(
         self,
