@@ -24,5 +24,7 @@ wav = model.generate(
     audio_prompt_path=AUDIO_PROMPT_PATH,
     exaggeration=2.0,
     cfg_weight=0.5
+    ,
+    diffusion_steps=12
     )
 ta.save("test-2.wav", wav, model.sr)

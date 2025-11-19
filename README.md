@@ -34,6 +34,7 @@ Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • 
   - Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip’s language. To mitigate this, set `cfg_weight` to `0`.
   - The default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts across all languages.
   - If the reference speaker has a fast speaking style, lowering `cfg_weight` to around `0.3` can improve pacing.
+  - Tune `diffusion_steps` (default `10`) to balance latency and fidelity. More steps typically improve detail at the cost of slower inference; fewer steps speed things up for streaming.
 
 - **Expressive or Dramatic Speech:**
   - Try lower `cfg_weight` values (e.g. `~0.3`) and increase `exaggeration` to around `0.7` or higher.
@@ -41,20 +42,78 @@ Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • 
 
 
 # Installation
-```shell
-pip install chatterbox-tts
-```
 
-Alternatively, you can install from source:
-```shell
-# conda create -yn chatterbox python=3.11
-# conda activate chatterbox
+### Basic Installation
 
-git clone https://github.com/resemble-ai/chatterbox.git
+```bash
+git clone https://github.com/prathamesh-chavan-22/chatterbox.git
 cd chatterbox
 pip install -e .
 ```
+
+### Optional Features
+
+Install with specific features:
+
+```bash
+# With quantization support (4-bit/8-bit)
+pip install -e ".[quantization]"
+
+# With performance optimizations (xFormers)
+pip install -e ".[performance]"
+
+# With streaming support
+pip install -e ".[streaming]"
+
+# Install everything
+pip install -e ".[all]"
+```
+
+### Requirements
+
+- Python >= 3.10
+- PyTorch >= 2.0.0
+- CUDA-compatible GPU (recommended for best performance)
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
+
+## Installing Russian Text Stresser (Optional)
+
+For Russian language support with proper stress marking, you'll need to install the `russian-text-stresser` package. Since the original package may have compatibility issues with newer Python and PyTorch versions, follow these steps to install a modified version:
+
+```shell
+# Clone the repository
+git clone https://github.com/Vuizur/add-stress-to-epub.git
+cd add-stress-to-epub
+
+# Edit the pyproject.toml file to update dependencies for Python 3.12 and PyTorch 2.9+
+# You can use any text editor to modify the file
+# Update the following sections:
+# - Change python version requirement to: requires-python = ">=3.12"
+# - Update torch dependency to: torch>=2.9.0
+# - Update all other dependencies to their latest compatible versions
+
+# After editing pyproject.toml, install the package
+pip install -e .
+```
+
+### Example pyproject.toml modifications:
+
+Open `pyproject.toml` in the cloned `add-stress-to-epub` directory and update it with the latest dependencies:
+
+```toml
+[project]
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.9.0",
+    "numpy>=1.26.0",
+    "transformers>=4.40.0",
+    # Add other updated dependencies as needed
+]
+```
+
+After making these changes, save the file and run `pip install -e .` from within the `add-stress-to-epub` directory.
+
+**Note:** If you don't plan to use Russian language features, this installation is optional and the model will work without it.
 
 # Usage
 ```python
@@ -67,6 +126,8 @@ model = ChatterboxTTS.from_pretrained(device="cuda")
 
 text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill."
 wav = model.generate(text)
+# Increase diffusion_steps for higher fidelity (slower/denser generation):
+wav_hq = model.generate(text, diffusion_steps=18)
 ta.save("test-english.wav", wav, model.sr)
 
 # Multilingual examples
@@ -83,9 +144,15 @@ ta.save("test-chinese.wav", wav_chinese, model.sr)
 # If you want to synthesize with a different voice, specify the audio prompt
 AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
+wav_hq = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH, diffusion_steps=18)
 ta.save("test-2.wav", wav, model.sr)
 ```
 See `example_tts.py` and `example_vc.py` for more examples.
+
+Streaming example (choose diffusion steps for faster or more accurate output):
+```bash
+python streaming_clone.py --diffusion-steps 18 --voice-clone reference_audio/3.wav
+```
 
 # Acknowledgements
 - [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)

@@ -84,7 +84,14 @@ class ChatterboxVC:
         self,
         audio,
         target_voice_path=None,
+        diffusion_steps: int = 10,
     ):
+        """
+        Convert input audio to target voice.
+
+        Args:
+            diffusion_steps: Number of diffusion steps to use for S3Gen inference. Default is 10.
+        """
         if target_voice_path:
             self.set_target_voice(target_voice_path)
         else:
@@ -98,6 +105,7 @@ class ChatterboxVC:
             wav, _ = self.s3gen.inference(
                 speech_tokens=s3_tokens,
                 ref_dict=self.ref_dict,
+                diffusion_steps=diffusion_steps,
             )
             wav = wav.squeeze(0).detach().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)

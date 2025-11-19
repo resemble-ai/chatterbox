@@ -8,6 +8,12 @@ import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
+try:
+    import bitsandbytes as bnb
+    BNB_AVAILABLE = True
+except ImportError:
+    BNB_AVAILABLE = False
+
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
 from .models.s3gen import S3GEN_SR, S3Gen
@@ -126,7 +132,15 @@ class ChatterboxTTS:
         self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
+    def from_local(cls, ckpt_dir, device, use_bnb_quantization=False, quantization_bits=8) -> 'ChatterboxTTS':
+        """Load model from local checkpoint directory.
+        
+        Args:
+            ckpt_dir: Path to checkpoint directory
+            device: Device to load model on
+            use_bnb_quantization: Whether to use BNB quantization
+            quantization_bits: Quantization bits, either 4 or 8 (default: 8)
+        """
         ckpt_dir = Path(ckpt_dir)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
@@ -134,6 +148,24 @@ class ChatterboxTTS:
             map_location = torch.device('cpu')
         else:
             map_location = None
+
+        # Validate BNB quantization requirements
+        if use_bnb_quantization:
+            if not BNB_AVAILABLE:
+                raise ImportError(
+                    "bitsandbytes is not installed. Please install it with: pip install bitsandbytes"
+                )
+            if device not in ["cuda"]:
+                raise ValueError(
+                    f"BNB quantization is only supported on CUDA devices, but got device: {device}"
+                )
+            if quantization_bits not in [4, 8]:
+                raise ValueError(
+                    f"quantization_bits must be either 4 or 8, but got: {quantization_bits}"
+                )
+                raise ValueError(
+                    f"BNB quantization is only supported on CUDA devices, but got device: {device}"
+                )
 
         ve = VoiceEncoder()
         ve.load_state_dict(
@@ -145,7 +177,14 @@ class ChatterboxTTS:
         t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
-        t3.load_state_dict(t3_state)
+        # Use strict=False for backward compatibility with older checkpoints
+        # that don't have the new norm_out layer in Perceiver
+        t3.load_state_dict(t3_state, strict=False)
+        
+        # Apply BNB quantization if requested
+        if use_bnb_quantization:
+            t3 = cls._quantize_model_bnb(t3, bits=quantization_bits)
+        
         t3.to(device).eval()
 
         s3gen = S3Gen()
@@ -164,8 +203,65 @@ class ChatterboxTTS:
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
+    @staticmethod
+    def _quantize_model_bnb(model, bits=8):
+        """Apply BNB quantization to Linear layers in the model.
+        
+        Args:
+            model: The model to quantize
+            bits: Quantization bits, either 4 or 8 (default: 8)
+        """
+        for name, module in model.named_children():
+            if isinstance(module, torch.nn.Linear):
+                if bits == 4:
+                    # Replace Linear layer with 4-bit quantized version
+                    layer = bnb.nn.Linear4bit(
+                        module.in_features,
+                        module.out_features,
+                        bias=module.bias is not None,
+                        compute_dtype=torch.float16,
+                        compress_statistics=True,
+                        quant_type='nf4'
+                    )
+                    # Copy weights
+                    layer.weight = bnb.nn.Params4bit(
+                        module.weight.data,
+                        requires_grad=False,
+                        compress_statistics=True,
+                        quant_type='nf4'
+                    )
+                else:  # 8-bit
+                    # Replace Linear layer with 8-bit quantized version
+                    layer = bnb.nn.Linear8bitLt(
+                        module.in_features,
+                        module.out_features,
+                        bias=module.bias is not None,
+                        has_fp16_weights=False,
+                    )
+                    # Copy weights
+                    layer.weight = bnb.nn.Int8Params(
+                        module.weight.data,
+                        requires_grad=False,
+                        has_fp16_weights=False,
+                    )
+                
+                if module.bias is not None:
+                    layer.bias = module.bias
+                setattr(model, name, layer)
+            elif len(list(module.children())) > 0:
+                # Recursively quantize child modules
+                setattr(model, name, ChatterboxTTS._quantize_model_bnb(module, bits))
+        return model
+
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTTS':
+    def from_pretrained(cls, device, use_bnb_quantization=False, quantization_bits=8) -> 'ChatterboxTTS':
+        """Load model from HuggingFace Hub.
+        
+        Args:
+            device: Device to load model on
+            use_bnb_quantization: Whether to use BNB quantization
+            quantization_bits: Quantization bits, either 4 or 8 (default: 8)
+        """
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -177,9 +273,14 @@ class ChatterboxTTS:
         for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 
-        return cls.from_local(Path(local_path).parent, device)
+        return cls.from_local(Path(local_path).parent, device, use_bnb_quantization=use_bnb_quantization, quantization_bits=quantization_bits)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
+        cache_key = (str(Path(wav_fpath)), float(exaggeration))
+        if hasattr(self, "_cond_cache") and cache_key in self._cond_cache:
+            self.conds = self._cond_cache[cache_key]
+            return
+
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
@@ -204,6 +305,9 @@ class ChatterboxTTS:
             emotion_adv=exaggeration * torch.ones(1, 1, 1),
         ).to(device=self.device)
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
+        if not hasattr(self, "_cond_cache"):
+            self._cond_cache = {}
+        self._cond_cache[cache_key] = self.conds
 
     def generate(
         self,
@@ -215,7 +319,15 @@ class ChatterboxTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
+        use_kv_cache=True,
+        diffusion_steps: int = 10,
     ):
+        """
+        Generate speech for given text.
+
+        Args:
+            diffusion_steps: Number of diffusion steps to use in the waveform generator (S3Gen). Default is 10. Higher values may improve fidelity but increase runtime latency.
+        """
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
@@ -234,9 +346,6 @@ class ChatterboxTTS:
         text = punc_norm(text)
         text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
 
-        if cfg_weight > 0.0:
-            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
-
         sot = self.t3.hp.start_text_token
         eot = self.t3.hp.stop_text_token
         text_tokens = F.pad(text_tokens, (1, 0), value=sot)
@@ -252,6 +361,7 @@ class ChatterboxTTS:
                 repetition_penalty=repetition_penalty,
                 min_p=min_p,
                 top_p=top_p,
+                use_kv_cache=use_kv_cache,
             )
             # Extract only the conditional batch.
             speech_tokens = speech_tokens[0]
@@ -260,12 +370,17 @@ class ChatterboxTTS:
             speech_tokens = drop_invalid_tokens(speech_tokens)
             
             speech_tokens = speech_tokens[speech_tokens < 6561]
+            
+            # Discard first 2 and last 2 frames to remove potential noise artifacts
+            if len(speech_tokens) > 4:
+                speech_tokens = speech_tokens[2:-2]
 
             speech_tokens = speech_tokens.to(self.device)
 
             wav, _ = self.s3gen.inference(
                 speech_tokens=speech_tokens,
                 ref_dict=self.conds.gen,
+                diffusion_steps=diffusion_steps,
             )
             wav = wav.squeeze(0).detach().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
