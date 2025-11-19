@@ -297,6 +297,11 @@ class ChatterboxMultilingualTTS:
         return cls.from_local(ckpt_dir, device, use_bnb_quantization=use_bnb_quantization, quantization_bits=quantization_bits)
     
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
+        cache_key = (str(Path(wav_fpath)), float(exaggeration))
+        if hasattr(self, "_cond_cache") and cache_key in self._cond_cache:
+            self.conds = self._cond_cache[cache_key]
+            return
+
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
@@ -322,6 +327,9 @@ class ChatterboxMultilingualTTS:
             emotion_adv=exaggeration * torch.ones(1, 1, 1),
         ).to(device=self.device)
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
+        if not hasattr(self, "_cond_cache"):
+            self._cond_cache = {}
+        self._cond_cache[cache_key] = self.conds
 
     def generate(
         self,
@@ -334,6 +342,7 @@ class ChatterboxMultilingualTTS:
         repetition_penalty=1.2,
         min_p=0.05,
         top_p=1.0,
+        use_kv_cache=True,
     ):
         # Validate language_id
         if language_id and language_id.lower() not in SUPPORTED_LANGUAGES:
@@ -361,9 +370,6 @@ class ChatterboxMultilingualTTS:
         text = punc_norm(text)
         text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id.lower() if language_id else None).to(self.device)
 
-        if cfg_weight > 0.0:
-            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
-
         sot = self.t3.hp.start_text_token
         eot = self.t3.hp.stop_text_token
         text_tokens = F.pad(text_tokens, (1, 0), value=sot)
@@ -379,6 +385,7 @@ class ChatterboxMultilingualTTS:
                 repetition_penalty=repetition_penalty,
                 min_p=min_p,
                 top_p=top_p,
+                use_kv_cache=use_kv_cache,
             )
             # Extract only the conditional batch.
             speech_tokens = speech_tokens[0]

@@ -276,6 +276,11 @@ class ChatterboxTTS:
         return cls.from_local(Path(local_path).parent, device, use_bnb_quantization=use_bnb_quantization, quantization_bits=quantization_bits)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
+        cache_key = (str(Path(wav_fpath)), float(exaggeration))
+        if hasattr(self, "_cond_cache") and cache_key in self._cond_cache:
+            self.conds = self._cond_cache[cache_key]
+            return
+
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
@@ -300,6 +305,9 @@ class ChatterboxTTS:
             emotion_adv=exaggeration * torch.ones(1, 1, 1),
         ).to(device=self.device)
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
+        if not hasattr(self, "_cond_cache"):
+            self._cond_cache = {}
+        self._cond_cache[cache_key] = self.conds
 
     def generate(
         self,
@@ -311,6 +319,7 @@ class ChatterboxTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
+        use_kv_cache=True,
     ):
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
@@ -330,9 +339,6 @@ class ChatterboxTTS:
         text = punc_norm(text)
         text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
 
-        if cfg_weight > 0.0:
-            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
-
         sot = self.t3.hp.start_text_token
         eot = self.t3.hp.stop_text_token
         text_tokens = F.pad(text_tokens, (1, 0), value=sot)
@@ -348,6 +354,7 @@ class ChatterboxTTS:
                 repetition_penalty=repetition_penalty,
                 min_p=min_p,
                 top_p=top_p,
+                use_kv_cache=use_kv_cache,
             )
             # Extract only the conditional batch.
             speech_tokens = speech_tokens[0]

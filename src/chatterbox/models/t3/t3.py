@@ -109,17 +109,22 @@ class T3(nn.Module):
         # prepare input embeddings (skip backbone tranformer embeddings)
         cond_emb = self.prepare_conditioning(t3_cond)  # (B, len_cond, dim)
         text_emb = self.text_emb(text_tokens)  # (B, len_text, dim)
-        if cfg_weight > 0.0:
-            text_emb[1].zero_()  # CFG uncond
-
         speech_emb = self.speech_emb(speech_tokens)  # (B, len_speech, dim)
         if self.hp.input_pos_emb == "learned":
             text_emb = text_emb + self.text_pos_emb(text_tokens)
             speech_emb = speech_emb + self.speech_pos_emb(speech_tokens)
         len_cond = cond_emb.size(1)
 
-        if cond_emb.size(0) != text_emb.size(0):
-             cond_emb = cond_emb.expand(text_emb.size(0), -1, -1)
+        batch_size = text_emb.size(0)
+        if cond_emb.size(0) != batch_size:
+            cond_emb = cond_emb.expand(batch_size, -1, -1)
+
+        if cfg_weight > 0.0:
+            zero_text = torch.zeros_like(text_emb)
+            text_emb = torch.cat([text_emb, zero_text], dim=0)
+            cond_emb = torch.cat([cond_emb, cond_emb], dim=0)
+            speech_emb = torch.cat([speech_emb, speech_emb], dim=0)
+            batch_size = text_emb.size(0)
 
         # concat
         embeds = torch.stack([
@@ -243,6 +248,7 @@ class T3(nn.Module):
         length_penalty=1.0,
         repetition_penalty=1.2,
         cfg_weight=0.5,
+        use_kv_cache: bool = True,
     ):
         """
         Args:
@@ -264,6 +270,7 @@ class T3(nn.Module):
             speech_tokens=initial_speech_tokens,
             cfg_weight=cfg_weight,
         )
+        cfg_active = cfg_weight > 0.0
 
         # In order to use the standard HF generate method, we need to extend some methods to inject our custom logic
         # Note the llama-specific logic. Other tfmr types can be added later.
@@ -314,18 +321,18 @@ class T3(nn.Module):
         # )
 
         device = embeds.device
-        batch_size = embeds.size(0) // 2  # Actual batch size (embeds has CFG so it's doubled)
+        batch_size = embeds.size(0) // 2 if cfg_active else embeds.size(0)
 
         bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=device)
         bos_token = bos_token.repeat(batch_size, 1)  # Repeat for dynamic batch size
         bos_embed = self.speech_emb(bos_token)  # shape: (B, 1, embed_dim)
         bos_embed = bos_embed + self.speech_pos_emb.get_fixed_embedding(0)
 
-        # Duplicate for CFG (batch_size * 2)
-        bos_embed = torch.cat([bos_embed, bos_embed])
+        if cfg_active:
+            bos_embed = torch.cat([bos_embed, bos_embed])
 
         # Combine condition and BOS token for the initial input
-        inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
+        base_inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
 
         # Track generated token ids; start with the BOS token.
         generated_ids = bos_token.clone()
@@ -339,24 +346,28 @@ class T3(nn.Module):
 
         # ---- Initial Forward Pass (no kv_cache yet) ----
         output = self.patched_model(
-            inputs_embeds=inputs_embeds,
+            inputs_embeds=base_inputs_embeds,
             past_key_values=None,
-            use_cache=True,
+            use_cache=use_kv_cache,
             output_attentions=True,
             output_hidden_states=True,
             return_dict=True,
         )
-        # Initialize kv_cache with the full context.
-        past = output.past_key_values
+        # Initialize kv_cache (if enabled) with the full context.
+        past = output.past_key_values if use_kv_cache else None
+        generated_embeds = []
 
         # ---- Generation Loop using kv_cache ----
-        for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
-            logits_step = output.logits[:, -1, :]                
-            # CFG combine  → (batch_size, V) - support dynamic batch size
-            cond   = logits_step[0:batch_size, :]
-            uncond = logits_step[batch_size:, :]
-            cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
-            logits = cond + cfg * (cond - uncond)
+        total_new_tokens = max_new_tokens or self.hp.max_speech_tokens
+        for i in tqdm(range(total_new_tokens), desc="Sampling", dynamic_ncols=True):
+            logits_step = output.logits[:, -1, :]
+            if cfg_active:
+                cond   = logits_step[0:batch_size, :]
+                uncond = logits_step[batch_size:, :]
+                cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
+                logits = cond + cfg * (cond - uncond)
+            else:
+                logits = logits_step
             
             # Boost EOS token probability after generating sufficient tokens
             # This helps prevent runaway generation without alignment stream analyzer
@@ -402,19 +413,32 @@ class T3(nn.Module):
             next_token_embed = self.speech_emb(next_token)
             next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
 
-            # Duplicate for CFG
-            next_token_embed = torch.cat([next_token_embed, next_token_embed])
+            if cfg_active:
+                next_token_embed = torch.cat([next_token_embed, next_token_embed])
 
-            # Forward pass with only the new token and the cached past.
-            output = self.patched_model(
-                inputs_embeds=next_token_embed,
-                past_key_values=past,
-                output_attentions=True,
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            # Update the kv_cache.
-            past = output.past_key_values
+            if use_kv_cache:
+                # Forward pass with only the new token and the cached past.
+                output = self.patched_model(
+                    inputs_embeds=next_token_embed,
+                    past_key_values=past,
+                    use_cache=True,
+                    output_attentions=True,
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+                past = output.past_key_values
+            else:
+                # Recompute full sequence when KV cache is disabled.
+                generated_embeds.append(next_token_embed)
+                full_inputs = torch.cat([base_inputs_embeds] + generated_embeds, dim=1)
+                output = self.patched_model(
+                    inputs_embeds=full_inputs,
+                    past_key_values=None,
+                    use_cache=False,
+                    output_attentions=True,
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
 
         # Concatenate all predicted tokens along the sequence dimension.
         predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
