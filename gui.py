@@ -1,4 +1,5 @@
 import sys
+import re
 import torch
 import torchaudio as ta
 from pathlib import Path
@@ -6,18 +7,26 @@ from safetensors.torch import load_file
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QLineEdit, QTextEdit, 
                                QComboBox, QLabel, QGroupBox, QFileDialog, 
-                               QMessageBox, QProgressBar)
-from PySide6.QtCore import QThread, Signal, Qt
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
-from PySide6.QtCore import QUrl
+                               QMessageBox, QCheckBox, QDoubleSpinBox)
+from PySide6.QtCore import QThread, Signal, QSettings
 from chatterbox_git.src.chatterbox import mtl_tts
+
+
+def split_into_sentences(text):
+    """Simple sentence splitter for batching"""
+    # Split on period, exclamation, question mark followed by space or end
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [s.strip() for s in sentences if s.strip()]
+
 
 class TTSThread(QThread):
     finished = Signal(str)
     error = Signal(str)
     progress = Signal(str)
     
-    def __init__(self, text, language_id, device, model_path, output_path, audio_prompt_path=None):
+    def __init__(self, text, language_id, device, model_path, output_path, 
+                 audio_prompt_path=None, use_batching=False, output_format="wav",
+                 temperature=0.8, cfg_weight=0.3):
         super().__init__()
         self.text = text
         self.language_id = language_id
@@ -25,251 +34,354 @@ class TTSThread(QThread):
         self.model_path = model_path
         self.output_path = output_path
         self.audio_prompt_path = audio_prompt_path
+        self.use_batching = use_batching
+        self.output_format = output_format.lower()
+        self.temperature = temperature
+        self.cfg_weight = cfg_weight
         
     def run(self):
         try:
-            self.progress.emit("Loading multilingual model...")
-            model = mtl_tts.ChatterboxMultilingualTTS.from_pretrained(device=self.device)
+            # Load model (EXACTLY like reference)
+            self.progress.emit("Loading model...")
+            multilingual_model = mtl_tts.ChatterboxMultilingualTTS.from_pretrained(device=self.device)
             
-            self.progress.emit(f"Loading language weights...")
+            self.progress.emit("Loading language weights...")
             t3_state = load_file(self.model_path, device=self.device)
-            model.t3.load_state_dict(t3_state)
-            model.t3.to(self.device).eval()
+            multilingual_model.t3.load_state_dict(t3_state)
+            multilingual_model.t3.to(self.device).eval()
             
-            self.progress.emit("Generating speech...")
-            # CORRECT: Pass audio_prompt_path directly to generate()
-            wav = model.generate(
-                self.text, 
-                language_id=self.language_id,
-                audio_prompt_path=self.audio_prompt_path  # Direct path reference
-            )
-            
+            # Ensure output directory exists
             Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
-            ta.save(self.output_path, wav, model.sr)
+            
+            # Generate audio
+            if self.use_batching:
+                self.progress.emit("Splitting into sentences...")
+                sentences = split_into_sentences(self.text)
+                
+                if len(sentences) == 0:
+                    raise ValueError("No sentences found in text")
+                
+                self.progress.emit(f"Processing {len(sentences)} sentences...")
+                wav_chunks = []
+                
+                for i, sentence in enumerate(sentences, 1):
+                    self.progress.emit(f"Generating sentence {i}/{len(sentences)}: {sentence[:50]}...")
+                    
+                    wav_chunk = multilingual_model.generate(
+                        sentence, 
+                        language_id=self.language_id,
+                        audio_prompt_path=self.audio_prompt_path,
+                        temperature=self.temperature,
+                        cfg_weight=self.cfg_weight
+                    )
+                    wav_chunks.append(wav_chunk)
+                    
+                    # Progressive saving - save accumulated chunks after each sentence
+                    self.progress.emit(f"Saving progress ({i}/{len(sentences)})...")
+                    wav_so_far = torch.cat(wav_chunks, dim=-1)
+                    if self.output_format == "mp3":
+                        ta.save(self.output_path, wav_so_far, multilingual_model.sr, format="mp3")
+                    else:
+                        ta.save(self.output_path, wav_so_far, multilingual_model.sr)
+                
+                # Final combined audio (already saved in loop)
+                wav = wav_so_far
+            else:
+                self.progress.emit("Generating audio...")
+                wav = multilingual_model.generate(
+                    self.text, 
+                    language_id=self.language_id,
+                    audio_prompt_path=self.audio_prompt_path,
+                    temperature=self.temperature,
+                    cfg_weight=self.cfg_weight
+                )
+                
+                # Save audio
+                self.progress.emit("Saving audio...")
+                if self.output_format == "mp3":
+                    ta.save(self.output_path, wav, multilingual_model.sr, format="mp3")
+                else:
+                    ta.save(self.output_path, wav, multilingual_model.sr)
             
             self.finished.emit(self.output_path)
+            
         except Exception as e:
-            self.error.emit(str(e))
+            import traceback
+            self.error.emit(f"{str(e)}\n\n{traceback.format_exc()}")
+
 
 class ChatterboxTTSGUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Chatterbox Multilingual TTS")
-        self.setMinimumSize(700, 450)
-        self.media_player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
-        self.media_player.setAudioOutput(self.audio_output)
+        self.setWindowTitle("Chatterbox TTS - Simple")
+        self.setMinimumWidth(600)
+        self.tts_thread = None
+        self.settings = QSettings("ChatterboxTTS", "SimpleGUI")
         self.init_ui()
+        self.load_settings()
         
-    # === CORRECT HELPER METHODS ===
-    
-    def browse_model_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Model", "", "SafeTensors (*.safetensors)")
-        if path:
-            self.model_path_edit.setText(path)
-            
-    def browse_prompt_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Reference Audio", "", "Audio Files (*.wav *.mp3 *.flac)")
-        if path:
-            self.prompt_path_edit.setText(path)
-            
-    def browse_output_file(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save Audio", "", "WAV (*.wav)")
-        if path:
-            if not path.endswith('.wav'):
-                path += '.wav'
-            self.output_path_edit.setText(path)
-        
-    def generate_speech(self):
-        # Validate inputs
-        text = self.text_edit.toPlainText().strip()
-        if not text:
-            QMessageBox.warning(self, "Input Error", "Please enter text to synthesize.")
-            return
-            
-        model_path = self.model_path_edit.text().strip()
-        if not Path(model_path).exists():
-            QMessageBox.warning(self, "Error", f"Model file not found:\n{model_path}")
-            return
-            
-        output_path = self.output_path_edit.text().strip()
-        if not output_path:
-            QMessageBox.warning(self, "Error", "Please specify an output path")
-            return
-        
-        # Get audio prompt path (if any)
-        audio_prompt_path = self.prompt_path_edit.text().strip()
-        if audio_prompt_path and not Path(audio_prompt_path).exists():
-            QMessageBox.warning(self, "Error", f"Reference audio not found:\n{audio_prompt_path}")
-            return
-        
-        # Disable UI and start generation
-        self.set_ui_enabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)
-        self.status_label.setText("Generating...")
-        
-        self.tts_thread = TTSThread(
-            text, 
-            self.lang_combo.currentText(), 
-            self.device_combo.currentText(), 
-            model_path, 
-            output_path, 
-            audio_prompt_path if audio_prompt_path else None
-        )
-        self.tts_thread.finished.connect(self.on_finished)
-        self.tts_thread.error.connect(self.on_error)
-        self.tts_thread.progress.connect(self.status_label.setText)
-        self.tts_thread.start()
-        
-    def on_finished(self, path):
-        self.set_ui_enabled(True)
-        self.progress_bar.setVisible(False)
-        self.status_label.setText(f"Saved: {Path(path).name}")
-        self.play_btn.setEnabled(True)
-        
-    def on_error(self, error):
-        self.set_ui_enabled(True)
-        self.progress_bar.setVisible(False)
-        self.status_label.setText("Error")
-        QMessageBox.critical(self, "Generation Error", error)
-        
-    def set_ui_enabled(self, enabled):
-        widgets = [self.generate_btn, self.device_combo, self.lang_combo, self.text_edit, 
-                  self.model_path_edit, self.browse_model_btn, self.prompt_path_edit, 
-                  self.browse_prompt_btn, self.output_path_edit, self.browse_output_btn]
-        for widget in widgets:
-            widget.setEnabled(enabled)
-            
-    def play_audio(self):
-        path = self.output_path_edit.text()
-        if Path(path).exists():
-            self.media_player.setSource(QUrl.fromLocalFile(path))
-            self.media_player.play()
-            self.play_btn.setEnabled(False)
-            self.stop_btn.setEnabled(True)
-        else:
-            QMessageBox.warning(self, "Error", "Audio file not found. Generate it first.")
-            
-    def stop_audio(self):
-        self.media_player.stop()
-        self.play_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
-        
-    # === UI SETUP ===
-    
     def init_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        
-        # Device Settings
-        device_group = QGroupBox("Device Settings")
-        device_layout = QHBoxLayout()
-        device_layout.addWidget(QLabel("Device:"))
-        self.device_combo = QComboBox()
-        self.device_combo.addItems(["cpu"] + (["cuda"] if torch.cuda.is_available() else []) + 
-                                   (["mps"] if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available() else []))
-        device_layout.addWidget(self.device_combo)
-        device_layout.addStretch()
-        device_group.setLayout(device_layout)
-        layout.addWidget(device_group)
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
         
         # Model Settings
         model_group = QGroupBox("Model Settings")
         model_layout = QVBoxLayout()
         
-        # Language selection
+        # Language
         lang_layout = QHBoxLayout()
-        lang_layout.addWidget(QLabel("Language:"))
-        self.lang_combo = QComboBox()
-        self.lang_combo.addItems(["cs", "en", "de", "es", "fr", "it", "pl", "pt", "ru", "tr", "ja", "ko", "zh"])
-        self.lang_combo.setCurrentText("cs")
-        lang_layout.addWidget(self.lang_combo)
-        lang_layout.addStretch()
+        lang_layout.addWidget(QLabel("Language ID:"))
+        self.language_edit = QLineEdit("cs")
+        self.language_edit.setPlaceholderText("e.g., cs, en, de")
+        lang_layout.addWidget(self.language_edit)
         model_layout.addLayout(lang_layout)
         
-        # Language model path
+        # Device
+        device_layout = QHBoxLayout()
+        device_layout.addWidget(QLabel("Device:"))
+        self.device_combo = QComboBox()
+        self.device_combo.addItems(["cuda", "cpu", "mps"])
+        device_layout.addWidget(self.device_combo)
+        device_layout.addStretch()
+        model_layout.addLayout(device_layout)
+        
+        # Model Path
         model_path_layout = QHBoxLayout()
-        self.model_path_edit = QLineEdit()
-        self.model_path_edit.setPlaceholderText("Path to language model (e.g., t3_cs.safetensors)...")
+        model_path_layout.addWidget(QLabel("Model (.safetensors):"))
+        self.model_path_edit = QLineEdit("t3_cs.safetensors")
         model_path_layout.addWidget(self.model_path_edit)
-        self.browse_model_btn = QPushButton("Browse...")
-        self.browse_model_btn.clicked.connect(self.browse_model_file)
-        model_path_layout.addWidget(self.browse_model_btn)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self.browse_model)
+        model_path_layout.addWidget(browse_btn)
         model_layout.addLayout(model_path_layout)
         
-        # Audio prompt path (Speaker conditioning)
-        prompt_group = QGroupBox("Speaker Reference (Optional)")
-        prompt_layout = QVBoxLayout()
-        
-        prompt_path_layout = QHBoxLayout()
+        # Reference Voice (Audio Prompt)
+        prompt_layout = QHBoxLayout()
+        prompt_layout.addWidget(QLabel("Reference Voice:"))
         self.prompt_path_edit = QLineEdit()
-        self.prompt_path_edit.setPlaceholderText("Path to reference audio file (optional)...")
-        prompt_path_layout.addWidget(self.prompt_path_edit)
-        self.browse_prompt_btn = QPushButton("Browse...")
-        self.browse_prompt_btn.clicked.connect(self.browse_prompt_file)
-        prompt_path_layout.addWidget(self.browse_prompt_btn)
-        prompt_layout.addLayout(prompt_path_layout)
+        self.prompt_path_edit.setPlaceholderText("Optional - leave empty for default voice")
+        prompt_layout.addWidget(self.prompt_path_edit)
+        browse_prompt_btn = QPushButton("Browse...")
+        browse_prompt_btn.clicked.connect(self.browse_prompt)
+        prompt_layout.addWidget(browse_prompt_btn)
+        model_layout.addLayout(prompt_layout)
         
-        prompt_group.setLayout(prompt_layout)
-        model_layout.addWidget(prompt_group)
         model_group.setLayout(model_layout)
         layout.addWidget(model_group)
         
         # Text Input
-        text_group = QGroupBox("Text to Speech")
+        text_group = QGroupBox("Text to Synthesize")
         text_layout = QVBoxLayout()
         self.text_edit = QTextEdit()
         self.text_edit.setPlaceholderText("Enter text here...")
-        self.text_edit.setText("Dobrý den, vítáme vás v našem testu syntézy řeči")
+        self.text_edit.setMaximumHeight(120)
         text_layout.addWidget(self.text_edit)
+        
+        # Batching option
+        self.batch_checkbox = QCheckBox("Use sentence batching (for longer texts with short sentences)")
+        text_layout.addWidget(self.batch_checkbox)
+        
         text_group.setLayout(text_layout)
         layout.addWidget(text_group)
         
-        # Output
-        output_group = QGroupBox("Output")
-        output_layout = QVBoxLayout()
-        output_path_layout = QHBoxLayout()
-        self.output_path_edit = QLineEdit()
-        self.output_path_edit.setText(str(Path.cwd() / "output.wav"))
-        output_path_layout.addWidget(self.output_path_edit)
-        self.browse_output_btn = QPushButton("Browse...")
-        self.browse_output_btn.clicked.connect(self.browse_output_file)
-        output_path_layout.addWidget(self.browse_output_btn)
-        output_layout.addLayout(output_path_layout)
-        output_group.setLayout(output_layout)
+        # Generation Parameters
+        params_group = QGroupBox("Generation Parameters")
+        params_layout = QVBoxLayout()
+        
+        # Temperature
+        temp_layout = QHBoxLayout()
+        temp_layout.addWidget(QLabel("Temperature:"))
+        self.temperature_spin = QDoubleSpinBox()
+        self.temperature_spin.setRange(0.05, 5.0)
+        self.temperature_spin.setSingleStep(0.05)
+        self.temperature_spin.setValue(0.8)
+        temp_layout.addWidget(self.temperature_spin)
+        temp_layout.addWidget(QLabel("(Lower = more consistent, Higher = more varied)"))
+        temp_layout.addStretch()
+        params_layout.addLayout(temp_layout)
+        
+        # CFG Weight / Pace
+        cfg_layout = QHBoxLayout()
+        cfg_layout.addWidget(QLabel("CFG Weight / Pace:"))
+        self.cfg_weight_spin = QDoubleSpinBox()
+        self.cfg_weight_spin.setRange(0.0, 1.0)
+        self.cfg_weight_spin.setSingleStep(0.05)
+        self.cfg_weight_spin.setValue(0.3)
+        cfg_layout.addWidget(self.cfg_weight_spin)
+        cfg_layout.addWidget(QLabel("(Controls generation guidance and pacing)"))
+        cfg_layout.addStretch()
+        params_layout.addLayout(cfg_layout)
+        
+        params_group.setLayout(params_layout)
+        layout.addWidget(params_group)
+        
+        # Output Settings
+        output_group = QGroupBox("Output Settings")
+        output_group_layout = QVBoxLayout()
+        
+        # Format selector - MORE PROMINENT
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("Output Format:"))
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["WAV", "MP3"])
+        self.format_combo.setMinimumWidth(100)
+        self.format_combo.currentTextChanged.connect(self.on_format_changed)
+        format_layout.addWidget(self.format_combo)
+        format_layout.addStretch()
+        output_group_layout.addLayout(format_layout)
+        
+        # Output Path
+        output_layout = QHBoxLayout()
+        output_layout.addWidget(QLabel("Output File:"))
+        self.output_path_edit = QLineEdit("output.wav")
+        output_layout.addWidget(self.output_path_edit)
+        browse_output_btn = QPushButton("Browse...")
+        browse_output_btn.clicked.connect(self.browse_output)
+        output_layout.addWidget(browse_output_btn)
+        output_group_layout.addLayout(output_layout)
+        
+        output_group.setLayout(output_group_layout)
         layout.addWidget(output_group)
         
-        # Progress
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
-        
+        # Status
         self.status_label = QLabel("Ready")
-        self.status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_label)
         
-        # Buttons
-        button_layout = QHBoxLayout()
+        # Generate Button
         self.generate_btn = QPushButton("Generate Speech")
         self.generate_btn.clicked.connect(self.generate_speech)
-        button_layout.addWidget(self.generate_btn)
-        self.play_btn = QPushButton("Play")
-        self.play_btn.clicked.connect(self.play_audio)
-        self.play_btn.setEnabled(False)
-        button_layout.addWidget(self.play_btn)
-        self.stop_btn = QPushButton("Stop")
-        self.stop_btn.clicked.connect(self.stop_audio)
-        self.stop_btn.setEnabled(False)
-        button_layout.addWidget(self.stop_btn)
-        layout.addLayout(button_layout)
+        layout.addWidget(self.generate_btn)
+        
+        layout.addStretch()
+    
+    def browse_model(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Model File", "", "SafeTensors (*.safetensors);;All Files (*)"
+        )
+        if file_path:
+            self.model_path_edit.setText(file_path)
+    
+    def browse_prompt(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Reference Voice", "", "Audio Files (*.wav *.mp3 *.flac);;All Files (*)"
+        )
+        if file_path:
+            self.prompt_path_edit.setText(file_path)
+    
+    def browse_output(self):
+        format_filter = "WAV Files (*.wav);;MP3 Files (*.mp3);;All Files (*)"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Output", "", format_filter
+        )
+        if file_path:
+            self.output_path_edit.setText(file_path)
+            # Auto-detect format from extension
+            if file_path.lower().endswith('.mp3'):
+                self.format_combo.setCurrentText("MP3")
+            else:
+                self.format_combo.setCurrentText("WAV")
+    
+    def on_format_changed(self, format_text):
+        """Update file extension when format changes"""
+        current_path = Path(self.output_path_edit.text())
+        if format_text == "MP3":
+            new_path = current_path.with_suffix('.mp3')
+        else:
+            new_path = current_path.with_suffix('.wav')
+        self.output_path_edit.setText(str(new_path))
+    
+    def load_settings(self):
+        """Load all settings from QSettings"""
+        self.language_edit.setText(self.settings.value("language", "cs"))
+        self.device_combo.setCurrentText(self.settings.value("device", "cuda"))
+        self.model_path_edit.setText(self.settings.value("model_path", "t3_cs.safetensors"))
+        self.prompt_path_edit.setText(self.settings.value("prompt_path", ""))
+        self.temperature_spin.setValue(float(self.settings.value("temperature", 0.8)))
+        self.cfg_weight_spin.setValue(float(self.settings.value("cfg_weight", 0.3)))
+        self.batch_checkbox.setChecked(self.settings.value("use_batching", False, type=bool))
+        self.output_path_edit.setText(self.settings.value("output_path", "output.wav"))
+        self.format_combo.setCurrentText(self.settings.value("format", "WAV"))
+        self.text_edit.setText(self.settings.value("text", ""))
+    
+    def save_settings(self):
+        """Save all settings to QSettings"""
+        self.settings.setValue("language", self.language_edit.text())
+        self.settings.setValue("device", self.device_combo.currentText())
+        self.settings.setValue("model_path", self.model_path_edit.text())
+        self.settings.setValue("prompt_path", self.prompt_path_edit.text())
+        self.settings.setValue("temperature", self.temperature_spin.value())
+        self.settings.setValue("cfg_weight", self.cfg_weight_spin.value())
+        self.settings.setValue("use_batching", self.batch_checkbox.isChecked())
+        self.settings.setValue("output_path", self.output_path_edit.text())
+        self.settings.setValue("format", self.format_combo.currentText())
+        self.settings.setValue("text", self.text_edit.toPlainText())
+    
+    def generate_speech(self):
+        text = self.text_edit.toPlainText().strip()
+        if not text:
+            QMessageBox.warning(self, "Error", "Please enter some text")
+            return
+        
+        model_path = self.model_path_edit.text()
+        if not Path(model_path).exists():
+            QMessageBox.warning(self, "Error", f"Model file not found: {model_path}")
+            return
+        
+        audio_prompt_path = self.prompt_path_edit.text().strip() or None
+        if audio_prompt_path and not Path(audio_prompt_path).exists():
+            QMessageBox.warning(self, "Error", f"Reference voice file not found: {audio_prompt_path}")
+            return
+        
+        # Save settings before generation
+        self.save_settings()
+        
+        self.generate_btn.setEnabled(False)
+        self.status_label.setText("Starting generation...")
+        
+        self.tts_thread = TTSThread(
+            text=text,
+            language_id=self.language_edit.text(),
+            device=self.device_combo.currentText(),
+            model_path=model_path,
+            output_path=self.output_path_edit.text(),
+            audio_prompt_path=audio_prompt_path,
+            use_batching=self.batch_checkbox.isChecked(),
+            output_format=self.format_combo.currentText(),
+            temperature=self.temperature_spin.value(),
+            cfg_weight=self.cfg_weight_spin.value()
+        )
+        
+        self.tts_thread.finished.connect(self.on_finished)
+        self.tts_thread.error.connect(self.on_error)
+        self.tts_thread.progress.connect(self.on_progress)
+        self.tts_thread.start()
+    
+    def on_progress(self, message):
+        self.status_label.setText(message)
+    
+    def on_finished(self, output_path):
+        self.generate_btn.setEnabled(True)
+        self.status_label.setText(f"Complete! Saved to: {output_path}")
+        QMessageBox.information(self, "Success", f"Audio saved to:\n{output_path}")
+    
+    def on_error(self, error_message):
+        self.generate_btn.setEnabled(True)
+        self.status_label.setText("Generation failed")
+        QMessageBox.critical(self, "Error", f"Error:\n{error_message}")
+    
+    def closeEvent(self, event):
+        """Save settings when window is closed"""
+        self.save_settings()
+        super().closeEvent(event)
+
 
 def main():
     app = QApplication(sys.argv)
     window = ChatterboxTTSGUI()
     window.show()
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()
