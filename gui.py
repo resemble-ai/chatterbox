@@ -15,7 +15,7 @@ from chatterbox_git.src.chatterbox import mtl_tts
 def split_into_sentences(text):
     """Simple sentence splitter for batching"""
     # Split on period, exclamation, question mark followed by space or end
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+        sentences = re.split(r'(?<!\d)[.!?](?=\s*[A-Z])', text.strip())
     return [s.strip() for s in sentences if s.strip()]
 
 
