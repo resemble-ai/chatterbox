@@ -29,6 +29,9 @@ model = ChatterboxTTS.from_pretrained(device=device)
 
 text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill."
 wav = model.generate(text)
+
+# Increase diffusion steps for higher fidelity (at the cost of latency)
+hi_fidelity_wav = model.generate(text, diffusion_steps=18)
 def save_wav(path, wav, sr):
     """Save a waveform tensor/array to path using soundfile.
 
@@ -56,10 +59,12 @@ def save_wav(path, wav, sr):
     sf.write(path, arr, sr)
 
 save_wav("test-1.wav", wav, model.sr)
+save_wav("test-1-hires.wav", hi_fidelity_wav, model.sr)
 
 multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device)
 text = "Bonjour, comment ça va? Ceci est le modèle de synthèse vocale multilingue Chatterbox, il prend en charge 23 langues."
 wav = multilingual_model.generate(text, language_id="fr")
+wav_hq_mtl = multilingual_model.generate(text, language_id="fr", diffusion_steps=16)
 save_wav("test-2.wav", wav, multilingual_model.sr)
 
 

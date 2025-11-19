@@ -21,7 +21,7 @@ def load_model():
     return model
 
 
-def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num, cfgw, min_p, top_p, repetition_penalty):
+def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num, cfgw, min_p, top_p, repetition_penalty, diffusion_steps):
     if model is None:
         model = ChatterboxTTS.from_pretrained(DEVICE)
 
@@ -37,6 +37,7 @@ def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num
         min_p=min_p,
         top_p=top_p,
         repetition_penalty=repetition_penalty,
+        diffusion_steps=diffusion_steps,
     )
     return (model.sr, wav.squeeze(0).numpy())
 
@@ -61,6 +62,7 @@ with gr.Blocks() as demo:
                 min_p = gr.Slider(0.00, 1.00, step=0.01, label="min_p || Newer Sampler. Recommend 0.02 > 0.1. Handles Higher Temperatures better. 0.00 Disables", value=0.05)
                 top_p = gr.Slider(0.00, 1.00, step=0.01, label="top_p || Original Sampler. 1.0 Disables(recommended). Original 0.8", value=1.00)
                 repetition_penalty = gr.Slider(1.00, 2.00, step=0.1, label="repetition_penalty", value=1.2)
+                diffusion_steps = gr.Slider(1, 32, step=1, label="diffusion_steps", value=10)
 
             run_btn = gr.Button("Generate", variant="primary")
 
@@ -82,6 +84,7 @@ with gr.Blocks() as demo:
             min_p,
             top_p,
             repetition_penalty,
+            diffusion_steps,
         ],
         outputs=audio_output,
     )

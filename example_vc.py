@@ -20,5 +20,6 @@ model = ChatterboxVC.from_pretrained(device)
 wav = model.generate(
     audio=AUDIO_PATH,
     target_voice_path=TARGET_VOICE_PATH,
+    diffusion_steps=12,  # example: slightly higher steps for better quality
 )
 ta.save("testvc.wav", wav, model.sr)

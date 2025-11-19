@@ -88,8 +88,12 @@ print("✅ Saved to test-quantized-2.wav")
 
 # If you want to synthesize with a different voice, specify the audio prompt
 AUDIO_PROMPT_PATH = "audio (3).wav"
-wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
+wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH, diffusion_steps=12)
 save_wav("test-quantized-3.wav", wav, model.sr)
+
+# High-fidelity quantized generation (increase diffusion steps to improve audio quality)
+wav_hq = model.generate(text, diffusion_steps=18)
+save_wav("test-quantized-1-hires.wav", wav_hq, model.sr)
 
 print("\n✨ All done! The quantized models use approximately 50% less GPU memory.")
 print("💡 Memory savings are especially noticeable with larger batch sizes or longer sequences.")

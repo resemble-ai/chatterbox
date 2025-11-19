@@ -1,4 +1,5 @@
 import torch
+import argparse
 import os
 import tempfile
 import sounddevice as sd
@@ -73,6 +74,7 @@ def stream_tts(
     voice_path: str = None,
     multilingual: bool = False,
     language_id: str = None,
+    diffusion_steps: int = 10,
 ):
     # Auto device detection
     if torch.cuda.is_available():
@@ -112,9 +114,14 @@ def stream_tts(
         print(f"\n[GEN {i}/{len(sentences)}] {sentence}")
 
         if multilingual:
-            wav = model.generate(sentence, language_id=language_id, audio_prompt_path=audio_prompt)
+            wav = model.generate(
+                sentence,
+                language_id=language_id,
+                audio_prompt_path=audio_prompt,
+                diffusion_steps=diffusion_steps,
+            )
         else:
-            wav = model.generate(sentence, audio_prompt_path=audio_prompt)
+            wav = model.generate(sentence, audio_prompt_path=audio_prompt, diffusion_steps=diffusion_steps)
 
         # Convert to numpy
         wav_np = wav.detach().cpu().numpy() if isinstance(wav, torch.Tensor) else np.asarray(wav)
@@ -156,9 +163,17 @@ if __name__ == "__main__":
 
     voice_clone_path = "reference_audio/3.wav"
 
+    parser = argparse.ArgumentParser(description='Streaming TTS Clone Example')
+    parser.add_argument('--voice-clone', type=str, default=voice_clone_path, help='Reference voice file for cloning')
+    parser.add_argument('--language', type=str, default='en', help='Language ID to use with multilingual model')
+    parser.add_argument('--multilingual', action='store_true', help='Use multilingual model path')
+    parser.add_argument('--diffusion-steps', type=int, default=10, help='Diffusion steps to use for S3Gen (higher=more fidelity, slower)')
+    args = parser.parse_args()
+
     stream_tts(
         text=text_input,
-        voice_path=voice_clone_path,
-        multilingual=False,
-        language_id="en",
+        voice_path=args.voice_clone,
+        multilingual=args.multilingual,
+        language_id=args.language,
+        diffusion_steps=args.diffusion_steps,  # raise to e.g. 16-20 for high fidelity
     )

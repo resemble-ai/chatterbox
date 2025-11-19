@@ -343,7 +343,14 @@ class ChatterboxMultilingualTTS:
         min_p=0.05,
         top_p=1.0,
         use_kv_cache=True,
+        diffusion_steps: int = 10,
     ):
+        """
+        Generate speech for given text and language.
+
+        Args:
+            diffusion_steps: Number of diffusion steps to use in the waveform generator (S3Gen). Default is 10.
+        """
         # Validate language_id
         if language_id and language_id.lower() not in SUPPORTED_LANGUAGES:
             supported_langs = ", ".join(SUPPORTED_LANGUAGES.keys())
@@ -404,6 +411,7 @@ class ChatterboxMultilingualTTS:
             wav, _ = self.s3gen.inference(
                 speech_tokens=speech_tokens,
                 ref_dict=self.conds.gen,
+                diffusion_steps=diffusion_steps,
             )
             wav = wav.squeeze(0).detach().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)

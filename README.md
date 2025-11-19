@@ -34,6 +34,7 @@ Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • 
   - Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip’s language. To mitigate this, set `cfg_weight` to `0`.
   - The default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts across all languages.
   - If the reference speaker has a fast speaking style, lowering `cfg_weight` to around `0.3` can improve pacing.
+  - Tune `diffusion_steps` (default `10`) to balance latency and fidelity. More steps typically improve detail at the cost of slower inference; fewer steps speed things up for streaming.
 
 - **Expressive or Dramatic Speech:**
   - Try lower `cfg_weight` values (e.g. `~0.3`) and increase `exaggeration` to around `0.7` or higher.
@@ -125,6 +126,8 @@ model = ChatterboxTTS.from_pretrained(device="cuda")
 
 text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill."
 wav = model.generate(text)
+# Increase diffusion_steps for higher fidelity (slower/denser generation):
+wav_hq = model.generate(text, diffusion_steps=18)
 ta.save("test-english.wav", wav, model.sr)
 
 # Multilingual examples
@@ -141,9 +144,15 @@ ta.save("test-chinese.wav", wav_chinese, model.sr)
 # If you want to synthesize with a different voice, specify the audio prompt
 AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
+wav_hq = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH, diffusion_steps=18)
 ta.save("test-2.wav", wav, model.sr)
 ```
 See `example_tts.py` and `example_vc.py` for more examples.
+
+Streaming example (choose diffusion steps for faster or more accurate output):
+```bash
+python streaming_clone.py --diffusion-steps 18 --voice-clone reference_audio/3.wav
+```
 
 # Acknowledgements
 - [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)

@@ -320,7 +320,14 @@ class ChatterboxTTS:
         cfg_weight=0.5,
         temperature=0.8,
         use_kv_cache=True,
+        diffusion_steps: int = 10,
     ):
+        """
+        Generate speech for given text.
+
+        Args:
+            diffusion_steps: Number of diffusion steps to use in the waveform generator (S3Gen). Default is 10. Higher values may improve fidelity but increase runtime latency.
+        """
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
@@ -373,6 +380,7 @@ class ChatterboxTTS:
             wav, _ = self.s3gen.inference(
                 speech_tokens=speech_tokens,
                 ref_dict=self.conds.gen,
+                diffusion_steps=diffusion_steps,
             )
             wav = wav.squeeze(0).detach().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
