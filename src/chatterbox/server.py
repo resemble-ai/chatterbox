@@ -30,6 +30,9 @@ CFG_WEIGHT = 0.5
 TEMPERATURE = 0.8
 CHUNK_SIZE = 50
 
+prompt_file_name = "1_0.5_1.0_0.5_True_0.9.wav"
+AUDIO_PROMPT_PATH = Path(__file__).resolve().parents[4] / f"inputs/audio_prompts/{prompt_file_name}"
+
 HOST = "0.0.0.0"
 PORT = 9000
 
@@ -62,14 +65,14 @@ class AudioBuffer:
         self.fade_out = np.linspace(1.0, 0, self.fade_samples, endpoint=True, dtype=self.dtype)
         self.fade_in = 1.0 - self.fade_out
 
-        self.lock = threading.Lock()
-        self.terminate = False
+        self._lock = threading.Lock()
+        self._running = True
     
     def add_chunk(self, chunk: np.ndarray):
         """
         Adds processed chunks to buffer
         """
-        with self.lock:
+        with self._lock:
             # No previous audio in buffer
             if self.buffer.size == 0:
                 self.buffer = chunk.copy()
@@ -107,7 +110,7 @@ class AudioBuffer:
         if num_samples <= 0:
             raise ValueError("num_samples must be > 0")
 
-        with self.lock:
+        with self._lock:
             # get number of samples available in buffer
             available_samples = self.buffer.size
 
@@ -130,27 +133,24 @@ class AudioBuffer:
             return out
 
     def available_samples(self) -> int:
-        with self.lock:
+        with self._lock:
             return self.buffer.size
 
-    def flush(self):
-        with self.lock:
-            self.flush = True
+    def terminate(self):
+        with self._lock:
+            self._running = False
 
-    def get_flush(self):
-        with self.lock:
-            return self.flush
+    def is_running(self):
+        with self._lock:
+            return self._running
 
 
 def generate_chunks(
     request_queue: queue.Queue, 
     chunk_queue: queue.Queue
 ):
-    # Load chatterbox model and perform setup
-    model = ChatterboxTTS.from_pretrained(device = "cuda")
-    prompt_file_name = "1_0.5_1.0_0.5_True_0.9.wav"
-    prompt_path = Path(__file__).resolve().parents[4] / f"inputs/audio_prompts/{prompt_file_name}"
-    model.setup_stream(audio_prompt_path=prompt_path, exaggeration=EXAGGERATION, fade_duration=FADE_DURATION)
+    # Create model instance
+    model = load_model()
 
     while True:
         # BLOCKS until request is available
@@ -171,107 +171,46 @@ def generate_chunks(
         ):
             # Blocks if audio queue is full
             chunk_queue.put(chunk)
-        
-        # Puts end-of-request signal onto chunk
-        print(f"Generation Time Cost: {time.time() - start_time}")
-        chunk_queue.put(None)
 
-def process_chunks(chunk_queue, audio_buffer):
+# def send_audio(client: socket.socket, audio_buffer):
+#     while audio_buffer.is_running() or audio_buffer.available_samples() > 0:
+#         audio_chunk = audio_buffer.get_samples(1024)
+#         raw_data = audio_chunk.tobytes()
+#         client.sendall(raw_data)
 
+# def send_chunk(client: socket.socket, chunk: np.ndarray):
+#     """
+#     Converts audio to raw bytes and sends chunk over TCP connection with header.
+#     """
+#     data = chunk.tobytes()
+#     data_len = len(data)    
+
+#     # Pack length as 4-byte unsigned int in network byte order
+#     header = struct.pack("!I", data_len)
+
+#     # Send header followed by data
+#     client.sendall(header)
+#     client.sendall(data)
+
+def load_model():
     model = ChatterboxTTS.from_pretrained(device = "cuda")
-    # prompt_file_name = "1_0.5_1.0_0.5_True_0.9.wav"
-    # prompt_path = Path(__file__).resolve().parents[4] / f"inputs/audio_prompts/{prompt_file_name}"
-    model.setup_stream(audio_prompt_path=None, exaggeration=EXAGGERATION, fade_duration=FADE_DURATION)
-
-    # Process and send tokens as they're generated
-    all_tokens_processed = []
-    audio = np.zeros(0, dtype=np.float32)
-
-    while True:
-        # TODO -> if processing time is slow enough maybe we could process multiple chunks together if there are multiple in the queue
-        token_chunk = chunk_queue.get()
-
-        # Check for end-of-request signal
-        if token_chunk is None:
-            # TODO end-of-request logic
-            all_tokens_passed = []
-            break
-
-        # Extract only the conditional batch
-        token_chunk = token_chunk[0]
-
-        # Process each chunk immediately
-        # TODO switch to saving only the previous chunk, to cut down on torch cat operations
-        audio_chunk, success = model._process_token_buffer(
-            token_buffer=[token_chunk],
-            all_tokens_so_far=all_tokens_processed, 
-            context_window=CONTEXT_WINDOW,
-        )
-
-        if success:
-            audio = np.concatenate([audio, audio_chunk], dtype=np.float32)
-            audio_buffer.add_chunk(audio_chunk)
-
-        # Update all_tokens_processed with the new tokens
-        # TODO switch to saving only the previous chunk, to cut down on torch cat operations 
-        # TODO also check that that this shouldn't only be applied when processing is a sucess
-        if len(all_tokens_processed) == 0:
-            all_tokens_processed = token_chunk
-        else:
-            all_tokens_processed = torch.cat([all_tokens_processed, token_chunk], dim=-1)
-
-    sf.write("stream_snapshot.wav", audio, SAMPLE_RATE)
-
-def send_audio(audio_buffer):
-    # Setup Server
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    server.bind((HOST, PORT))
-    server.listen(1)
-    print("waiting for connection...")
-    client, addr = server.accept()
-    print(f"client {addr} connected to port {PORT}\n")
-
-    while not audio_buffer.get_flush() and audio_buffer.available_samples() != 0:
-        audio_chunk = audio_buffer.get_samples(1024)
-        raw_data = audio_chunk.tobytes()
-        sock.sendall(raw_data)
-
-    sock.close()
-
+    model.setup_stream(audio_prompt_path=AUDIO_PROMPT_PATH, exaggeration=EXAGGERATION, fade_duration=FADE_DURATION)
+    return model
 
 
 def main():
     # Initialize shared multiprocessing queues
-    request_queue = torch.multiprocessing.Queue()
-    chunk_queue = torch.multiprocessing.Queue()
-    audio_buffer = AudioBuffer(FADE_DURATION, SAMPLE_RATE)
+    #request_queue = torch.multiprocessing.Queue()
 
-    # Create generation subprocess
-    generation = torch.multiprocessing.Process(target=generate_chunks, args=(request_queue, chunk_queue))
-    generation.start()
+    # Create model Instance
+    model = load_model()
+    model.stream(context_window=CONTEXT_WINDOW)
 
-    # Create processing thread
-    processing_thread = threading.Thread(target=process_chunks, args=(chunk_queue, audio_buffer,))
-    processing_thread.start()
-
-    # Create networking thread with connected client
-    networking_thread = threading.Thread(target=process_chunks, args=(audio_buffer,))
-    networking_thread.start()
-
-    time.sleep(10.0)
-
-    # Populate request queue with test request
-    request = "Active-duty U S military personnel get special baggage allowances with Delta. When traveling on orders or for personal travel, you’ll receive baggage fee exceptions and extra checked bag benefits. These allowances apply to all branches, including the Marine Corps, Army, Air Force, Space Force, Navy, and Coast Guard. There may be some regional weight or embargo restrictions. Would you like me to text you a link with the full details for military baggage policies?" 
-    request_queue.put(request)
-
-    # Send generation termination signal
-    request_queue.put(None)
-    generation.join() # Wait for generation to finish
-
-    processing_thread.join() # Wait for processing to finish
-    audio_buffer.flush() # Flush audio buffer
-    networking_thread.join() # Wait for audio buffer to be cleared
+    # # Populate request queue with test request
+    # request = "Active-duty U S military personnel get special baggage allowances with Delta. When traveling on orders or for personal travel, you’ll receive baggage fee exceptions and extra checked bag benefits. These allowances apply to all branches, including the Marine Corps, Army, Air Force, Space Force, Navy, and Coast Guard. There may be some regional weight or embargo restrictions. Would you like me to text you a link with the full details for military baggage policies?" 
+    # request_queue.put(request)
+    # # Send Termination Signal
+    # request_queue.put(None)
 
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method('spawn', force=True)
