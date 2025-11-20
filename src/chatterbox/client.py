@@ -21,21 +21,13 @@ SAMPLE_RATE = 24000
 
 @dataclass
 class Metrics:
-    chunk_processing_cost: Optional[float] = None
-    networking_cost: Optional[float] = None
-
-def recv_exact(sock: socket.socket, n: int) -> bytes:
-    buf = bytearray(n)
-    view = memoryview(buf)
-    total = 0
-    while total < n:
-        recieved = sock.recv_into(view[total:])
-        if recieved == 0:
-            raise EOFError("Socket closed while recieving data")
-        total += recieved
-    return bytes(buf)
+    first_chunk_time: Optional[float] = None
     
 def main():
+    # setup metrics
+    metrics = Metrics()
+
+    # setup pyaudio stream
     p = pyaudio.PyAudio()
     stream = p.open(
         format=pyaudio.paFloat32,
@@ -45,25 +37,44 @@ def main():
         frames_per_buffer=1024
     )
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect((HOST, PORT))
+    # connect to server
+    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    conn.connect((HOST, PORT))
     print("connected to server")
 
     try:
         while True:
-            # header = recv_exact(sock, 4)
-            # (chunk_size,) = struct.unpack("!I", header)
-            # data = recv_exact(sock, chunk_size)
-            data = sock.recv(1024)
+            # receive data from connection
+            data = conn.recv(1024)
+            
+            # Check if no more data (end of stream)
+            if not data:
+                break
+
+            # Record time of first chunk received
+            if metrics.first_chunk_time is None:
+                metrics.first_chunk_time = time.time()
+
+            # write data to pyaudio stream
             stream.write(data)
     except EOFError:
         print("Network thread: server closed connection")
     finally:
         stream.stop_stream()
         stream.close()
-        p.terminate
+        p.terminate()
+        
+        # Send first chunk time to server
         try:
-            sock.close()
+            if metrics.first_chunk_time is not None:
+                data = struct.pack('d', metrics.first_chunk_time)
+                conn.sendall(data)
+                print(f"Sent first chunk time: {metrics.first_chunk_time}")
+        except Exception as e:
+            print(f"Error sending first chunk time: {e}")
+        
+        try:
+            conn.close()
         except Exception:
             pass
 

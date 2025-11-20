@@ -37,17 +37,11 @@ AUDIO_PROMPT_PATH = Path(__file__).resolve().parents[4] / f"inputs/audio_prompts
 HOST = "0.0.0.0"
 PORT = 9000
 
-# @dataclass
-# class Metrics:
-#     """Metrics for streaming TTS generation"""
-#     networking_cost: Optional[float] = None
-#     text_processing_cost: Optional[float] = None
-#     generation_cost: Optional[float] = None
-#     speech_processing_cost: Optional[float] = None
-#     total_time: Optional[float] = None
-#     total_audio_duration: Optional[float] = None
-#     rtf: Optional[float] = None
-#     total_chunks = 0
+@dataclass
+class Metrics:
+    """Metrics for streaming TTS generation"""
+    start_time: Optional[float] = None
+    latency_to_first_chunk: Optional[float] = None
 
 # class AudioBuffer:
 #     def __init__(
@@ -233,6 +227,10 @@ def process_chunks(
     sf.write("stream_snapshot.wav", audio, SAMPLE_RATE)
 
 def main():
+    # Initialize metrics
+    metrics = Metrics()
+    metrics.start_time = time.time()
+
     # Initialize shared multiprocessing queues
     request_queue = torch.multiprocessing.Queue()
     chunk_queue = torch.multiprocessing.Queue()
@@ -260,6 +258,16 @@ def main():
 
     # Process generated chunks
     process_chunks(model=proc_model, chunk_queue=chunk_queue, conn=conn, context_window=CONTEXT_WINDOW)
+
+    # Receive first chunk time from client
+    try:
+        data = conn.recv(struct.calcsize('d'))
+        if data:
+            client_first_chunk_time = struct.unpack('d', data)[0]
+            metrics.latency_to_first_chunk = client_first_chunk_time - metrics.start_time
+            print(f"Latency to first chunk: {metrics.latency_to_first_chunk:.4f}s")
+    except Exception as e:
+        print(f"Error receiving first chunk time: {e}")
 
     # Send termination signal
     request_queue.put(None)
