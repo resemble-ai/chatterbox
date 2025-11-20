@@ -13,6 +13,7 @@ import multiprocessing
 import torch
 import numpy as np
 from chatterbox import ChatterboxTTS
+from chatterbox.tts import EOS, END_OF_REQUEST
 from pathlib import Path
 import soundfile as sf
 
@@ -147,7 +148,7 @@ PORT = 9000
 
 def load_model():
     model = ChatterboxTTS.from_pretrained(device = "cuda")
-    model.setup_stream(audio_prompt_path=AUDIO_PROMPT_PATH, exaggeration=EXAGGERATION, fade_duration=FADE_DURATION, eos=EOS)
+    model.setup_stream(audio_prompt_path=AUDIO_PROMPT_PATH, exaggeration=EXAGGERATION, fade_duration=FADE_DURATION)
     return model
 
 
@@ -197,7 +198,7 @@ def process_chunks(
             continue
             
         # Stream termiate signal
-        if token_chunk is None:
+        if token_chunk is END_OF_REQUEST:
             break
 
         # Extract only the conditional batch

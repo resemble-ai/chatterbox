@@ -32,6 +32,10 @@ import soundfile as sf
 
 REPO_ID = "ResembleAI/chatterbox"
 
+# Sentinel objects for stream control
+EOS = object()  # End of sentence sentinel
+END_OF_REQUEST = object()  # End of request sentinel
+
 
 def punc_norm(text: str) -> str:
     """
@@ -152,8 +156,6 @@ class ChatterboxTTS:
         self.fade_samples = None
         self.fade_in = None
         self.fade_out = None
-
-        self.EOS = None
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
@@ -436,17 +438,16 @@ class ChatterboxTTS:
                     top_p=top_p,
                 ):
                     yield token_chunk
-            yield self.EOS # Signals end of sentence
+            yield EOS # Signals end of sentence
 
-        yield None # Signals end of request
+        yield END_OF_REQUEST # Signals end of request
 
 
     def setup_stream(
         self,
         audio_prompt_path: Optional[str] = None,
         exaggeration: float = 0.5,
-        fade_duration: float = 0.001,
-        eos = None
+        fade_duration: float = 0.001
     ):
         # Prepare audio prompt if provided
         if audio_prompt_path:
@@ -467,10 +468,6 @@ class ChatterboxTTS:
         self.fade_samples = int(round(fade_duration * self.sr))
         self.fade_out = np.linspace(1.0, 0, self.fade_samples, endpoint=True, dtype=np.float32)
         self.fade_in = 1.0 - self.fade_out
-
-        if eos is None:
-            raise ValueError("Must provide end of sentence sentinel")
-        self.EOS = eos
 
     # def stream(
     #     self,
