@@ -320,16 +320,13 @@ class ChatterboxTTS:
         context_window,
         prev_tail
     ):
-        # Combine buffered chunks of tokens
-        new_tokens = torch.cat(token_buffer, dim=-1)
-
         # Build tokens_to_process by including a context window
         if len(all_tokens_so_far) > 0:
             context_tokens = all_tokens_so_far[-context_window:] # In the case that all_tokens_so_far is less than context tokens, python slicing will return al of all_tokens_so_far
-            tokens_to_process = torch.cat([context_tokens, new_tokens], dim=-1)
+            tokens_to_process = torch.cat([context_tokens, token_buffer], dim=-1)
             context_length = len(context_tokens)
         else:
-            tokens_to_process = new_tokens
+            tokens_to_process = token_buffer
             context_length = 0
 
 
