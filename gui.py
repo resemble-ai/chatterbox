@@ -79,6 +79,10 @@ class TTSThread(QThread):
                     # Progressive saving - save accumulated chunks after each sentence
                     self.progress.emit(f"Saving progress ({i}/{len(sentences)})...")
                     wav_so_far = torch.cat(wav_chunks, dim=-1)
+
+                    if wav_so_far.shape[0] == 1:
+                        wav_so_far = wav_so_far.repeat(2, 1)
+
                     if self.output_format == "mp3":
                         ta.save(self.output_path, wav_so_far, multilingual_model.sr, format="mp3")
                     else:
