@@ -32,9 +32,19 @@ import soundfile as sf
 
 REPO_ID = "ResembleAI/chatterbox"
 
+
+class _Sentinel:
+    """Sentinel object that survives pickling"""
+    def __init__(self, name):
+        self.name = name
+    
+    def __repr__(self):
+        return f"<{self.name}>"
+
+
 # Sentinel objects for stream control
-EOS = object()  # End of sentence sentinel
-END_OF_REQUEST = object()  # End of request sentinel
+EOS = _Sentinel("EOS")  # End of sentence sentinel
+END_OF_REQUEST = _Sentinel("END_OF_REQUEST")  # End of request sentinel
 
 
 def punc_norm(text: str) -> str:

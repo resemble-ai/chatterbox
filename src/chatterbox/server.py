@@ -192,13 +192,13 @@ def process_chunks(
         token_chunk = chunk_queue.get()
 
         # Check for end of sentence signal
-        if token_chunk is EOS:
+        if isinstance(token_chunk, type(EOS)) and token_chunk.name == "EOS":
             all_tokens_processed = []
             prev_tail = None
             continue
             
         # Stream termiate signal
-        if token_chunk is END_OF_REQUEST:
+        if isinstance(token_chunk, type(END_OF_REQUEST)) and token_chunk.name == "END_OF_REQUEST":
             break
 
         # Extract only the conditional batch
