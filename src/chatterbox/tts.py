@@ -129,8 +129,7 @@ class Conditionals:
 class ChatterboxTTS:
     ENC_COND_LEN = 6 * S3_SR
     DEC_COND_LEN = 10 * S3GEN_SR
-    
-    EOS = object() # end of sentence sentinel
+
 
     def __init__(
         self,
@@ -153,6 +152,8 @@ class ChatterboxTTS:
         self.fade_samples = None
         self.fade_in = None
         self.fade_out = None
+
+        self.EOS = None
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
@@ -400,58 +401,52 @@ class ChatterboxTTS:
             Tuple of (audio_chunk, metrics) where audio_chunk is a torch.Tensor
             and metrics contains timing information
         """
-        while True:
-            # BLOCKS until request is available
-            text = request_queue.get()
+        # chunk text by sentence to avoid token limit
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        sentences = [s.strip() for s in sentences]
+    
+        for s in sentences:
+            # Norm and tokenize text
+            sentence = punc_norm(s)
+            text_tokens = self.tokenizer.text_to_tokens(sentence).to(self.device)
+            
+            # While cfg_weight is not essential to TTS generation it improves quality of the output and adherence to conditions. For the purposes of this repository we will require it to be set to a non-zero value.
+            if not cfg_weight > 0.0:
+                raise ValueError("cfg_weight must be greater than zero")
+            text_tokens = torch.cat([text_tokens, text_tokens], dim=0) # Need two seqs for CFG.
 
-            # Checks for shutdown signal
-            if text is None: 
-                break
+            sot = self.t3.hp.start_text_token
+            eot = self.t3.hp.stop_text_token
+            text_tokens = F.pad(text_tokens, (1, 0), value=sot)
+            text_tokens = F.pad(text_tokens, (0, 1), value=eot)
 
-            # chunk text by sentence to avoid token limit
-            sentences = re.split(r'(?<=[.!?])\s+', text)
-            sentences = [s.strip() for s in sentences]
-        
-            for s in sentences:
-                # Norm and tokenize text
-                sentence = punc_norm(s)
-                text_tokens = self.tokenizer.text_to_tokens(sentence).to(self.device)
-                
-                # While cfg_weight is not essential to TTS generation it improves quality of the output and adherence to conditions. For the purposes of this repository we will require it to be set to a non-zero value.
-                if not cfg_weight > 0.0:
-                    raise ValueError("cfg_weight must be greater than zero")
-                text_tokens = torch.cat([text_tokens, text_tokens], dim=0) # Need two seqs for CFG.
+            # all_tokens_processed = []  # Keep track of all tokens processed so far
 
-                sot = self.t3.hp.start_text_token
-                eot = self.t3.hp.stop_text_token
-                text_tokens = F.pad(text_tokens, (1, 0), value=sot)
-                text_tokens = F.pad(text_tokens, (0, 1), value=eot)
+            with torch.inference_mode():
+                # Stream speech tokens
+                for token_chunk in self.t3.inference_stream(
+                    t3_cond=self.conds.t3,
+                    text_tokens=text_tokens,
+                    max_new_tokens=1000,
+                    temperature=temperature,
+                    cfg_weight=cfg_weight,
+                    chunk_size=chunk_size,
+                    repetition_penalty=repetition_penalty,
+                    min_p=min_p,
+                    top_p=top_p,
+                ):
+                    yield token_chunk
+            yield self.EOS # Signals end of sentence
 
-                # all_tokens_processed = []  # Keep track of all tokens processed so far
-
-                with torch.inference_mode():
-                    # Stream speech tokens
-                    for token_chunk in self.t3.inference_stream(
-                        t3_cond=self.conds.t3,
-                        text_tokens=text_tokens,
-                        max_new_tokens=1000,
-                        temperature=temperature,
-                        cfg_weight=cfg_weight,
-                        chunk_size=chunk_size,
-                        repetition_penalty=repetition_penalty,
-                        min_p=min_p,
-                        top_p=top_p,
-                    ):
-                        yield token_chunk
-                yield EOS # Signals end of sentence
-            yield None
+        yield None # Signals end of request
 
 
     def setup_stream(
         self,
         audio_prompt_path: Optional[str] = None,
         exaggeration: float = 0.5,
-        fade_duration: float = 0.001
+        fade_duration: float = 0.001,
+        eos = None
     ):
         # Prepare audio prompt if provided
         if audio_prompt_path:
@@ -473,76 +468,80 @@ class ChatterboxTTS:
         self.fade_out = np.linspace(1.0, 0, self.fade_samples, endpoint=True, dtype=np.float32)
         self.fade_in = 1.0 - self.fade_out
 
-    def stream(
-        self,
-        context_window: int = 50
-    ):
-        # Create queue for unprocessed chunks
-        chunk_queue = multiprocessing.Queue()
-        request_queue = multiprocessing.Queue()
+        if eos is None:
+            raise ValueError("Must provide end of sentence sentinel")
+        self.EOS = eos
 
-        # Start generation subprocess
-        generation = torch.multiprocessing.Process(target=self.generate_stream, args=(request_queue, chunk_queue))
-        generation.start()
+    # def stream(
+    #     self,
+    #     context_window: int = 50
+    # ):
+    #     # Create queue for unprocessed chunks
+    #     chunk_queue = multiprocessing.Queue()
+    #     request_queue = multiprocessing.Queue()
+
+    #     # Start generation subprocess
+    #     generation = torch.multiprocessing.Process(target=self.generate_stream, args=(request_queue, chunk_queue))
+    #     generation.start()
     
-        # Setup Server
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        server.bind((HOST, PORT))
-        server.listen(1)
-        print("waiting for connection...")
-        client, addr = server.accept()
-        print(f"client {addr} connected to port {PORT}\n")
+    #     # Setup Server
+    #     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #     server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    #     server.bind((HOST, PORT))
+    #     server.listen(1)
+    #     print("waiting for connection...")
+    #     client, addr = server.accept()
+    #     print(f"client {addr} connected to port {PORT}\n")
 
-        prev_tail = None # Keeps track of the previous chunk tail for cross fading
-        all_tokens_processed = [] # Stores previous tokens to fill context window
-        all_audio_processed = np.zeros(0, dtype=np.float32) # Stores all audio chunks produced
+    #     prev_tail = None # Keeps track of the previous chunk tail for cross fading
+    #     all_tokens_processed = [] # Stores previous tokens to fill context window
+    #     all_audio_processed = np.zeros(0, dtype=np.float32) # Stores all audio chunks produced
 
-        while True:
-            # Wait on generated tokens
-            token_chunk = chunk_queue.get()
+    #     while True:
+    #         # Wait on generated tokens
+    #         token_chunk = chunk_queue.get()
 
-            # Check for end of sentence signal
-            if token_chunk is EOS:
-                all_tokens_processed = []
-                prev_tail = None
-                continue
+    #         # Check for end of sentence signal
+    #         if token_chunk is EOS:
+    #             all_tokens_processed = []
+    #             prev_tail = None
+    #             continue
                 
-            # Stream termiate signal
-            if token_chunk is None:
-                break
+    #         # Stream termiate signal
+    #         if token_chunk is None:
+    #             break
 
-            # Extract only the conditional batch
-            token_chunk = token_chunk[0]
+    #         # Extract only the conditional batch
+    #         token_chunk = token_chunk[0]
 
-            # Process chunk TODO-> consider only using the previous chunk for each context window cut down on np cat operations
-            audio_chunk, new_tail, success = self._process_token_buffer(
-                token_buffer=[token_chunk],
-                all_tokens_processed=all_tokens_processed,
-                context_window=context_window,
-                prev_tail=prev_tail
-            )
+    #         # Process chunk TODO-> consider only using the previous chunk for each context window cut down on np cat operations
+    #         audio_chunk, new_tail, success = self._process_token_buffer(
+    #             token_buffer=[token_chunk],
+    #             all_tokens_processed=all_tokens_processed,
+    #             context_window=context_window,
+    #             prev_tail=prev_tail
+    #         )
 
-            if success:
-                # Send audio over TCP
-                data = audio_chunk.tobytes()
-                client.sendall(data)
+    #         if success:
+    #             # Send audio over TCP
+    #             data = audio_chunk.tobytes()
+    #             client.sendall(data)
 
-                # Store new tail
-                prev_tail = new_tail
+    #             # Store new tail
+    #             prev_tail = new_tail
 
-                # Store new audio
-                all_audio_processed = np.concatenate([all_audio_processed, audio_chunk], dtype=np.float32)
+    #             # Store new audio
+    #             all_audio_processed = np.concatenate([all_audio_processed, audio_chunk], dtype=np.float32)
             
-            # Store new tokens
-            if len(all_tokens_processed) == 0:
-                all_tokens_processed = token_chunk
-            else:
-                all_tokens_processed = torch.cat([all_tokens_processed, token_chunk], dim=-1)
+    #         # Store new tokens
+    #         if len(all_tokens_processed) == 0:
+    #             all_tokens_processed = token_chunk
+    #         else:
+    #             all_tokens_processed = torch.cat([all_tokens_processed, token_chunk], dim=-1)
 
-        # Reconstruct stored audio
-        sf.write("stream_snapshot.wav", audio, SAMPLE_RATE)
-        client.close()
+    #     # Reconstruct stored audio
+    #     sf.write("stream_snapshot.wav", audio, SAMPLE_RATE)
+    #     client.close()
 
 
 
