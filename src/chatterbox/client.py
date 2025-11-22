@@ -18,14 +18,8 @@ from typing import Optional
 HOST = "195.26.233.44"
 PORT = 34521
 SAMPLE_RATE = 24000
-
-@dataclass
-class Metrics:
-    first_chunk_time: Optional[float] = None
     
 def main():
-    # setup metrics
-    metrics = Metrics()
 
     # setup pyaudio stream
     p = pyaudio.PyAudio()
@@ -40,39 +34,32 @@ def main():
     # connect to server
     conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     conn.connect((HOST, PORT))
+    conn.settimeout(10.0)
     print("connected to server")
 
     try:
         while True:
             # receive data from connection
             data = conn.recv(1024)
-            
-            # Check if no more data (end of stream)
-            if not data:
-                break
 
-            # Record time of first chunk received
-            if metrics.first_chunk_time is None:
-                metrics.first_chunk_time = time.time()
+            # If server closes connection, recv returns b''
+            if not data:
+                print("Server closed connection")
+                break
 
             # write data to pyaudio stream
             stream.write(data)
+    except socket.timeout:
+        print("Network thread: socket timeout, no data received")
     except EOFError:
         print("Network thread: server closed connection")
     finally:
+        # cleanup pyaudio
         stream.stop_stream()
         stream.close()
         p.terminate()
-        
-        # Send first chunk time to server
-        try:
-            if metrics.first_chunk_time is not None:
-                data = struct.pack('d', metrics.first_chunk_time)
-                conn.sendall(data)
-                print(f"Sent first chunk time: {metrics.first_chunk_time}")
-        except Exception as e:
-            print(f"Error sending first chunk time: {e}")
-        
+
+        # close connection       
         try:
             conn.close()
         except Exception:
