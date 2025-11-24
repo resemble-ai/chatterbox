@@ -42,8 +42,8 @@ class EnTokenizer:
         return ids
 
     def decode(self, seq):
-        if isinstance(seq, torch.Tensor):
-            seq = seq.cpu().numpy()
+        # if isinstance(seq, torch.Tensor):
+        #     seq = seq.cpu().numpy()
 
         txt: str = self.tokenizer.decode(seq, skip_special_tokens=False)
         txt = txt.replace(' ', '')
@@ -305,8 +305,8 @@ class MTLTokenizer:
         return self.tokenizer.encode(txt).ids
 
     def decode(self, seq):
-        if isinstance(seq, torch.Tensor):
-            seq = seq.cpu().numpy()
+        # if isinstance(seq, torch.Tensor):
+        #     seq = seq.cpu().numpy()
 
         txt = self.tokenizer.decode(seq, skip_special_tokens=False)
         txt = txt.replace(' ', '').replace(SPACE, ' ').replace(EOT, '').replace(UNK, '')

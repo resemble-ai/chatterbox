@@ -471,81 +471,13 @@ class ChatterboxTTS:
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
 
+        # Setup t3 model
+        self.t3.setup_model()
+
         # Setup cross-fading configs
         self.fade_samples = int(round(fade_duration * self.sr))
         self.fade_out = np.linspace(1.0, 0, self.fade_samples, endpoint=True, dtype=np.float32)
         self.fade_in = 1.0 - self.fade_out
-
-    # def stream(
-    #     self,
-    #     context_window: int = 50
-    # ):
-    #     # Create queue for unprocessed chunks
-    #     chunk_queue = multiprocessing.Queue()
-    #     request_queue = multiprocessing.Queue()
-
-    #     # Start generation subprocess
-    #     generation = torch.multiprocessing.Process(target=self.generate_stream, args=(request_queue, chunk_queue))
-    #     generation.start()
-    
-    #     # Setup Server
-    #     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #     server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    #     server.bind((HOST, PORT))
-    #     server.listen(1)
-    #     print("waiting for connection...")
-    #     client, addr = server.accept()
-    #     print(f"client {addr} connected to port {PORT}\n")
-
-    #     prev_tail = None # Keeps track of the previous chunk tail for cross fading
-    #     all_tokens_processed = [] # Stores previous tokens to fill context window
-    #     all_audio_processed = np.zeros(0, dtype=np.float32) # Stores all audio chunks produced
-
-    #     while True:
-    #         # Wait on generated tokens
-    #         token_chunk = chunk_queue.get()
-
-    #         # Check for end of sentence signal
-    #         if token_chunk is EOS:
-    #             all_tokens_processed = []
-    #             prev_tail = None
-    #             continue
-                
-    #         # Stream termiate signal
-    #         if token_chunk is None:
-    #             break
-
-    #         # Extract only the conditional batch
-    #         token_chunk = token_chunk[0]
-
-    #         # Process chunk TODO-> consider only using the previous chunk for each context window cut down on np cat operations
-    #         audio_chunk, new_tail, success = self._process_token_buffer(
-    #             token_buffer=[token_chunk],
-    #             all_tokens_processed=all_tokens_processed,
-    #             context_window=context_window,
-    #             prev_tail=prev_tail
-    #         )
-
-    #         if success:
-    #             # Send audio over TCP
-    #             data = audio_chunk.tobytes()
-    #             client.sendall(data)
-
-    #             # Store new tail
-    #             prev_tail = new_tail
-
-    #             # Store new audio
-    #             all_audio_processed = np.concatenate([all_audio_processed, audio_chunk], dtype=np.float32)
-            
-    #         # Store new tokens
-    #         if len(all_tokens_processed) == 0:
-    #             all_tokens_processed = token_chunk
-    #         else:
-    #             all_tokens_processed = torch.cat([all_tokens_processed, token_chunk], dim=-1)
-
-    #     # Reconstruct stored audio
-    #     sf.write("stream_snapshot.wav", audio, SAMPLE_RATE)
-    #     client.close()
 
 
 

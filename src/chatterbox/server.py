@@ -24,12 +24,12 @@ import socket
 SAMPLE_RATE = 24000
 
 FADE_DURATION = 0.005
-CONTEXT_WINDOW = 50
+CONTEXT_WINDOW = 250
 
 EXAGGERATION = 0.5
 CFG_WEIGHT = 0.5
 TEMPERATURE = 0.8
-CHUNK_SIZE = 25
+CHUNK_SIZE = 15
 
 prompt_file_name = "1_0.5_1.0_0.5_True_0.9.wav"
 AUDIO_PROMPT_PATH = Path(__file__).resolve().parents[4] / f"inputs/audio_prompts/{prompt_file_name}"
@@ -146,7 +146,9 @@ def main():
 
     # Create processing model instance
     proc_model = load_model()
-    time.sleep(20.0) # wait for models to finish loading
+
+    # wait for models to finish loading
+    time.sleep(15.0)
 
     # Create TCP conneciton with client
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -158,7 +160,7 @@ def main():
     print(f"client {addr} connected to port {PORT}\n")
 
     # Send warmup request
-    request = "Playback will begin shortly. Warming up the model."
+    request = "Warming up the model."
     request_queue.put(request)
 
     # Process generated chunks
@@ -167,7 +169,7 @@ def main():
     # reset metrics
     metrics.audio_duration = 0.0
     metrics.first_chunk_time = None
-    time.sleep(6.0)
+    time.sleep(5.0)
 
     # Send request
     request = "Active-duty U S military personnel get special baggage allowances with Delta. When traveling on orders or for personal travel, you’ll receive baggage fee exceptions and extra checked bag benefits. These allowances apply to all branches, including the Marine Corps, Army, Air Force, Space Force, Navy, and Coast Guard. There may be some regional weight or embargo restrictions. Would you like me to text you a link with the full details for military baggage policies?" 
@@ -177,15 +179,6 @@ def main():
     # Process generated chunks
     process_chunks(model=proc_model, chunk_queue=chunk_queue, conn=conn, context_window=CONTEXT_WINDOW, metrics=metrics)
 
-    # # Receive first chunk time from client
-    # try:
-    #     data = conn.recv(struct.calcsize('d'))
-    #     if data:
-    #         metrics.playback_start_time = struct.unpack('d', data)[0]
-    #     else:
-    #         raise ValueError("data is None, cannot calculate latency")
-    # except Exception as e:
-    #     print(f"Error receiving first chunk time: {e}")
 
     # Send termination signal
     request_queue.put(None)

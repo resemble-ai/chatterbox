@@ -76,6 +76,32 @@ class T3(nn.Module):
     def device(self):
         return self.speech_head.weight.device
 
+    def setup_model(self):
+        """
+        Setup model if not compiled.
+        """
+        #Default to None for English models, only create for multilingual.
+        alignment_stream_analyzer = None
+        # if self.hp.is_multilingual:
+        #     alignment_stream_analyzer = AlignmentStreamAnalyzer(
+        #         self.tfmr,
+        #         None,
+        #         text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
+        #         alignment_layer_idx=9,
+        #         eos_idx=self.hp.stop_speech_token,
+        #     )
+
+        patched_model = T3HuggingfaceBackend(
+            config=self.cfg,
+            llama=self.tfmr,
+            speech_enc=self.speech_emb,
+            speech_head=self.speech_head,
+            alignment_stream_analyzer=alignment_stream_analyzer,
+        )
+        
+        self.patched_model = patched_model
+        self.compiled = True
+
     def prepare_conditioning(self, t3_cond: T3Cond):
         """
         Token cond data needs to be embedded, so that needs to be here instead of in `T3CondEnc`.
@@ -435,33 +461,32 @@ class T3(nn.Module):
             speech_tokens=initial_speech_tokens,
             cfg_weight=cfg_weight
         )
+        
+        # NOTE -> For Real time applications we should not be compiling the model every time inference_stream is called, this should be done in setup
+        # self.compiled = False
+        # # Setup model if not compiled
+        # if not self.compiled:
+        #     # Default to None for English models, only create for multilingual
+        #     alignment_stream_analyzer = None
+        #     # if self.hp.is_multilingual:
+        #     #     raise ValueError("hp.is_multilingual should be set to false")
+        #     #     alignment_stream_analyzer = AlignmentStreamAnalyzer(
+        #     #         self.tfmr,
+        #     #         None,
+        #     #         text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
+        #     #         alignment_layer_idx=9,
+        #     #         eos_idx=self.hp.stop_speech_token,
+        #     #     )
 
-        self.compiled = False
-
-        # Setup model if not compiled
-        if not self.compiled:
-            # Default to None for English models, only create for multilingual
-            alignment_stream_analyzer = None
-            if self.hp.is_multilingual:
-                # NOTE -> Raise error if multilingual
-                raise ValueError("hp.is_multilingual should be set to false")
-                alignment_stream_analyzer = AlignmentStreamAnalyzer(
-                    self.tfmr,
-                    None,
-                    text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
-                    alignment_layer_idx=9,
-                    eos_idx=self.hp.stop_speech_token,
-                )
-
-            patched_model = T3HuggingfaceBackend(
-                config=self.cfg,
-                llama=self.tfmr,
-                speech_enc=self.speech_emb,
-                speech_head=self.speech_head,
-                alignment_stream_analyzer=alignment_stream_analyzer,
-            )
-            self.patched_model = patched_model
-            self.compiled = True
+        #     patched_model = T3HuggingfaceBackend(
+        #         config=self.cfg,
+        #         llama=self.tfmr,
+        #         speech_enc=self.speech_emb,
+        #         speech_head=self.speech_head,
+        #         alignment_stream_analyzer=alignment_stream_analyzer,
+        #     )
+        #     self.patched_model = patched_model
+        #     self.compiled = True
 
         device = embeds.device
 

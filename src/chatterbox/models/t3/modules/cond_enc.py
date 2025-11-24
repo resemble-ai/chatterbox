@@ -33,7 +33,7 @@ class T3Cond:
         torch.save(self.__dict__, fpath)
 
     @staticmethod
-    def load(fpath, map_location="cpu"):
+    def load(fpath, map_location="cuda"):
         kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
         return T3Cond(**kwargs)
 
