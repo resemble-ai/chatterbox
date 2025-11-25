@@ -348,7 +348,12 @@ class ChatterboxTTS:
         wav = wav.squeeze(0).detach().cpu().numpy()
 
         # If we have context tokens, crop out the samples corresponding to them
-        # TODO -> this seems impercise considering different tokens may have different audio lengths. Something to consider.
+        """
+        NOTE
+        Samples_per_token calculation assumes that each token corresponds to an equal number of samples. 
+        This is a simplification and may not hold true for all tokenization schemes or models.
+          For more accurate results, consider using alignment information if available.
+        """
         if context_length > 0:
             samples_per_token = len(wav) / len(speech_tokens)
             skip_samples = int(context_length * samples_per_token)
