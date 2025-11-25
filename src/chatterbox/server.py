@@ -23,13 +23,13 @@ import socket
 
 SAMPLE_RATE = 24000
 
-FADE_DURATION = 0.005
+FADE_DURATION = 0.01
 CONTEXT_WINDOW = 250
 
 EXAGGERATION = 0.5
-CFG_WEIGHT = 0.5
+CFG_WEIGHT = 0.3
 TEMPERATURE = 0.8
-CHUNK_SIZE = 15
+CHUNK_SIZE = 25
 
 prompt_file_name = "1_0.5_1.0_0.5_True_0.9.wav"
 AUDIO_PROMPT_PATH = Path(__file__).resolve().parents[4] / f"inputs/audio_prompts/{prompt_file_name}"
@@ -80,8 +80,8 @@ def process_chunks(
     model: ChatterboxTTS,
     chunk_queue: torch.multiprocessing.Queue,
     conn: socket.socket,
-    context_window: int = 25,
-    metrics = None
+    context_window: int,
+    metrics
 ):
     prev_tail = None # Keeps track of the previous chunk tail for cross fading
     all_tokens_processed = [] # Stores previous tokens to fill context window

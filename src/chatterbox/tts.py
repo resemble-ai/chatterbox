@@ -27,7 +27,7 @@ import multiprocessing
 import socket
 import struct
 import soundfile as sf
-
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -166,6 +166,7 @@ class ChatterboxTTS:
         self.fade_samples = None
         self.fade_in = None
         self.fade_out = None
+        self.sentence_splitter = None
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
@@ -347,6 +348,11 @@ class ChatterboxTTS:
         )
         wav = wav.squeeze(0).detach().cpu().numpy()
 
+        for i in range(len(wav)):
+            if wav[i] == 0:
+                print(f"{len(wav)}-{i}")
+
+
         # If we have context tokens, crop out the samples corresponding to them
         """
         NOTE
@@ -483,6 +489,13 @@ class ChatterboxTTS:
         self.fade_samples = int(round(fade_duration * self.sr))
         self.fade_out = np.linspace(1.0, 0, self.fade_samples, endpoint=True, dtype=np.float32)
         self.fade_in = 1.0 - self.fade_out
+
+        # create sentence splitter for pause based chunking
+        self.sentence_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=25,
+            chunk_overlap=0,
+            separators=[".", " ", ","]
+        )
 
 
 

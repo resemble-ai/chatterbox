@@ -525,6 +525,7 @@ class T3(nn.Module):
 
         # ---- Generation Loop using kv_cache ----
         for i in range(max_new_tokens):
+
             logits_step = output.logits[:, -1, :]
 
             # CFG combine -> (1, V)
@@ -583,5 +584,6 @@ class T3(nn.Module):
             
             # Update the kv_cache.
             past = output.past_key_values
+
 
         
