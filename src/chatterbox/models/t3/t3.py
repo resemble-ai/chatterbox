@@ -52,6 +52,9 @@ class T3(nn.Module):
         super().__init__()
         self.hp = hp
         self.cfg = LlamaConfig(**LLAMA_CONFIGS[hp.llama_config_name])
+        # Set attention implementation to 'eager' to support output_attentions
+        # SDPA (default) doesn't support output_attentions needed for alignment analysis
+        self.cfg._attn_implementation = 'eager'
         self.tfmr = LlamaModel(self.cfg)
         self.dim = self.cfg.hidden_size
         self.deepspeed_patch_applied = False

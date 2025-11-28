@@ -14,7 +14,7 @@ dependencies = [
     "s3tokenizer",
     "torch==2.6.0",
     "torchaudio==2.6.0",
-    "transformers==4.46.3",
+    "transformers>=4.53.0",
     "diffusers==0.29.0",
     "resemble-perth==1.0.1",
     "conformer==0.3.2",

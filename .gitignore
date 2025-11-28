@@ -1,4 +1,7 @@
 .vscode
+.idea
+.DS_Store
+.env
 
 # Pylance
 pyrightconfig.json
