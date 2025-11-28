@@ -296,12 +296,15 @@ class S3Token2Mel(torch.nn.Module):
 
         print("[FORWARD] Running flow inference...")
         log_memory("before_flow_inference")
-        output_mels, _ = self.flow.inference(
+        output_mels, flow_cache = self.flow.inference(
             token=speech_tokens,
             token_len=speech_token_lens,
             finalize=finalize,
             **ref_dict,
         )
+        # Explicitly delete flow_cache to prevent memory leak
+        if flow_cache is not None:
+            del flow_cache
         log_tensor_info(output_mels, "output_mels")
         log_memory("after_flow_inference")
 

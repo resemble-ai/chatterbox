@@ -27,6 +27,16 @@ from ..utils import AttrDict
 logger = logging.getLogger(__name__)
 
 
+def clear_device_memory():
+    """Clear GPU memory for both CUDA and MPS devices."""
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    elif hasattr(torch, 'mps') and torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
+
 def get_memory_mb():
     return psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
 
@@ -338,8 +348,7 @@ class T3(nn.Module):
         # ---- Initial Forward Pass (no kv_cache yet) ----
         # Add memory cleanup before the memory-intensive operation
         import gc
-        torch.cuda.empty_cache() if torch.cuda.is_available() else None
-        gc.collect()
+        clear_device_memory()
 
         # Use gradient checkpointing to reduce memory usage
         original_gradient_checkpointing = getattr(self.patched_model, 'gradient_checkpointing', False)
@@ -367,8 +376,7 @@ class T3(nn.Module):
         # (Previously disabled here, but keeping it on reduces memory usage)
 
         # Clean up memory after initial forward pass
-        torch.cuda.empty_cache() if torch.cuda.is_available() else None
-        gc.collect()
+        clear_device_memory()
 
         # ---- Generation Loop using kv_cache ----
         for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
@@ -431,9 +439,28 @@ class T3(nn.Module):
 
             # Aggressive memory cleanup every 10 steps
             if i % 10 == 0:
-                torch.cuda.empty_cache() if torch.cuda.is_available() else None
-                gc.collect()
+                clear_device_memory()
 
         # Concatenate all predicted tokens along the sequence dimension.
         predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
+        
+        # CRITICAL: Clean up KV cache and intermediate tensors to prevent memory leak
+        del past
+        del output
+        del embeds
+        del inputs_embeds
+        del bos_embed
+        del bos_token
+        del generated_ids
+        for p in predicted:
+            del p
+        del predicted
+        
+        # Reset alignment stream analyzer state if it exists
+        if self.patched_model.alignment_stream_analyzer is not None:
+            self.patched_model.alignment_stream_analyzer.reset()
+        
+        # Force memory cleanup
+        clear_device_memory()
+        
         return predicted_tokens

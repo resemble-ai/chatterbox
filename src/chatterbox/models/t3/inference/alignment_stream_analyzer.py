@@ -176,3 +176,16 @@ class AlignmentStreamAnalyzer:
 
         self.curr_frame_pos += 1
         return logits
+
+    def reset(self):
+        """Reset the analyzer state between inference calls to prevent memory leaks."""
+        i, j = self.text_tokens_slice
+        self.alignment = torch.zeros(0, j-i)
+        self.curr_frame_pos = 0
+        self.text_position = 0
+        self.started = False
+        self.started_at = None
+        self.complete = False
+        self.completed_at = None
+        self.generated_tokens = []
+        self.last_aligned_attns = [None] * len(self.last_aligned_attns)

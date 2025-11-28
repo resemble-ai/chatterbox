@@ -23,6 +23,16 @@ from .models.t3.modules.cond_enc import T3Cond
 def get_memory_mb():
     return psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
 
+
+def clear_device_memory():
+    """Clear GPU memory for both CUDA and MPS devices."""
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    elif hasattr(torch, 'mps') and torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
 REPO_ID = "ResembleAI/chatterbox"
 
 # Supported languages for the multilingual model
@@ -236,8 +246,7 @@ class ChatterboxMultilingualTTS:
 
             # Add memory cleanup before tokenization
             import gc
-            torch.cuda.empty_cache() if torch.cuda.is_available() else None
-            gc.collect()
+            clear_device_memory()
 
             # Use smaller max_len to be extra safe
             safe_max_len = min(plen, 150)  # 150 tokens for better quality
@@ -245,8 +254,7 @@ class ChatterboxMultilingualTTS:
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
 
             # More memory cleanup after tokenization
-            torch.cuda.empty_cache() if torch.cuda.is_available() else None
-            gc.collect()
+            clear_device_memory()
 
         # Voice-encoder speaker embedding
         ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR))
@@ -371,8 +379,16 @@ class ChatterboxMultilingualTTS:
         generate_baseline = get_memory_mb()
         print(f"generate_baseline: {generate_baseline:.1f}")
         with torch.inference_mode():
-            # Use mixed precision inference for better memory efficiency
-            with torch.autocast(device_type='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float16, enabled=torch.cuda.is_available()):
+            # Determine device type and autocast settings
+            # Note: MPS has limited autocast support, so we only enable for CUDA
+            if torch.cuda.is_available():
+                device_type = 'cuda'
+                autocast_enabled = True
+            else:
+                device_type = 'cpu'
+                autocast_enabled = False
+            
+            with torch.autocast(device_type=device_type, dtype=torch.float16, enabled=autocast_enabled):
                 speech_tokens = self.t3.inference(
                     t3_cond=self.conds.t3,
                     text_tokens=text_tokens,
@@ -408,6 +424,10 @@ class ChatterboxMultilingualTTS:
                 wav = wav.squeeze(0).detach().cpu().numpy()
 
                 print(f"after_s3gen_inference: {after_s3gen_inference:.1f}")
+        
+        # Force memory cleanup after generation
+        clear_device_memory()
+        
         return torch.from_numpy(wav).unsqueeze(0)
 
     def _split_text_intelligently(self, text, language_id, target_words_per_chunk=50):

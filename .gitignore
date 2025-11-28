@@ -3,6 +3,8 @@
 .DS_Store
 .env
 
+audiobook_cache
+
 # Pylance
 pyrightconfig.json
 
