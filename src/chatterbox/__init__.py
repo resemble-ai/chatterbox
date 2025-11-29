@@ -9,3 +9,13 @@ __version__ = version("chatterbox")
 from .tts import ChatterboxTTS
 from .vc import ChatterboxVC
 from .mtl_tts import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
+from .models import DEBUG_LOGGING, is_debug
+
+__all__ = [
+    "ChatterboxTTS",
+    "ChatterboxVC",
+    "ChatterboxMultilingualTTS",
+    "SUPPORTED_LANGUAGES",
+    "DEBUG_LOGGING",
+    "is_debug",
+]

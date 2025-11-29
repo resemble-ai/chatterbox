@@ -32,10 +32,7 @@ from .transformer.upsample_encoder import UpsampleConformerEncoder
 from .flow_matching import CausalConditionalCFM
 from .decoder import ConditionalDecoder
 from .configs import CFM_PARAMS
-
-# Controlled debug logging flag. Set environment variable `CHATTERBOX_DEBUG=1` to enable.
-DEBUG_LOGGING = os.environ.get("CHATTERBOX_DEBUG", "0") == "1"
-
+from ..utils import is_debug
 
 def log_message(msg, level="info"):
     """Log a message only when `DEBUG_LOGGING` is enabled.
@@ -45,7 +42,7 @@ def log_message(msg, level="info"):
     """
     if level == "error":
         logging.error(msg)
-    elif not DEBUG_LOGGING:
+    elif not is_debug():
         return
     if level == "debug":
         logging.debug(msg)
