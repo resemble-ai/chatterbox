@@ -21,7 +21,7 @@ from .modules.t3_config import T3Config
 from .llama_configs import LLAMA_CONFIGS
 from .inference.t3_hf_backend import T3HuggingfaceBackend
 from .inference.alignment_stream_analyzer import AlignmentStreamAnalyzer
-from ..utils import AttrDict
+from ..utils import AttrDict, get_optimal_dtype_str
 
 
 logger = logging.getLogger(__name__)
