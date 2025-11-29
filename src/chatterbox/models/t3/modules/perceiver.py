@@ -8,6 +8,8 @@ from torch import nn
 import torch.nn.functional as F
 from einops import rearrange
 
+from chatterbox.models.utils import contiguous_permute
+
 
 class RelativePositionBias(nn.Module):
     def __init__(self, scale, causal=False, num_buckets=32, max_distance=128, heads=8):
@@ -109,9 +111,14 @@ class AttentionQKV(nn.Module):
         return out
 
     def split_heads(self, x):
+        """Split tensor into attention heads.
+        
+        Note: permute creates non-contiguous views. We make them contiguous
+        for MPS Metal kernel compatibility in subsequent matmul operations.
+        """
         bs, length, _ = x.shape
         x = x.view(bs, length, self.n_heads, self.head_dim)
-        return x.permute(0, 2, 1, 3)
+        return contiguous_permute(x, 0, 2, 1, 3)  # contiguous for MPS matmul
 
     def combine_heads(self, x):
         bs, _, length, _ = x.shape

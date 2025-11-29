@@ -415,11 +415,12 @@ class CAMPPlus(torch.nn.Module):
                     torch.nn.init.zeros_(m.bias)
 
     def forward(self, x):
-        x = x.permute(0, 2, 1)  # (B,T,F) => (B,F,T)
+        # permute creates non-contiguous views - make contiguous for MPS kernels
+        x = x.permute(0, 2, 1).contiguous()  # (B,T,F) => (B,F,T)
         x = self.head(x)
         x = self.xvector(x)
         if self.output_level == "frame":
-            x = x.transpose(1, 2)
+            x = x.transpose(1, 2).contiguous()  # ensure contiguous for downstream ops
         return x
 
     def inference(self, audio_list):

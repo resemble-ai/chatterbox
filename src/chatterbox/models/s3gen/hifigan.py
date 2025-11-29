@@ -28,6 +28,8 @@ from torch.nn.utils import remove_weight_norm
 from torch.nn.utils.parametrizations import weight_norm
 from torch.distributions.uniform import Uniform
 from torch import nn, sin, pow
+
+from chatterbox.models.utils import contiguous_transpose
 from torch.nn import Parameter
 
 
@@ -273,9 +275,10 @@ class SourceModuleHnNSF(torch.nn.Module):
         """
         # source for harmonic branch
         with torch.no_grad():
-            sine_wavs, uv, _ = self.l_sin_gen(x.transpose(1, 2))
-            sine_wavs = sine_wavs.transpose(1, 2)
-            uv = uv.transpose(1, 2)
+            # transpose creates non-contiguous views - make contiguous for MPS kernels
+            sine_wavs, uv, _ = self.l_sin_gen(contiguous_transpose(x, 1, 2))
+            sine_wavs = contiguous_transpose(sine_wavs, 1, 2)
+            uv = contiguous_transpose(uv, 1, 2)
         sine_merge = self.l_tanh(self.l_linear(sine_wavs))
 
         # source for noise branch, in the same shape as uv
@@ -498,7 +501,8 @@ class HiFTGenerator(nn.Module):
             batch: dict,
             device: torch.device,
     ) -> Dict[str, Optional[torch.Tensor]]:
-        speech_feat = batch['speech_feat'].transpose(1, 2).to(device)
+        # transpose creates non-contiguous view - make contiguous for MPS kernels
+        speech_feat = contiguous_transpose(batch['speech_feat'], 1, 2).to(device)
         # mel->f0
 
         # MEMORY_FIX: Clear any f0_predictor cache before inference
@@ -506,12 +510,12 @@ class HiFTGenerator(nn.Module):
             self.f0_predictor.clear_cache()
 
         f0 = self.f0_predictor(speech_feat)
-        # f0->source
-        s_upsampled = self.f0_upsamp(f0[:, None]).transpose(1, 2)
+        # f0->source - ensure contiguous after transpose for MPS kernels
+        s_upsampled = contiguous_transpose(self.f0_upsamp(f0[:, None]), 1, 2)
         s, *source_extras = self.m_source(s_upsampled)
         del s_upsampled, source_extras  # MEMORY_FIX: Clean up immediately
 
-        s = s.transpose(1, 2)
+        s = contiguous_transpose(s, 1, 2)  # ensure contiguous for decode
         # s = self.f0_upsamp(f0[:, None]).transpose(1, 2)  # bs,n,t
         # s, _, _ = self.m_source(s)
         # s = s.transpose(1, 2)
@@ -535,12 +539,12 @@ class HiFTGenerator(nn.Module):
             self.f0_predictor.clear_cache()
 
         f0 = self.f0_predictor(speech_feat)
-        # f0->source
-        s_upsampled = self.f0_upsamp(f0[:, None]).transpose(1, 2)
+        # f0->source - ensure contiguous after transpose for MPS kernels
+        s_upsampled = contiguous_transpose(self.f0_upsamp(f0[:, None]), 1, 2)
         s, *source_extras = self.m_source(s_upsampled)
         del s_upsampled, source_extras  # MEMORY_FIX: Clean up immediately
 
-        s = s.transpose(1, 2)
+        s = contiguous_transpose(s, 1, 2)  # ensure contiguous for decode
         # s = self.f0_upsamp(f0[:, None]).transpose(1, 2)  # bs,n,t
         # s, _, _ = self.m_source(s)
         # s = s.transpose(1, 2)

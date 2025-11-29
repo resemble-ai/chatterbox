@@ -15,6 +15,8 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.parametrizations import weight_norm
 
+from chatterbox.models.utils import contiguous_transpose
+
 
 class ConvRNNF0Predictor(nn.Module):
     def __init__(self,
@@ -51,5 +53,6 @@ class ConvRNNF0Predictor(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.condnet(x)
-        x = x.transpose(1, 2)
+        # transpose creates non-contiguous view - make contiguous for MPS Linear kernel
+        x = contiguous_transpose(x, 1, 2)
         return torch.abs(self.classifier(x).squeeze(-1))

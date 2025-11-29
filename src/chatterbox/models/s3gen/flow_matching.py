@@ -16,6 +16,7 @@ import torch
 import torch.nn.functional as F
 from .matcha.flow_matching import BASECFM
 from .configs import CFM_PARAMS
+from chatterbox.models.utils import ensure_contiguous
 
 
 class ConditionalCFM(BASECFM):
@@ -83,14 +84,24 @@ class ConditionalCFM(BASECFM):
             spks (torch.Tensor, optional): speaker ids. Defaults to None.
                 shape: (batch_size, spk_emb_dim)
             cond: Not used but kept for future purposes
+            
+        Note on MPS Contiguity:
+            The x tensor is iteratively updated in-place during the ODE solve.
+            If x becomes non-contiguous (from reshape/view operations), MPS 
+            in-place operations like addcmul_ may fail silently. We ensure
+            contiguity at the start and after split operations.
         """
         t, _, dt = t_span[0], t_span[-1], t_span[1] - t_span[0]
         t = t.unsqueeze(dim=0)
+        
+        # Ensure x is contiguous at start - critical for MPS ODE solver stability
+        x = ensure_contiguous(x)
 
         # NOTE: If trajectory debugging is needed in the future, add a return_trajectory=False parameter
         # and conditionally collect: if return_trajectory: trajectory.append(x.clone())
 
         # Do not use concat, it may cause memory format changed and trt infer with wrong results!
+        # Pre-allocate contiguous buffers for CFG inference
         x_in = torch.zeros([2, 80, x.size(2)], device=x.device, dtype=x.dtype)
         mask_in = torch.zeros([2, 1, x.size(2)], device=x.device, dtype=x.dtype)
         mu_in = torch.zeros([2, 80, x.size(2)], device=x.device, dtype=x.dtype)
@@ -111,7 +122,10 @@ class ConditionalCFM(BASECFM):
                 spks_in,
                 cond_in
             )
+            # torch.split may return views - ensure contiguity for MPS in-place ops
             dphi_dt, cfg_dphi_dt = torch.split(dphi_dt, [x.size(0), x.size(0)], dim=0)
+            dphi_dt = ensure_contiguous(dphi_dt)
+            cfg_dphi_dt = ensure_contiguous(cfg_dphi_dt)
             dphi_dt = ((1.0 + self.inference_cfg_rate) * dphi_dt - self.inference_cfg_rate * cfg_dphi_dt)
             x = x + dt * dphi_dt
             t = t + dt

@@ -32,7 +32,7 @@ from .transformer.upsample_encoder import UpsampleConformerEncoder
 from .flow_matching import CausalConditionalCFM
 from .decoder import ConditionalDecoder
 from .configs import CFM_PARAMS
-from ..utils import is_debug
+from chatterbox.models.utils import is_debug, contiguous_transpose
 
 def log_message(msg, level="info"):
     """Log a message only when `DEBUG_LOGGING` is enabled.
@@ -221,7 +221,8 @@ class S3Token2Mel(torch.nn.Module):
 
         log_message("[EMBED_REF] Extracting mel spectrogram...")
         log_memory("before_mel_extraction")
-        ref_mels_24 = self.mel_extractor(ref_wav_24).transpose(1, 2).to(device)
+        # transpose creates non-contiguous view - make contiguous for MPS kernels
+        ref_mels_24 = contiguous_transpose(self.mel_extractor(ref_wav_24), 1, 2).to(device)
         log_tensor_info(ref_mels_24, "ref_mels_24")
         log_memory("after_mel_extraction")
         ref_mels_24_len = None
