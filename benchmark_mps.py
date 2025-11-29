@@ -21,6 +21,7 @@ import statistics
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from pathlib import Path
+from chatterbox.models.utils import get_memory_info
 
 
 # ============================================================================
@@ -119,18 +120,17 @@ that AI benefits humanity as a whole.
 # ============================================================================
 
 def get_memory_mb() -> float:
-    """Get current process memory usage in MB."""
-    return psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+    """Get current system memory usage in GB, converted to MB for compatibility."""
+    info = get_memory_info()
+    return info['sys_used_gb'] * 1024
 
 
 def get_gpu_memory_mb(device: str) -> Optional[float]:
     """Get GPU memory usage if available."""
-    if device == "mps" and torch.backends.mps.is_available():
-        # MPS doesn't have direct memory query, but we can get allocation info
-        try:
-            return torch.mps.current_allocated_memory() / 1024 / 1024
-        except AttributeError:
-            return None
+    info = get_memory_info()
+
+    if device == "mps" and 'mps_allocated_mb' in info:
+        return info['mps_allocated_mb']
     elif device == "cuda" and torch.cuda.is_available():
         return torch.cuda.memory_allocated() / 1024 / 1024
     return None
@@ -183,6 +183,7 @@ class SingleRunResult:
     gpu_memory_mb: Optional[float]
     audio_duration_seconds: float
     realtime_factor: float  # audio_duration / generation_time
+    wav: Optional[Any] = None
 
 
 @dataclass
@@ -277,45 +278,81 @@ class ChatterboxBenchmark:
             self.model.prepare_conditionals(self.config.audio_prompt_path)
             print("  ✓ Voice conditionals prepared")
     
-    def run_single_generation(self, text: str, run_id: int = 0) -> SingleRunResult:
-        """Run a single TTS generation and collect metrics."""
+    def run_single_generation(self, text: str, run_id: int = 0, keep_wav: bool = False, category: str = "short") -> SingleRunResult:
+        """Run a single TTS generation and collect metrics.
+
+        If `keep_wav` is True, the returned SingleRunResult will contain the generated
+        waveform in its `wav` field and the function will NOT delete the tensor or
+        clear GPU memory. Caller is responsible for deleting the tensor and clearing
+        memory after saving.
+
+        Args:
+            text: Text to generate
+            run_id: Run number (used for audio prompt handling)
+            keep_wav: Whether to keep the waveform in the result
+            category: Text category ("short", "medium", "long", "extra_long")
+        """
         clear_memory(self.current_device)
-        
+
         mem_before = get_memory_mb()
         gpu_mem_before = get_gpu_memory_mb(self.current_device)
-        
+
         start_time = time.time()
-        
+
+        # Use generate_long() for long texts to avoid truncation
+        use_long_generation = category in ["long", "extra_long"]
+
         # Generate audio
         if self.config.model_type == "multilingual":
-            wav = self.model.generate(
-                text,
-                language_id="en",
-                audio_prompt_path=self.config.audio_prompt_path if run_id == 0 else None,
-                exaggeration=0.5,
-                cfg_weight=0.5,
-            )
+            if use_long_generation:
+                wav = self.model.generate_long(
+                    text,
+                    language_id="en",
+                    audio_prompt_path=self.config.audio_prompt_path if run_id == 0 else None,
+                    exaggeration=0.5,
+                    cfg_weight=0.5,
+                    chunk_size_words=50,
+                    overlap_duration=0.1,
+                )
+            else:
+                wav = self.model.generate(
+                    text,
+                    language_id="en",
+                    audio_prompt_path=self.config.audio_prompt_path if run_id == 0 else None,
+                    exaggeration=0.5,
+                    cfg_weight=0.5,
+                )
         else:
-            wav = self.model.generate(
-                text,
-                audio_prompt_path=self.config.audio_prompt_path if run_id == 0 else None,
-                exaggeration=0.5,
-                cfg_weight=0.5,
-            )
-        
+            if use_long_generation:
+                wav = self.model.generate_long(
+                    text,
+                    audio_prompt_path=self.config.audio_prompt_path if run_id == 0 else None,
+                    exaggeration=0.5,
+                    cfg_weight=0.5,
+                    chunk_size_words=50,
+                    overlap_duration=0.1,
+                )
+            else:
+                wav = self.model.generate(
+                    text,
+                    audio_prompt_path=self.config.audio_prompt_path if run_id == 0 else None,
+                    exaggeration=0.5,
+                    cfg_weight=0.5,
+                )
+
         generation_time = time.time() - start_time
-        
+
         mem_after = get_memory_mb()
         gpu_mem_after = get_gpu_memory_mb(self.current_device)
-        
+
         # Calculate audio duration
         sample_rate = self.model.sr
         audio_samples = wav.shape[-1]
         audio_duration = audio_samples / sample_rate
-        
+
         # Calculate real-time factor
         realtime_factor = audio_duration / generation_time if generation_time > 0 else 0
-        
+
         result = SingleRunResult(
             device=self.current_device,
             text_length_words=word_count(text),
@@ -327,12 +364,14 @@ class ChatterboxBenchmark:
             gpu_memory_mb=gpu_mem_after,
             audio_duration_seconds=audio_duration,
             realtime_factor=realtime_factor,
+            wav=wav if keep_wav else None,
         )
-        
-        # CRITICAL: Explicitly delete tensor and clear memory to prevent leaks
-        del wav
-        clear_memory(self.current_device)
-        
+
+        # If caller does not want to keep the waveform, delete it and clear memory.
+        if not keep_wav:
+            del wav
+            clear_memory(self.current_device)
+
         return result
     
     def benchmark_text(self, text: str, category: str) -> BenchmarkResult:
@@ -343,19 +382,27 @@ class ChatterboxBenchmark:
         
         print(f"\n  Testing: {preview}")
         print(f"  Length: {text_words} words, {text_chars} chars")
-        
+
+        # Indicate which generation method will be used
+        if category in ["long", "extra_long"]:
+            print(f"  Method: generate_long() with chunking (50 words/chunk)")
+        else:
+            print(f"  Method: generate() (single-pass)")
+
         # Warmup runs
         print(f"  Warmup runs: ", end="", flush=True)
         for i in range(self.config.warmup_runs):
-            self.run_single_generation(text, run_id=i)
+            self.run_single_generation(text, run_id=i, category=category)
             print(".", end="", flush=True)
         print(" done")
-        
+
         # Benchmark runs
         print(f"  Benchmark runs: ", end="", flush=True)
         run_results: List[SingleRunResult] = []
         for i in range(self.config.benchmark_runs):
-            result = self.run_single_generation(text, run_id=i + self.config.warmup_runs)
+            # Keep the waveform from the last timed run if we want to save audio
+            keep = self.config.save_audio and (i == self.config.benchmark_runs - 1)
+            result = self.run_single_generation(text, run_id=i + self.config.warmup_runs, keep_wav=keep, category=category)
             run_results.append(result)
             print(".", end="", flush=True)
         print(" done")
@@ -391,10 +438,21 @@ class ChatterboxBenchmark:
         print(f"  → Time: {result.mean_time:.2f}s ± {result.std_time:.2f}s")
         print(f"  → Real-time factor: {result.mean_realtime_factor:.2f}x")
         print(f"  → Throughput: {result.words_per_second:.1f} words/s, {result.chars_per_second:.1f} chars/s")
-        
-        # Force aggressive cleanup between benchmarks
+        # Save the last waveform immediately if requested to avoid re-generating
+        if self.config.save_audio:
+            last_wav = run_results[-1].wav
+            if last_wav is not None:
+                output_path = Path(self.config.output_dir) / f"{self.current_device}_{category}.wav"
+                ta.save(str(output_path), last_wav, self.model.sr)
+                print(f"  → Saved: {output_path}")
+                # Remove reference from the stored result so memory can be freed
+                run_results[-1].wav = None
+                del last_wav
+                clear_memory(self.current_device)
+
+        # Force aggressive cleanup between benchmarks (if wav was not kept earlier)
         clear_memory(self.current_device)
-        
+
         return result
     
     def run_benchmarks(self):
@@ -429,26 +487,8 @@ class ChatterboxBenchmark:
                 result = self.benchmark_text(text, category)
                 self.results.append(result)
                 
-                # Save audio if requested
-                if self.config.save_audio:
-                    # Generate one final time for saving
-                    if self.config.model_type == "multilingual":
-                        wav = self.model.generate(
-                            text,
-                            language_id="en",
-                            exaggeration=0.5,
-                            cfg_weight=0.5,
-                        )
-                    else:
-                        wav = self.model.generate(
-                            text,
-                            exaggeration=0.5,
-                            cfg_weight=0.5,
-                        )
-                    
-                    output_path = Path(self.config.output_dir) / f"{device}_{category}.wav"
-                    ta.save(str(output_path), wav, self.model.sr)
-                    print(f"  → Saved: {output_path}")
+                # Note: audio is saved immediately inside `benchmark_text` to avoid
+                # regenerating a sample. No further action needed here.
     
     def print_summary(self):
         """Print benchmark summary table."""

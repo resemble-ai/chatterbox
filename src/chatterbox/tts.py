@@ -246,7 +246,7 @@ class ChatterboxTTS:
             speech_tokens = self.t3.inference(
                 t3_cond=self.conds.t3,
                 text_tokens=text_tokens,
-                max_new_tokens=1000,  # TODO: use the value in config
+                max_new_tokens=self.t3.hp.max_speech_tokens,
                 temperature=temperature,
                 cfg_weight=cfg_weight,
                 repetition_penalty=repetition_penalty,
@@ -270,3 +270,274 @@ class ChatterboxTTS:
             wav = wav.squeeze(0).detach().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
         return torch.from_numpy(watermarked_wav).unsqueeze(0)
+
+    def _split_text_intelligently(self, text, target_words_per_chunk=50):
+        """
+        Split text at sentence/phrase boundaries for chunked generation.
+
+        Args:
+            text: Input text to split
+            target_words_per_chunk: Target number of words per chunk
+
+        Returns:
+            List of text chunks
+        """
+        import re
+
+        # Split AFTER punctuation using lookbehind
+        sentence_pattern = r'(?<=[.!?])\s+'
+
+        # Split into sentences
+        sentences = [s.strip() for s in re.split(sentence_pattern, text) if s.strip()]
+
+        # Group sentences into chunks of approximately target_words_per_chunk
+        chunks = []
+        current_chunk = []
+        current_word_count = 0
+
+        for sentence in sentences:
+            if not sentence.strip():
+                continue
+            word_count = len(sentence.split())
+
+            if current_word_count + word_count > target_words_per_chunk and current_chunk:
+                # Start new chunk
+                chunks.append(' '.join(current_chunk))
+                current_chunk = [sentence]
+                current_word_count = word_count
+            else:
+                current_chunk.append(sentence)
+                current_word_count += word_count
+
+        # Add remaining chunk
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+
+        return chunks if chunks else [text]
+
+    def _crossfade_chunks(self, chunks, overlap_duration=1.0):
+        """
+        Concatenate audio chunks with crossfading in overlap regions.
+
+        Args:
+            chunks: List of audio tensors (1D numpy arrays or tensors)
+            overlap_duration: Duration of crossfade in seconds
+
+        Returns:
+            Single concatenated audio tensor
+        """
+        import numpy as np
+
+        if len(chunks) == 0:
+            return torch.tensor([])
+        if len(chunks) == 1:
+            chunk = chunks[0]
+            if isinstance(chunk, torch.Tensor):
+                chunk_np = chunk.detach().cpu().numpy()
+            else:
+                chunk_np = chunk
+            # Ensure 1D output (squeeze if needed)
+            if chunk_np.ndim == 2:
+                chunk_np = chunk_np.squeeze(0)
+            return chunk_np
+
+        overlap_samples = int(overlap_duration * self.sr)
+
+        # Convert all chunks to numpy
+        np_chunks = []
+        for chunk in chunks:
+            if isinstance(chunk, torch.Tensor):
+                chunk_np = chunk.detach().cpu().numpy()
+            else:
+                chunk_np = chunk
+            if chunk_np.ndim == 2:
+                chunk_np = chunk_np.squeeze(0)
+            np_chunks.append(chunk_np)
+
+        # Start with first chunk
+        result = np_chunks[0]
+
+        # Crossfade and concatenate remaining chunks
+        for i in range(1, len(np_chunks)):
+            current_chunk = np_chunks[i]
+
+            if len(result) < overlap_samples or len(current_chunk) < overlap_samples:
+                # Not enough samples for crossfade, just concatenate
+                result = np.concatenate([result, current_chunk])
+            else:
+                # Create crossfade
+                fade_out = np.linspace(1.0, 0.0, overlap_samples)
+                fade_in = np.linspace(0.0, 1.0, overlap_samples)
+
+                # Apply crossfade to overlapping region
+                overlap_result = result[-overlap_samples:] * fade_out
+                overlap_current = current_chunk[:overlap_samples] * fade_in
+                overlap_mixed = overlap_result + overlap_current
+
+                # Concatenate: result (minus overlap) + mixed overlap + rest of current
+                result = np.concatenate([
+                    result[:-overlap_samples],
+                    overlap_mixed,
+                    current_chunk[overlap_samples:]
+                ])
+
+        return result
+
+    def generate_long(
+        self,
+        text,
+        audio_prompt_path=None,
+        exaggeration=0.5,
+        cfg_weight=0.5,
+        temperature=0.8,
+        repetition_penalty=1.2,
+        min_p=0.05,
+        top_p=1.0,
+        chunk_size_words=50,
+        overlap_duration=0.1,
+        progress_callback=None,
+    ):
+        """
+        Generate long audio by chunking text with crossfading between chunks.
+
+        This method is optimized for generating speech from long text (>50 words) without
+        running out of memory or hitting generation limits. It splits the text into smaller
+        chunks, generates audio for each chunk independently, and seamlessly combines them
+        with crossfading.
+
+        **When to use:**
+        - Text longer than ~50 words
+        - Documents, articles, or long-form content
+        - When standard generate() produces truncated or poor-quality audio
+
+        **How it works:**
+        1. Splits text intelligently at sentence/phrase boundaries
+        2. Generates audio for each chunk using the reference voice
+        3. Crossfades chunks together for smooth transitions
+
+        Args:
+            text: Input text to synthesize (any length)
+            audio_prompt_path: Path to reference audio file for voice cloning. If None, uses
+                             previously prepared conditionals via `prepare_conditionals()`.
+            exaggeration: Voice exaggeration/expressiveness level (0.0-1.0). Higher values
+                        produce more expressive speech. Default: 0.5
+            cfg_weight: Classifier-free guidance weight (0.0-1.0). Higher values follow
+                      conditioning more closely. Default: 0.5
+            temperature: Sampling temperature for token generation (0.0-2.0). Higher values
+                       increase randomness. Default: 0.8
+            repetition_penalty: Penalty for repeating tokens (1.0-3.0). Higher values reduce
+                              repetition. Default: 1.2
+            min_p: Minimum probability threshold for sampling. Default: 0.05
+            top_p: Nucleus sampling threshold. Default: 1.0 (no filtering)
+            chunk_size_words: Target number of words per chunk. Default: 50. Increase for
+                            faster generation but higher memory usage; decrease for lower
+                            memory usage.
+            overlap_duration: Duration in seconds of crossfade between chunks. Default: 0.1.
+                            For speech, shorter crossfades (0.05-0.2s) work better to avoid
+                            blending words. Increase only for music-like content.
+            progress_callback: Optional callback function to monitor generation progress.
+                             Called with (stage, **kwargs) at various stages:
+                             - "preparing_conditionals": Before loading reference audio
+                             - "text_split": After splitting text into chunks
+                             - "chunk_start": Before generating each chunk
+                             - "chunk_complete": After generating each chunk
+                             - "crossfading": Before combining chunks
+                             - "complete": After final audio is ready
+
+        Returns:
+            torch.Tensor: Generated audio waveform with shape (1, num_samples) at 24kHz sample rate.
+
+        Raises:
+            AssertionError: If audio_prompt_path is None and conditionals haven't been prepared.
+
+        Example:
+            >>> model = ChatterboxTTS.from_pretrained(device="mps")
+            >>> long_text = "This is a very long text that spans multiple sentences..."
+            >>>
+            >>> def progress_handler(stage, **kwargs):
+            ...     if stage == "chunk_start":
+            ...         print(f"Generating chunk {kwargs['chunk_number']}/{kwargs['total_chunks']}")
+            >>>
+            >>> wav = model.generate_long(
+            ...     long_text,
+            ...     audio_prompt_path="reference.wav",
+            ...     chunk_size_words=50,
+            ...     overlap_duration=1.0,
+            ...     progress_callback=progress_handler
+            ... )
+            >>> import torchaudio as ta
+            >>> ta.save("long_output.wav", wav, model.sr)
+        """
+        # Prepare initial conditioning
+        if audio_prompt_path:
+            if progress_callback:
+                progress_callback(stage="preparing_conditionals", audio_path=audio_prompt_path)
+            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
+        else:
+            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+
+        # Split text into chunks
+        text_chunks = self._split_text_intelligently(text, target_words_per_chunk=chunk_size_words)
+
+        if progress_callback:
+            progress_callback(
+                stage="text_split",
+                total_chunks=len(text_chunks),
+                chunk_previews=[(i+1, len(chunk.split()), chunk[:50]) for i, chunk in enumerate(text_chunks)]
+            )
+
+        all_audio_chunks = []
+
+        # Generate each chunk
+        for i, text_chunk in enumerate(text_chunks):
+            if progress_callback:
+                progress_callback(
+                    stage="chunk_start",
+                    chunk_index=i,
+                    chunk_number=i+1,
+                    total_chunks=len(text_chunks),
+                    text_preview=text_chunk[:50],
+                    word_count=len(text_chunk.split())
+                )
+
+            # Generate audio for this chunk
+            audio = self.generate(
+                text_chunk,
+                audio_prompt_path=None,  # Use cached conditionals
+                exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
+                temperature=temperature,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
+            )
+
+            all_audio_chunks.append(audio)
+
+            if progress_callback:
+                progress_callback(
+                    stage="chunk_complete",
+                    chunk_index=i,
+                    chunk_number=i+1,
+                    total_chunks=len(text_chunks),
+                    audio_shape=audio.shape
+                )
+
+        # Crossfade and concatenate all chunks
+        if progress_callback:
+            progress_callback(
+                stage="crossfading",
+                total_chunks=len(all_audio_chunks),
+                overlap_duration=overlap_duration
+            )
+
+        final_audio = self._crossfade_chunks(all_audio_chunks, overlap_duration)
+
+        if progress_callback:
+            progress_callback(
+                stage="complete",
+                total_chunks=len(all_audio_chunks),
+                final_audio_shape=(1, len(final_audio))
+            )
+
+        return torch.from_numpy(final_audio).unsqueeze(0)
