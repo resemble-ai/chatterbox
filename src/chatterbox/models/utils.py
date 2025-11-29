@@ -17,6 +17,11 @@ def is_debug():
 # Module-level constant preserved for import-time compatibility.
 DEBUG_LOGGING = is_debug()
 
+# Enable MPS allocator debug logging when CHATTERBOX_DEBUG is enabled
+# See: https://docs.pytorch.org/docs/stable/mps_environment_variables.html
+if DEBUG_LOGGING:
+    environ["PYTORCH_DEBUG_MPS_ALLOCATOR"] = "1"
+
 def get_optimal_dtype(device=None):
     """
     Returns the optimal dtype for the given device.

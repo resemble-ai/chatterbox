@@ -87,9 +87,8 @@ class ConditionalCFM(BASECFM):
         t, _, dt = t_span[0], t_span[-1], t_span[1] - t_span[0]
         t = t.unsqueeze(dim=0)
 
-        # I am storing this because I can later plot it by putting a debugger here and saving it to a file
-        # Or in future might add like a return_all_steps flag
-        sol = []
+        # NOTE: If trajectory debugging is needed in the future, add a return_trajectory=False parameter
+        # and conditionally collect: if return_trajectory: trajectory.append(x.clone())
 
         # Do not use concat, it may cause memory format changed and trt infer with wrong results!
         x_in = torch.zeros([2, 80, x.size(2)], device=x.device, dtype=x.dtype)
@@ -116,11 +115,10 @@ class ConditionalCFM(BASECFM):
             dphi_dt = ((1.0 + self.inference_cfg_rate) * dphi_dt - self.inference_cfg_rate * cfg_dphi_dt)
             x = x + dt * dphi_dt
             t = t + dt
-            sol.append(x)
             if step < len(t_span) - 1:
                 dt = t_span[step + 1] - t
 
-        return sol[-1].float()
+        return x.float()
 
     def forward_estimator(self, x, mask, mu, t, spks, cond):
         if isinstance(self.estimator, torch.nn.Module):
@@ -188,7 +186,19 @@ class ConditionalCFM(BASECFM):
 class CausalConditionalCFM(ConditionalCFM):
     def __init__(self, in_channels=240, cfm_params=CFM_PARAMS, n_spks=1, spk_emb_dim=80, estimator=None):
         super().__init__(in_channels, cfm_params, n_spks, spk_emb_dim, estimator)
-        self.rand_noise = torch.randn([1, 80, 50 * 300])
+        self._rand_noise = None  # Lazy allocation - saves ~5MB at init
+
+    def _get_rand_noise(self, size: int, device, dtype):
+        """Lazily allocate and cache random noise tensor.
+        
+        Memory Impact: Saves ~5MB during model loading
+        Quality Impact: None (maintains deterministic noise values)
+        """
+        if self._rand_noise is None or self._rand_noise.size(2) < size:
+            # Allocate with some headroom to avoid frequent reallocations
+            alloc_size = max(size, 50 * 300)  # Default: 15000 frames
+            self._rand_noise = torch.randn([1, 80, alloc_size])
+        return self._rand_noise[:, :, :size].to(device=device, dtype=dtype)
 
     @torch.inference_mode()
     def forward(self, mu, mask, n_timesteps, temperature=1.0, spks=None, cond=None):
@@ -210,7 +220,7 @@ class CausalConditionalCFM(ConditionalCFM):
                 shape: (batch_size, n_feats, mel_timesteps)
         """
 
-        z = self.rand_noise[:, :, :mu.size(2)].to(mu.device).to(mu.dtype) * temperature
+        z = self._get_rand_noise(mu.size(2), mu.device, mu.dtype) * temperature
         # fix prompt and overlap part mu and z
         t_span = torch.linspace(0, 1, n_timesteps + 1, device=mu.device, dtype=mu.dtype)
         if self.t_scheduler == 'cosine':
