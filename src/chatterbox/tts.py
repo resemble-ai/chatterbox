@@ -14,6 +14,7 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from .models.utils import clear_device_memory
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -318,6 +319,9 @@ class ChatterboxTTS:
     def _crossfade_chunks(self, chunks, overlap_duration=1.0):
         """
         Concatenate audio chunks with crossfading in overlap regions.
+        
+        OPTIMIZED: Uses single final concatenation instead of iterative concatenation
+        to avoid O(n²) memory copying and fragmentation on MPS/unified memory systems.
 
         Args:
             chunks: List of audio tensors (1D numpy arrays or tensors)
@@ -329,7 +333,7 @@ class ChatterboxTTS:
         import numpy as np
 
         if len(chunks) == 0:
-            return torch.tensor([])
+            return np.array([], dtype=np.float32)
         if len(chunks) == 1:
             chunk = chunks[0]
             if isinstance(chunk, torch.Tensor):
@@ -343,7 +347,7 @@ class ChatterboxTTS:
 
         overlap_samples = int(overlap_duration * self.sr)
 
-        # Convert all chunks to numpy
+        # Convert all chunks to numpy (already on CPU from generate())
         np_chunks = []
         for chunk in chunks:
             if isinstance(chunk, torch.Tensor):
@@ -354,33 +358,51 @@ class ChatterboxTTS:
                 chunk_np = chunk_np.squeeze(0)
             np_chunks.append(chunk_np)
 
-        # Start with first chunk
-        result = np_chunks[0]
+        # EFFICIENT CONCATENATION: Build list of segments, concatenate once at end
+        # This avoids O(n²) memory copying from iterative np.concatenate
+        segments_to_concat = []
+        
+        # Process first chunk - add everything except the overlap region at the end
+        first_chunk = np_chunks[0]
+        if len(first_chunk) > overlap_samples and len(np_chunks) > 1:
+            segments_to_concat.append(first_chunk[:-overlap_samples])
+            prev_overlap_region = first_chunk[-overlap_samples:]
+        else:
+            # First chunk too short for overlap, will handle in loop
+            prev_overlap_region = None
+            segments_to_concat.append(first_chunk)
 
-        # Crossfade and concatenate remaining chunks
+        # Process middle and last chunks
         for i in range(1, len(np_chunks)):
             current_chunk = np_chunks[i]
-
-            if len(result) < overlap_samples or len(current_chunk) < overlap_samples:
-                # Not enough samples for crossfade, just concatenate
-                result = np.concatenate([result, current_chunk])
-            else:
+            is_last = (i == len(np_chunks) - 1)
+            
+            # Check if we can do crossfade
+            if prev_overlap_region is not None and len(current_chunk) >= overlap_samples:
                 # Create crossfade
-                fade_out = np.linspace(1.0, 0.0, overlap_samples)
-                fade_in = np.linspace(0.0, 1.0, overlap_samples)
+                fade_out = np.linspace(1.0, 0.0, overlap_samples, dtype=np.float32)
+                fade_in = np.linspace(0.0, 1.0, overlap_samples, dtype=np.float32)
+                
+                overlap_mixed = prev_overlap_region * fade_out + current_chunk[:overlap_samples] * fade_in
+                segments_to_concat.append(overlap_mixed)
+                
+                if is_last:
+                    # Last chunk: add everything after overlap
+                    segments_to_concat.append(current_chunk[overlap_samples:])
+                else:
+                    # Middle chunk: add middle section, save end for next crossfade
+                    if len(current_chunk) > 2 * overlap_samples:
+                        segments_to_concat.append(current_chunk[overlap_samples:-overlap_samples])
+                    prev_overlap_region = current_chunk[-overlap_samples:]
+            else:
+                # Can't crossfade (chunk too short), just append
+                segments_to_concat.append(current_chunk)
+                prev_overlap_region = None if is_last else (
+                    current_chunk[-overlap_samples:] if len(current_chunk) >= overlap_samples else None
+                )
 
-                # Apply crossfade to overlapping region
-                overlap_result = result[-overlap_samples:] * fade_out
-                overlap_current = current_chunk[:overlap_samples] * fade_in
-                overlap_mixed = overlap_result + overlap_current
-
-                # Concatenate: result (minus overlap) + mixed overlap + rest of current
-                result = np.concatenate([
-                    result[:-overlap_samples],
-                    overlap_mixed,
-                    current_chunk[overlap_samples:]
-                ])
-
+        # Single concatenation at the end - O(n) instead of O(n²)
+        result = np.concatenate(segments_to_concat)
         return result
 
     def generate_long(
@@ -512,7 +534,15 @@ class ChatterboxTTS:
                 top_p=top_p,
             )
 
+            # MEMORY OPTIMIZATION: Move to CPU immediately to free MPS memory
+            # The generate() method already returns CPU tensors, but we ensure
+            # proper cleanup of any intermediate MPS tensors here
+            if isinstance(audio, torch.Tensor):
+                audio = audio.detach().cpu()
             all_audio_chunks.append(audio)
+            
+            # Aggressive memory cleanup after each chunk to prevent "staircase" growth
+            clear_device_memory()
 
             if progress_callback:
                 progress_callback(

@@ -1,6 +1,17 @@
 from os import environ
+import gc
 from torch import bfloat16, float16, float32, cuda, backends, mps
 from psutil import virtual_memory
+
+
+def clear_device_memory():
+    """Clear GPU memory for both CUDA and MPS devices."""
+    gc.collect()
+    if cuda.is_available():
+        cuda.empty_cache()
+    elif hasattr(backends, 'mps') and backends.mps.is_available():
+        mps.empty_cache()
+
 
 class AttrDict(dict):
     def __init__(self, *args, **kwargs):
