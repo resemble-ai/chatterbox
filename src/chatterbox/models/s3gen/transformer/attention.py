@@ -22,6 +22,8 @@ from typing import Tuple
 import torch
 from torch import nn
 
+from chatterbox.models.utils import contiguous_transpose
+
 
 class MultiHeadedAttention(nn.Module):
     """Multi-Head Attention layer.
@@ -67,15 +69,20 @@ class MultiHeadedAttention(nn.Module):
                 (#batch, n_head, time2, d_k).
             torch.Tensor: Transformed value tensor, size
                 (#batch, n_head, time2, d_k).
-
+                
+        Note:
+            transpose() creates non-contiguous views. MPS Metal kernels require
+            contiguous tensors for optimal performance. We make q,k,v contiguous
+            before the matmul in attention scoring.
         """
         n_batch = query.size(0)
         q = self.linear_q(query).view(n_batch, -1, self.h, self.d_k)
         k = self.linear_k(key).view(n_batch, -1, self.h, self.d_k)
         v = self.linear_v(value).view(n_batch, -1, self.h, self.d_k)
-        q = q.transpose(1, 2)  # (batch, head, time1, d_k)
-        k = k.transpose(1, 2)  # (batch, head, time2, d_k)
-        v = v.transpose(1, 2)  # (batch, head, time2, d_k)
+        # transpose creates non-contiguous views - make contiguous for MPS kernels
+        q = contiguous_transpose(q, 1, 2)  # (batch, head, time1, d_k)
+        k = contiguous_transpose(k, 1, 2)  # (batch, head, time2, d_k)
+        v = contiguous_transpose(v, 1, 2)  # (batch, head, time2, d_k)
 
         return q, k, v
 
@@ -304,17 +311,17 @@ class RelPositionMultiHeadedAttention(MultiHeadedAttention):
 
         n_batch_pos = pos_emb.size(0)
         p = self.linear_pos(pos_emb).view(n_batch_pos, -1, self.h, self.d_k)
-        p = p.transpose(1, 2)  # (batch, head, time1, d_k)
+        p = contiguous_transpose(p, 1, 2)  # (batch, head, time1, d_k) - contiguous for MPS
 
+        # (batch, head, time1, d_k) - ensure contiguous after transpose for MPS matmul
+        q_with_bias_u = contiguous_transpose(q + self.pos_bias_u.to(q.device), 1, 2)
         # (batch, head, time1, d_k)
-        q_with_bias_u = (q + self.pos_bias_u.to(q.device)).transpose(1, 2)
-        # (batch, head, time1, d_k)
-        q_with_bias_v = (q + self.pos_bias_v.to(q.device)).transpose(1, 2)
+        q_with_bias_v = contiguous_transpose(q + self.pos_bias_v.to(q.device), 1, 2)
 
         # compute attention score
         # first compute matrix a and matrix c
         # as described in https://arxiv.org/abs/1901.02860 Section 3.3
-        # (batch, head, time1, time2)
+        # (batch, head, time1, time2) - k is already contiguous from forward_qkv
         matrix_ac = torch.matmul(q_with_bias_u, k.transpose(-2, -1))
 
         # compute matrix b and matrix d

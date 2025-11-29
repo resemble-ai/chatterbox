@@ -171,7 +171,7 @@ class MaskedDiffWithXvec(torch.nn.Module):
             mask=mask.unsqueeze(1),
             spks=embedding,
             cond=conds,
-            n_timesteps=10,
+            n_timesteps=5,  # Midpoint: 5 steps × 2 evals = 10 total (vs Euler 10 steps × 1 eval = 10)
             prompt_len=mel_len1,
             flow_cache=flow_cache
         )
@@ -283,7 +283,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
             mask=mask.unsqueeze(1),
             spks=embedding,
             cond=conds,
-            n_timesteps=10
+            n_timesteps=5  # Midpoint: 5 steps × 2 evals = 10 total (vs Euler 10 steps × 1 eval = 10)
         )
         feat = feat[:, :, mel_len1:]
         assert feat.shape[2] == mel_len2
