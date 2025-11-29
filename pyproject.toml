@@ -26,6 +26,12 @@ dependencies = [
 
 ]
 
+[project.optional-dependencies]
+mlx = [
+    "mlx>=0.30.0",
+    "mlx-lm>=0.28.3",
+]
+
 [project.urls]
 Homepage = "https://github.com/michaelcreatesstuff/chatterbox"
 Repository = "https://github.com/michaelcreatesstuff/chatterbox"
