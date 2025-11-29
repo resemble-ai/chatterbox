@@ -117,8 +117,16 @@ def generate_audiobook(script, voices, output_dir="./audiobook_output"):
         print("=" * 80)
         print("Combining segments into audiobook...")
         
-        # Simple concatenation (could add silence between segments if desired)
-        combined_audio = torch.cat([seg[0] for seg in all_segments], dim=1)
+        # EFFICIENT CONCATENATION: Move to CPU first, collect in list, single cat at end
+        # This avoids O(n²) memory copying and MPS memory fragmentation
+        cpu_segments = []
+        for seg, speaker in all_segments:
+            # Ensure tensor is on CPU to free MPS memory
+            cpu_seg = seg.detach().cpu() if seg.device.type != 'cpu' else seg
+            cpu_segments.append(cpu_seg)
+        
+        # Single concatenation in system RAM
+        combined_audio = torch.cat(cpu_segments, dim=1)
         
         audiobook_file = output_path / "complete_audiobook.wav"
         ta.save(audiobook_file, combined_audio, model.sr)

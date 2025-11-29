@@ -1,4 +1,3 @@
-
 <img width="1200" height="600" alt="Chatterbox-Multilingual" src="https://www.resemble.ai/wp-content/uploads/2025/09/Chatterbox-Multilingual-1.png" />
 
 # Chatterbox TTS
@@ -8,7 +7,7 @@
 [![Alt Text](https://static-public.podonos.com/badges/insight-on-pdns-sm-dark.svg)](https://podonos.com/resembleai/chatterbox)
 [![Discord](https://img.shields.io/discord/1377773249798344776?label=join%20discord&logo=discord&style=flat)](https://discord.gg/rJq9cRJBJ6)
 
-_Made with ♥️ by <a href="https://resemble.ai" target="_blank"><img width="100" alt="resemble-logo-horizontal" src="https://github.com/user-attachments/assets/35cf756b-3506-4943-9c72-c05ddfa4e525" /></a>
+\_Made with ♥️ by <a href="https://resemble.ai" target="_blank"><img width="100" alt="resemble-logo-horizontal" src="https://github.com/user-attachments/assets/35cf756b-3506-4943-9c72-c05ddfa4e525" /></a>
 
 We're excited to introduce **Chatterbox Multilingual**, [Resemble AI's](https://resemble.ai) first production-grade open source TTS model supporting **23 languages** out of the box. Licensed under MIT, Chatterbox has been benchmarked against leading closed-source systems like ElevenLabs, and is consistently preferred in side-by-side evaluations.
 
@@ -17,6 +16,7 @@ Whether you're working on memes, videos, games, or AI agents, Chatterbox brings 
 If you like the model but need to scale or tune it for higher accuracy, check out our competitively priced TTS service (<a href="https://resemble.ai">link</a>). It delivers reliable performance with ultra-low latency of sub 200ms—ideal for production use in agents, applications, or interactive media.
 
 # Key Details
+
 - Multilingual, zero-shot TTS supporting 23 languages
 - SoTA zeroshot English TTS
 - 0.5B Llama backbone
@@ -27,10 +27,14 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
 - Easy voice conversion script
 - [Outperforms ElevenLabs](https://podonos.com/resembleai/chatterbox)
 
-# Supported Languages 
+# Supported Languages
+
 Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • Spanish (es) • Finnish (fi) • French (fr) • Hebrew (he) • Hindi (hi) • Italian (it) • Japanese (ja) • Korean (ko) • Malay (ms) • Dutch (nl) • Norwegian (no) • Polish (pl) • Portuguese (pt) • Russian (ru) • Swedish (sv) • Swahili (sw) • Turkish (tr) • Chinese (zh)
+
 # Tips
+
 - **General Use (TTS and Voice Agents):**
+
   - Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip’s language. To mitigate this, set `cfg_weight` to `0`.
   - The default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts across all languages.
   - If the reference speaker has a fast speaking style, lowering `cfg_weight` to around `0.3` can improve pacing.
@@ -39,13 +43,14 @@ Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • 
   - Try lower `cfg_weight` values (e.g. `~0.3`) and increase `exaggeration` to around `0.7` or higher.
   - Higher `exaggeration` tends to speed up speech; reducing `cfg_weight` helps compensate with slower, more deliberate pacing.
 
-
 # Installation
+
 ```shell
 pip install chatterbox-tts
 ```
 
 Alternatively, you can install from source:
+
 ```shell
 # conda create -yn chatterbox python=3.11
 # conda activate chatterbox
@@ -54,9 +59,11 @@ git clone https://github.com/resemble-ai/chatterbox.git
 cd chatterbox
 pip install -e .
 ```
+
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
 # Usage
+
 ```python
 import torchaudio as ta
 from chatterbox.tts import ChatterboxTTS
@@ -85,9 +92,36 @@ AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
 ta.save("test-2.wav", wav, model.sr)
 ```
+
 See `example_tts.py` and `example_vc.py` for more examples.
 
+# Performance Optimizations
+
+Chatterbox includes automatic **float16 KV cache optimization** (enabled by default), providing significant performance improvements:
+
+- **18-32% faster generation** depending on text length
+- **Up to 5.8 GB memory savings** for long-form content
+- **No quality degradation** - extensively tested
+
+**Benchmark Results (Apple Silicon M4):**
+| Text Length | Speed Improvement | Memory Savings |
+|-------------|------------------|----------------|
+| Long | 31.9% faster | ~5.8 GB |
+| Medium | 18.2% faster | ~645 MB |
+| Short | 5.1% faster | ~582 MB |
+
+**Advanced Configuration:**
+
+```python
+from chatterbox.models.t3.modules.t3_config import T3Config
+
+# Float16 is enabled by default, but you can disable it if needed:
+config = T3Config.english_only(kv_cache_dtype=None)  # Disable optimization
+model = ChatterboxTTS.from_pretrained(device="cuda", t3_config=config)
+```
+
 # Acknowledgements
+
 - [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)
 - [Real-Time-Voice-Cloning](https://github.com/CorentinJ/Real-Time-Voice-Cloning)
 - [HiFT-GAN](https://github.com/yl4579/HiFTNet)
@@ -97,7 +131,6 @@ See `example_tts.py` and `example_vc.py` for more examples.
 # Built-in PerTh Watermarking for Responsible AI
 
 Every audio file generated by Chatterbox includes [Resemble AI's Perth (Perceptual Threshold) Watermarker](https://github.com/resemble-ai/perth) - imperceptible neural watermarks that survive MP3 compression, audio editing, and common manipulations while maintaining nearly 100% detection accuracy.
-
 
 ## Watermark extraction
 
@@ -121,13 +154,14 @@ print(f"Extracted watermark: {watermark}")
 # Output: 0.0 (no watermark) or 1.0 (watermarked)
 ```
 
-
 # Official Discord
 
 👋 Join us on [Discord](https://discord.gg/rJq9cRJBJ6) and let's build something awesome together!
 
 # Citation
+
 If you find this model useful, please consider citing.
+
 ```
 @misc{chatterboxtts2025,
   author       = {{Resemble AI}},
@@ -137,5 +171,7 @@ If you find this model useful, please consider citing.
   note         = {GitHub repository}
 }
 ```
+
 # Disclaimer
+
 Don't use this model to do bad things. Prompts are sourced from freely available data on the internet.

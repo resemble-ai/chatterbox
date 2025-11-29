@@ -40,6 +40,53 @@ def clear_device_memory():
 def get_memory_mb():
     return psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
 
+
+def convert_kv_cache_dtype(past_key_values, target_dtype):
+    """
+    Convert KV cache to specified dtype for memory optimization.
+
+    Args:
+        past_key_values: Cache object or tuple of (key, value) tuples from transformer
+        target_dtype: Target dtype (e.g., torch.float16)
+
+    Returns:
+        Converted KV cache in same structure
+    """
+    if past_key_values is None or target_dtype is None:
+        return past_key_values
+
+    # Handle DynamicCache objects from newer transformers versions
+    try:
+        from transformers.cache_utils import DynamicCache
+        if isinstance(past_key_values, DynamicCache):
+            # Create a new DynamicCache with converted tensors
+            new_cache = DynamicCache()
+            for layer_idx in range(len(past_key_values.key_cache)):
+                key_states = past_key_values.key_cache[layer_idx].to(dtype=target_dtype)
+                value_states = past_key_values.value_cache[layer_idx].to(dtype=target_dtype)
+                new_cache.update(key_states, value_states, layer_idx)
+            return new_cache
+    except (ImportError, AttributeError):
+        pass
+
+    # Handle legacy tuple format
+    if isinstance(past_key_values, tuple):
+        converted = []
+        for layer_past in past_key_values:
+            if isinstance(layer_past, tuple) and len(layer_past) == 2:
+                key_states, value_states = layer_past
+                converted.append((
+                    key_states.to(dtype=target_dtype),
+                    value_states.to(dtype=target_dtype)
+                ))
+            else:
+                # Handle other cache formats if needed
+                converted.append(layer_past)
+        return tuple(converted)
+
+    # If unknown format, return as-is
+    return past_key_values
+
 def _ensure_BOT_EOT(text_tokens: Tensor, hp):
     B = text_tokens.size(0)
     assert (text_tokens == hp.start_text_token).int().sum() >= B, "missing start_text_token"
@@ -373,6 +420,11 @@ class T3(nn.Module):
         # Initialize kv_cache with the full context.
         past = output.past_key_values
 
+        # Convert KV cache to float16 if configured for memory optimization
+        kv_dtype = getattr(self.hp, 'kv_cache_dtype', None)
+        if kv_dtype == 'float16':
+            past = convert_kv_cache_dtype(past, torch.float16)
+
         # Keep gradient checkpointing enabled throughout generation for better memory management
         # (Previously disabled here, but keeping it on reduces memory usage)
 
@@ -441,6 +493,10 @@ class T3(nn.Module):
             )
             # Update the kv_cache.
             past = output.past_key_values
+
+            # Convert KV cache to float16 if configured for memory optimization
+            if kv_dtype == 'float16':
+                past = convert_kv_cache_dtype(past, torch.float16)
 
             # Aggressive memory cleanup every 10 steps
             if i % 10 == 0:
