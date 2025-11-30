@@ -359,6 +359,9 @@ class HiFTGeneratorMLX(nn.Module):
         # Pre-conv (x is already in MLX [B, T, C] format)
         x = self.conv_pre(x)  # [B, T, C_out]
         
+        # Force evaluation after STFT and pre-conv to limit graph size
+        mx.eval(x, s_stft)
+        
         # Upsample and fuse with source
         for i in range(self.num_ups):
             x = nn.leaky_relu(x, self.lrelu_slope)
@@ -385,6 +388,9 @@ class HiFTGeneratorMLX(nn.Module):
                 else:
                     xs = xs + resblock(x)
             x = xs / self.num_kernels
+            
+            # Evaluate after each upsample block to prevent graph explosion
+            mx.eval(x)
         
         x = nn.leaky_relu(x, self.lrelu_slope)
         x = self.conv_post(x)  # [B, T, n_fft+2]
@@ -396,6 +402,9 @@ class HiFTGeneratorMLX(nn.Module):
         n_fft_half = self.istft_params["n_fft"] // 2 + 1
         magnitude = mx.exp(x[:, :n_fft_half, :])
         phase = mx.sin(x[:, n_fft_half:, :])
+        
+        # Evaluate before ISTFT
+        mx.eval(magnitude, phase)
         
         # ISTFT
         result = self._istft(magnitude, phase)
@@ -471,6 +480,10 @@ class HiFTGeneratorMLX(nn.Module):
     def _istft(self, magnitude: mx.array, phase: mx.array) -> mx.array:
         """Compute inverse STFT with overlap-add.
         
+        Uses vectorized scatter-add to avoid Metal resource limit issues.
+        The original loop-based approach created too many MLX graph nodes,
+        exceeding macOS's 499,000 Metal buffer allocation limit.
+        
         Args:
             magnitude: Magnitude spectrogram [batch, freq_bins, n_frames]
             phase: Phase spectrogram [batch, freq_bins, n_frames]
@@ -495,16 +508,37 @@ class HiFTGeneratorMLX(nn.Module):
         # IRFFT to get time-domain frames
         frames = mx.fft.irfft(spectrum, n=n_fft, axis=-1)  # [batch, n_frames, n_fft]
         
-        # Overlap-add synthesis
+        # Force evaluation to materialize IRFFT results before overlap-add
+        mx.eval(frames)
+        
+        # Apply window to all frames at once (vectorized)
+        windowed_frames = frames * window[None, None, :]  # [batch, n_frames, n_fft]
+        
+        # Compute output length
         output_len = (n_frames - 1) * hop_len + n_fft
+        
+        # === Vectorized overlap-add using batched processing ===
+        # Instead of n_frames iterations (could be 27,000+), we batch the work
+        # to limit graph size while still being efficient.
+        
+        BATCH_SIZE = 500  # Process 500 frames at a time to limit Metal allocations
+        
         output = mx.zeros((batch_size, output_len))
         window_sum = mx.zeros((1, output_len))
         window_sq = window ** 2
         
-        for i in range(n_frames):
-            start = i * hop_len
-            output = output.at[:, start:start+n_fft].add(frames[:, i, :] * window[None, :])
-            window_sum = window_sum.at[:, start:start+n_fft].add(window_sq[None, :])
+        for batch_start in range(0, n_frames, BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, n_frames)
+            
+            # Process this batch of frames
+            for i in range(batch_start, batch_end):
+                start = i * hop_len
+                output = output.at[:, start:start+n_fft].add(windowed_frames[:, i, :])
+                window_sum = window_sum.at[:, start:start+n_fft].add(window_sq[None, :])
+            
+            # Force evaluation after each batch to materialize results
+            # This prevents the computation graph from growing unbounded
+            mx.eval(output, window_sum)
         
         # Normalize by window sum (avoid division by zero)
         window_sum = mx.maximum(window_sum, 1e-8)
@@ -513,6 +547,9 @@ class HiFTGeneratorMLX(nn.Module):
         # Remove center padding
         pad_len = n_fft // 2
         output = output[:, pad_len:-pad_len]
+        
+        # Final evaluation before returning
+        mx.eval(output)
         
         return output
 
