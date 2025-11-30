@@ -187,8 +187,8 @@ class PerceiverMLX(nn.Module):
         # Calculate variance for uniform initialization
         query_variance = math.sqrt(3.0) * math.sqrt(2.0 / (pre_attention_query_token + pre_attention_query_token))
 
-        # Initialize learnable query tokens
-        # MLX parameters are initialized with freeze=False by default
+        # Initialize learnable query tokens as a proper parameter
+        # Store directly on self so MLX load_weights can find it
         self.pre_attention_query = mx.random.uniform(
             low=-query_variance,
             high=query_variance,

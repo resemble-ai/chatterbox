@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Resemble AI
+# Copyright (c) 2025 MichaelYangAI
 # MIT License
 
 """
@@ -9,6 +9,7 @@ Measures:
 - Memory usage
 - Generation quality (numerical similarity)
 - Model loading time
+- Quantized MLX performance (4-bit and 8-bit)
 """
 
 import time
@@ -46,46 +47,76 @@ class BenchmarkResults:
         self.results: Dict[str, Dict] = {}
 
     def add_result(self, name: str, pytorch_time: float, mlx_time: float,
-                   pytorch_mem: float, mlx_mem: float):
+                   pytorch_mem: float, mlx_mem: float,
+                   mlx_quant_time: float = 0, mlx_quant_mem: float = 0):
         """Add a benchmark result."""
         speedup = pytorch_time / mlx_time if mlx_time > 0 else 0
         mem_reduction = (pytorch_mem - mlx_mem) / pytorch_mem * 100 if pytorch_mem > 0 else 0
 
+        speedup_quant = pytorch_time / mlx_quant_time if mlx_quant_time > 0 else 0
+        mem_reduction_quant = (pytorch_mem - mlx_quant_mem) / pytorch_mem * 100 if pytorch_mem > 0 else 0
+
         self.results[name] = {
             'pytorch_time': pytorch_time,
             'mlx_time': mlx_time,
+            'mlx_quant_time': mlx_quant_time,
             'speedup': speedup,
+            'speedup_quant': speedup_quant,
             'pytorch_mem': pytorch_mem,
             'mlx_mem': mlx_mem,
+            'mlx_quant_mem': mlx_quant_mem,
             'mem_reduction': mem_reduction,
+            'mem_reduction_quant': mem_reduction_quant,
         }
 
     def print_summary(self):
         """Print formatted benchmark summary."""
-        print("\n" + "=" * 80)
-        print("MLX vs PyTorch Benchmark Results")
-        print("=" * 80)
+        print("\n" + "=" * 120)
+        print("MLX vs PyTorch Benchmark Results (Including Quantized MLX)")
+        print("=" * 120)
 
         # Header
-        print(f"{'Benchmark':<30} {'PyTorch (s)':<15} {'MLX (s)':<15} {'Speedup':<10} {'Mem Saving':<12}")
-        print("-" * 80)
+        print(f"{'Benchmark':<25} {'PyTorch':<12} {'MLX':<12} {'MLX-Q4':<12} "
+              f"{'Speedup':<10} {'Q4 Speedup':<12} {'Mem Save':<10} {'Q4 Mem Save':<12}")
+        print("-" * 120)
 
         for name, result in self.results.items():
-            print(f"{name:<30} "
-                  f"{result['pytorch_time']:<15.3f} "
-                  f"{result['mlx_time']:<15.3f} "
-                  f"{result['speedup']:<10.2f}x "
-                  f"{result['mem_reduction']:<12.1f}%")
+            mlx_q_str = f"{result['mlx_quant_time']:.3f}" if result['mlx_quant_time'] > 0 else "N/A"
+            speedup_q_str = f"{result['speedup_quant']:.2f}x" if result['speedup_quant'] > 0 else "N/A"
+            mem_q_str = f"{result['mem_reduction_quant']:.1f}%" if result['mlx_quant_time'] > 0 else "N/A"
 
-        print("=" * 80)
+            print(f"{name:<25} "
+                  f"{result['pytorch_time']:<12.3f} "
+                  f"{result['mlx_time']:<12.3f} "
+                  f"{mlx_q_str:<12} "
+                  f"{result['speedup']:<10.2f}x "
+                  f"{speedup_q_str:<12} "
+                  f"{result['mem_reduction']:<10.1f}% "
+                  f"{mem_q_str:<12}")
+
+        print("=" * 120)
 
         # Overall statistics
         avg_speedup = np.mean([r['speedup'] for r in self.results.values()])
         avg_mem_reduction = np.mean([r['mem_reduction'] for r in self.results.values()])
 
-        print(f"\nOverall Performance:")
-        print(f"  Average Speedup: {avg_speedup:.2f}x")
-        print(f"  Average Memory Reduction: {avg_mem_reduction:.1f}%")
+        # Quantized stats (only for benchmarks that have quantized results)
+        quant_results = [r for r in self.results.values() if r['speedup_quant'] > 0]
+        if quant_results:
+            avg_speedup_quant = np.mean([r['speedup_quant'] for r in quant_results])
+            avg_mem_reduction_quant = np.mean([r['mem_reduction_quant'] for r in quant_results])
+
+            print(f"\nOverall Performance:")
+            print(f"  MLX Full Precision:")
+            print(f"    Average Speedup: {avg_speedup:.2f}x")
+            print(f"    Average Memory Reduction: {avg_mem_reduction:.1f}%")
+            print(f"  MLX 4-bit Quantized:")
+            print(f"    Average Speedup: {avg_speedup_quant:.2f}x")
+            print(f"    Average Memory Reduction: {avg_mem_reduction_quant:.1f}%")
+        else:
+            print(f"\nOverall Performance:")
+            print(f"  Average Speedup: {avg_speedup:.2f}x")
+            print(f"  Average Memory Reduction: {avg_mem_reduction:.1f}%")
         print()
 
 
@@ -113,7 +144,7 @@ def benchmark_model_loading():
     # MLX loading
     if not MLX_AVAILABLE:
         logger.warning("Skipping MLX benchmark - MLX not installed")
-        return pytorch_time, 0, pytorch_mem, 0
+        return pytorch_time, 0, pytorch_mem, 0, 0, 0
 
     mem_before = get_memory_mb()
     start = time.time()
@@ -131,7 +162,28 @@ def benchmark_model_loading():
         mlx_time = 0
         mlx_mem = 0
 
-    return pytorch_time, mlx_time, pytorch_mem, mlx_mem
+    # Quantized MLX loading
+    mem_before = get_memory_mb()
+    start = time.time()
+    try:
+        from chatterbox.models.t3_mlx.t3_mlx import T3MLX
+        from chatterbox.models.t3_mlx.quantization.quantize_mlx import QuantizedT3MLX
+        from chatterbox.models.t3.modules.t3_config import T3Config
+
+        config = T3Config.english_only()
+        t3_mlx_base = T3MLX(hp=config)
+        t3_mlx_quant = QuantizedT3MLX(t3_mlx_base, bits=4, group_size=64)
+        mlx_quant_time = time.time() - start
+        mlx_quant_mem = get_memory_mb() - mem_before
+        del t3_mlx_base, t3_mlx_quant
+    except Exception as e:
+        logger.error(f"Quantized MLX loading failed: {e}")
+        import traceback
+        traceback.print_exc()
+        mlx_quant_time = 0
+        mlx_quant_mem = 0
+
+    return pytorch_time, mlx_time, pytorch_mem, mlx_mem, mlx_quant_time, mlx_quant_mem
 
 
 def benchmark_forward_pass(seq_length: int = 50):
@@ -140,7 +192,7 @@ def benchmark_forward_pass(seq_length: int = 50):
 
     if not MLX_AVAILABLE:
         logger.warning("Skipping MLX benchmark - MLX not installed")
-        return 0, 0, 0, 0
+        return 0, 0, 0, 0, 0, 0
 
     import torch
     import mlx.core as mx
@@ -258,7 +310,48 @@ def benchmark_forward_pass(seq_length: int = 50):
         mlx_time = 0
         mlx_mem = 0
 
-    return pytorch_time, mlx_time, pytorch_mem, mlx_mem
+    # Quantized MLX benchmark
+    try:
+        from chatterbox.models.t3_mlx.quantization.quantize_mlx import QuantizedT3MLX
+
+        t3_mlx_base = T3MLX(hp=config)
+        t3_mlx_quant = QuantizedT3MLX(t3_mlx_base, bits=4, group_size=64)
+
+        # Use same inputs as MLX
+        # Warm-up
+        _ = t3_mlx_quant(
+            t3_cond=cond_mlx,
+            text_tokens=text_tokens_mlx,
+            text_token_lens=text_lens_mlx,
+            speech_tokens=speech_tokens_mlx,
+            speech_token_lens=speech_lens_mlx,
+        )
+
+        # Benchmark
+        mem_before = get_memory_mb()
+        start = time.time()
+        num_iters = 10
+        for _ in range(num_iters):
+            output = t3_mlx_quant(
+                t3_cond=cond_mlx,
+                text_tokens=text_tokens_mlx,
+                text_token_lens=text_lens_mlx,
+                speech_tokens=speech_tokens_mlx,
+                speech_token_lens=speech_lens_mlx,
+            )
+            mx.eval(output['speech_logits'])  # Force evaluation
+        mlx_quant_time = (time.time() - start) / num_iters
+        mlx_quant_mem = get_memory_mb() - mem_before
+
+        del t3_mlx_base, t3_mlx_quant
+    except Exception as e:
+        logger.error(f"Quantized MLX forward pass failed: {e}")
+        import traceback
+        traceback.print_exc()
+        mlx_quant_time = 0
+        mlx_quant_mem = 0
+
+    return pytorch_time, mlx_time, pytorch_mem, mlx_mem, mlx_quant_time, mlx_quant_mem
 
 
 def benchmark_generation(max_tokens: int = 50):
@@ -267,7 +360,7 @@ def benchmark_generation(max_tokens: int = 50):
 
     if not MLX_AVAILABLE:
         logger.warning("Skipping MLX benchmark - MLX not installed")
-        return 0, 0, 0, 0
+        return 0, 0, 0, 0, 0, 0
 
     import torch
     import mlx.core as mx
@@ -346,7 +439,39 @@ def benchmark_generation(max_tokens: int = 50):
         mlx_time = 0
         mlx_mem = 0
 
-    return pytorch_time, mlx_time, pytorch_mem, mlx_mem
+    # Quantized MLX generation
+    try:
+        from chatterbox.models.t3_mlx.quantization.quantize_mlx import QuantizedT3MLX
+
+        t3_mlx_base = T3MLX(hp=config)
+        t3_mlx_quant = QuantizedT3MLX(t3_mlx_base, bits=4, group_size=64)
+
+        text_tokens_mlx = mx.array([text_tokens_list])
+        cond_mlx = T3CondMLX(speaker_emb=mx.random.normal((1, 256)), emotion_adv=0.5)
+
+        mem_before = get_memory_mb()
+        start = time.time()
+
+        output_mlx_quant = t3_mlx_quant.generate(
+            t3_cond=cond_mlx,
+            text_tokens=text_tokens_mlx,
+            max_new_tokens=max_tokens,
+            temperature=0.8,
+            cfg_weight=0.0,  # Disable CFG to simplify for benchmarking
+        )
+
+        mlx_quant_time = time.time() - start
+        mlx_quant_mem = get_memory_mb() - mem_before
+
+        del t3_mlx_base, t3_mlx_quant, output_mlx_quant
+    except Exception as e:
+        logger.error(f"Quantized MLX generation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        mlx_quant_time = 0
+        mlx_quant_mem = 0
+
+    return pytorch_time, mlx_time, pytorch_mem, mlx_mem, mlx_quant_time, mlx_quant_mem
 
 
 def main():
@@ -363,20 +488,20 @@ def main():
 
     # Model loading
     if not args.skip_loading:
-        pt_time, mlx_time, pt_mem, mlx_mem = benchmark_model_loading()
-        results.add_result("Model Loading", pt_time, mlx_time, pt_mem, mlx_mem)
+        pt_time, mlx_time, pt_mem, mlx_mem, mlx_q_time, mlx_q_mem = benchmark_model_loading()
+        results.add_result("Model Loading", pt_time, mlx_time, pt_mem, mlx_mem, mlx_q_time, mlx_q_mem)
 
     # Forward pass - different sequence lengths
     if not args.skip_forward:
         for seq_len in [10, 50, 100]:
-            pt_time, mlx_time, pt_mem, mlx_mem = benchmark_forward_pass(seq_length=seq_len)
-            results.add_result(f"Forward Pass (len={seq_len})", pt_time, mlx_time, pt_mem, mlx_mem)
+            pt_time, mlx_time, pt_mem, mlx_mem, mlx_q_time, mlx_q_mem = benchmark_forward_pass(seq_length=seq_len)
+            results.add_result(f"Forward (len={seq_len})", pt_time, mlx_time, pt_mem, mlx_mem, mlx_q_time, mlx_q_mem)
 
     # Generation
     if not args.skip_generation:
         for max_tokens in [20, 50, 100]:
-            pt_time, mlx_time, pt_mem, mlx_mem = benchmark_generation(max_tokens=max_tokens)
-            results.add_result(f"Generation ({max_tokens} tokens)", pt_time, mlx_time, pt_mem, mlx_mem)
+            pt_time, mlx_time, pt_mem, mlx_mem, mlx_q_time, mlx_q_mem = benchmark_generation(max_tokens=max_tokens)
+            results.add_result(f"Gen ({max_tokens} tokens)", pt_time, mlx_time, pt_mem, mlx_mem, mlx_q_time, mlx_q_mem)
 
     # Print results
     results.print_summary()
@@ -384,10 +509,13 @@ def main():
     # Save results to file
     output_path = Path("benchmark_mlx_results.txt")
     with open(output_path, "w") as f:
-        f.write("MLX vs PyTorch Benchmark Results\n")
-        f.write("=" * 80 + "\n")
+        f.write("MLX vs PyTorch Benchmark Results (Including Quantized)\n")
+        f.write("=" * 120 + "\n")
         for name, result in results.results.items():
-            f.write(f"{name}: {result['speedup']:.2f}x speedup, {result['mem_reduction']:.1f}% memory reduction\n")
+            line = f"{name}: MLX {result['speedup']:.2f}x speedup, {result['mem_reduction']:.1f}% memory reduction"
+            if result['speedup_quant'] > 0:
+                line += f" | MLX-Q4 {result['speedup_quant']:.2f}x speedup, {result['mem_reduction_quant']:.1f}% memory reduction"
+            f.write(line + "\n")
 
     logger.info(f"Results saved to {output_path}")
 

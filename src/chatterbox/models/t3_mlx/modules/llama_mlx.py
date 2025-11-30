@@ -57,7 +57,7 @@ class RMSNorm(nn.Module):
 
 
 class RoPE(nn.Module):
-    """Rotary Position Embedding."""
+    """Rotary Position Embedding with Llama3-style scaling support."""
 
     def __init__(self, dims: int, max_position_embeddings: int = 131072, base: float = 500000.0,
                  rope_scaling: Optional[Dict] = None):
@@ -65,35 +65,70 @@ class RoPE(nn.Module):
         self.dims = dims
         self.max_position_embeddings = max_position_embeddings
         self.base = base
+        self.rope_scaling = rope_scaling
 
-        # Handle rope scaling (Llama 3 style)
+        # Compute base inverse frequencies
+        inv_freq = 1.0 / (base ** (mx.arange(0, dims, 2, dtype=mx.float32) / dims))
+        
+        # Apply Llama3-style scaling if configured
         if rope_scaling is not None and rope_scaling.get('rope_type') == 'llama3':
-            self.factor = rope_scaling.get('factor', 8.0)
-            self.low_freq_factor = rope_scaling.get('low_freq_factor', 1.0)
-            self.high_freq_factor = rope_scaling.get('high_freq_factor', 4.0)
-            self.original_max_position = rope_scaling.get('original_max_position_embeddings', 8192)
+            factor = rope_scaling.get('factor', 8.0)
+            low_freq_factor = rope_scaling.get('low_freq_factor', 1.0)
+            high_freq_factor = rope_scaling.get('high_freq_factor', 4.0)
+            old_context_len = rope_scaling.get('original_max_position_embeddings', 8192)
+            
+            low_freq_wavelen = old_context_len / low_freq_factor
+            high_freq_wavelen = old_context_len / high_freq_factor
+            
+            # Apply frequency-dependent scaling to get scaled inv_freq
+            inv_freq_np = inv_freq.tolist()
+            new_inv_freqs = []
+            for freq in inv_freq_np:
+                wavelen = 2 * 3.141592653589793 / freq
+                if wavelen < high_freq_wavelen:
+                    # High frequency: no scaling
+                    new_inv_freqs.append(freq)
+                elif wavelen > low_freq_wavelen:
+                    # Low frequency: full scaling
+                    new_inv_freqs.append(freq / factor)
+                else:
+                    # Mid frequency: linear interpolation
+                    smooth = (old_context_len / wavelen - low_freq_factor) / (high_freq_factor - low_freq_factor)
+                    new_inv_freqs.append((1 - smooth) * freq / factor + smooth * freq)
+            
+            # CRITICAL: mx.fast.rope 'freqs' param expects 1/inv_freq (regular frequencies),
+            # not inv_freq (inverse frequencies). It internally computes inv_freq = 1/freqs.
+            scaled_inv_freq = mx.array(new_inv_freqs, dtype=mx.float32)
+            self._freqs = 1.0 / scaled_inv_freq  # Convert inv_freq to freqs for mx.fast.rope
+            self._use_custom_freqs = True
         else:
-            self.factor = 1.0
-            self.low_freq_factor = 1.0
-            self.high_freq_factor = 1.0
-            self.original_max_position = max_position_embeddings
+            self._freqs = None
+            self._use_custom_freqs = False
 
     def __call__(self, q: mx.array, k: mx.array, offset: int = 0) -> Tuple[mx.array, mx.array]:
         """
         Apply rotary position embeddings.
 
         Args:
-            q: Query tensor of shape (..., seq_len, n_heads, head_dim)
-            k: Key tensor of shape (..., seq_len, n_heads, head_dim)
+            q: Query tensor of shape (B, n_heads, seq_len, head_dim)
+            k: Key tensor of shape (B, n_kv_heads, seq_len, head_dim)
             offset: Position offset for cached sequences
 
         Returns:
             Tuple of (rotated_q, rotated_k)
         """
-        # Use MLX's RoPE implementation with required parameters
-        # traditional=False for Llama-style RoPE
-        return mx.fast.rope(q, self.dims, traditional=False, base=self.base, scale=1.0, offset=offset), \
-               mx.fast.rope(k, self.dims, traditional=False, base=self.base, scale=1.0, offset=offset)
+        if self._use_custom_freqs:
+            # Use precomputed Llama3-scaled frequencies
+            return (
+                mx.fast.rope(q, self.dims, traditional=False, base=None, scale=1.0, offset=offset, freqs=self._freqs),
+                mx.fast.rope(k, self.dims, traditional=False, base=None, scale=1.0, offset=offset, freqs=self._freqs)
+            )
+        else:
+            # Standard RoPE
+            return (
+                mx.fast.rope(q, self.dims, traditional=False, base=self.base, scale=1.0, offset=offset),
+                mx.fast.rope(k, self.dims, traditional=False, base=self.base, scale=1.0, offset=offset)
+            )
 
 
 class Attention(nn.Module):
@@ -144,22 +179,23 @@ class Attention(nn.Module):
         k = self.k_proj(x)
         v = self.v_proj(x)
 
-        # Reshape for multi-head attention
+        # Reshape for multi-head attention: (B, L, n_heads, head_dim)
         q = mx.reshape(q, (B, L, self.num_heads, self.head_dim))
         k = mx.reshape(k, (B, L, self.num_kv_heads, self.head_dim))
         v = mx.reshape(v, (B, L, self.num_kv_heads, self.head_dim))
 
-        # Apply RoPE
-        offset = 0
-        if cache is not None:
-            k_cache, v_cache = cache
-            offset = k_cache.shape[1] if k_cache.ndim == 4 else k_cache.shape[2]
-        q, k = self.rope(q, k, offset=offset)
-
-        # Transpose for attention BEFORE caching: (B, n_heads, L, head_dim)
+        # Transpose BEFORE RoPE: (B, n_heads, L, head_dim)
+        # MLX fast.rope expects position on axis -2 (second-to-last)
         q = mx.transpose(q, (0, 2, 1, 3))
         k = mx.transpose(k, (0, 2, 1, 3))
         v = mx.transpose(v, (0, 2, 1, 3))
+
+        # Apply RoPE (now q/k are in correct shape for mx.fast.rope)
+        offset = 0
+        if cache is not None:
+            k_cache, v_cache = cache
+            offset = k_cache.shape[2]  # Position dim is now axis 2
+        q, k = self.rope(q, k, offset=offset)
 
         # Handle KV cache (cache is already in transposed format)
         if cache is not None:
@@ -173,15 +209,12 @@ class Attention(nn.Module):
             k = mx.repeat(k, n_rep, axis=1)
             v = mx.repeat(v, n_rep, axis=1)
 
-        # Compute attention scores
-        scores = (q @ mx.transpose(k, (0, 1, 3, 2))) * self.scale
-
-        if mask is not None:
-            scores = scores + mask
-
-        # Compute attention weights and output
-        attn_weights = mx.softmax(scores, axis=-1)
-        output = attn_weights @ v  # (B, n_heads, L_q, head_dim)
+        # Use mx.fast.scaled_dot_product_attention with causal masking
+        # This is faster and correctly applies causal attention like PT's eager attention
+        # mask="causal" applies the upper triangular -inf mask automatically
+        output = mx.fast.scaled_dot_product_attention(
+            q, k, v, scale=self.scale, mask="causal"
+        )
 
         # Reshape and project output
         output = mx.transpose(output, (0, 2, 1, 3))  # (B, L_q, n_heads, head_dim)

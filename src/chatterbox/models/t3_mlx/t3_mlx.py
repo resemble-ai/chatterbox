@@ -113,7 +113,7 @@ class T3MLX(nn.Module):
 
         Args:
             t3_cond: Conditioning data
-            text_tokens: Text token IDs
+            text_tokens: Text token IDs (B, L) - batch size is 2 when cfg_weight > 0
             speech_tokens: Speech token IDs
             cfg_weight: Classifier-free guidance weight
 
@@ -125,29 +125,45 @@ class T3MLX(nn.Module):
 
         # Text embeddings
         text_emb = self.text_emb(text_tokens)  # (B, len_text, dim)
-
-        # CFG: zero out text for unconditional branch
-        if cfg_weight > 0.0:
-            # Create a copy with second batch item zeroed
+        
+        # CFG: zero out text embedding for unconditional branch BEFORE adding position embeddings
+        # This matches PyTorch behavior where text_emb[1].zero_() is called before pos_emb addition
+        # Note: text_tokens already has batch size 2 when CFG is enabled
+        if cfg_weight > 0.0 and text_emb.shape[0] >= 2:
+            # Zero out the second batch item (unconditional) - only the content embedding, not position
+            text_emb_cond = text_emb[0:1]
             text_emb_uncond = mx.zeros_like(text_emb[1:2])
-            text_emb = mx.concatenate([text_emb[0:1], text_emb_uncond], axis=0)
+            text_emb = mx.concatenate([text_emb_cond, text_emb_uncond], axis=0)
+        
+        # Add text position embeddings AFTER zeroing out unconditional text
+        if self.hp.input_pos_emb == "learned":
+            text_emb = text_emb + self.text_pos_emb(text_tokens)
 
         # Speech embeddings
         speech_emb = self.speech_emb(speech_tokens)  # (B, len_speech, dim)
 
-        # Add position embeddings
+        # Add speech position embeddings
         if self.hp.input_pos_emb == "learned":
-            text_emb = text_emb + self.text_pos_emb(text_tokens)
             speech_emb = speech_emb + self.speech_pos_emb(speech_tokens)
 
-        len_cond = cond_emb.shape[1]
-
-        # Broadcast conditioning if batch sizes don't match
-        if cond_emb.shape[0] != text_emb.shape[0]:
+        # Broadcast embeddings to match batch sizes
+        batch_size = text_emb.shape[0]
+        
+        # Expand conditioning if needed
+        if cond_emb.shape[0] != batch_size:
             cond_emb = mx.broadcast_to(
                 cond_emb,
-                (text_emb.shape[0], cond_emb.shape[1], cond_emb.shape[2])
+                (batch_size, cond_emb.shape[1], cond_emb.shape[2])
             )
+        
+        # Expand speech embeddings if needed
+        if speech_emb.shape[0] != batch_size:
+            speech_emb = mx.broadcast_to(
+                speech_emb,
+                (batch_size, speech_emb.shape[1], speech_emb.shape[2])
+            )
+
+        len_cond = cond_emb.shape[1]
 
         # Concatenate: [conditioning, text, speech]
         embeds = mx.concatenate([cond_emb, text_emb, speech_emb], axis=1)
@@ -425,3 +441,58 @@ class T3MLX(nn.Module):
 
         # Concatenate generated tokens (skip BOS)
         return mx.concatenate(generated_ids[1:], axis=1)
+
+    def inference(
+        self,
+        *,
+        t3_cond: T3CondMLX,
+        text_tokens: mx.array,
+        max_new_tokens: Optional[int] = None,
+        temperature: float = 0.8,
+        top_p: float = 0.95,
+        min_p: float = 0.05,
+        repetition_penalty: float = 1.2,
+        cfg_weight: float = 0.5,
+        # PyTorch API compatibility - ignored for MLX
+        initial_speech_tokens: Optional[mx.array] = None,
+        prepend_prompt_speech_tokens: Optional[mx.array] = None,
+        num_return_sequences: int = 1,
+        stop_on_eos: bool = True,
+        do_sample: bool = True,
+        length_penalty: float = 1.0,
+    ) -> mx.array:
+        """
+        Inference wrapper for compatibility with PyTorch T3 API.
+
+        This is an alias for generate() with additional parameters for PyTorch API compatibility.
+        Some parameters are ignored in the MLX implementation.
+
+        Args:
+            t3_cond: Conditioning data
+            text_tokens: Text token IDs (1D or 2D)
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Nucleus sampling threshold
+            min_p: Minimum probability threshold
+            repetition_penalty: Penalty for repeated tokens
+            cfg_weight: Classifier-free guidance weight
+            initial_speech_tokens: Ignored (for PyTorch API compatibility)
+            prepend_prompt_speech_tokens: Ignored (for PyTorch API compatibility)
+            num_return_sequences: Ignored (for PyTorch API compatibility)
+            stop_on_eos: Ignored (for PyTorch API compatibility)
+            do_sample: Ignored (for PyTorch API compatibility)
+            length_penalty: Ignored (for PyTorch API compatibility)
+
+        Returns:
+            Generated speech token IDs
+        """
+        return self.generate(
+            t3_cond=t3_cond,
+            text_tokens=text_tokens,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            min_p=min_p,
+            repetition_penalty=repetition_penalty,
+            cfg_weight=cfg_weight,
+        )

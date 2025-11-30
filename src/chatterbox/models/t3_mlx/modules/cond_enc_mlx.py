@@ -48,12 +48,19 @@ class T3CondMLX:
             # Convert torch tensor to numpy, then to MLX
             return mx.array(tensor.cpu().numpy())
 
+        # Handle emotion_adv - extract scalar value from tensor if needed
+        emotion_adv = t3_cond_pt.emotion_adv
+        if hasattr(emotion_adv, 'item'):
+            emotion_adv = float(emotion_adv.view(-1)[0].item())
+        elif not isinstance(emotion_adv, (int, float)):
+            emotion_adv = float(emotion_adv)
+        
         return T3CondMLX(
             speaker_emb=to_mlx(t3_cond_pt.speaker_emb),
             clap_emb=to_mlx(t3_cond_pt.clap_emb),
             cond_prompt_speech_tokens=to_mlx(t3_cond_pt.cond_prompt_speech_tokens),
             cond_prompt_speech_emb=to_mlx(t3_cond_pt.cond_prompt_speech_emb),
-            emotion_adv=t3_cond_pt.emotion_adv if isinstance(t3_cond_pt.emotion_adv, (int, float)) else t3_cond_pt.emotion_adv
+            emotion_adv=emotion_adv,
         )
 
 

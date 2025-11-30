@@ -4,17 +4,23 @@
 """
 MLX-optimized TTS pipeline for Chatterbox.
 Provides significant performance improvements on Apple Silicon (M1/M2/M3/M4).
+
+This implementation uses a hybrid approach:
+- MLX for T3 (autoregressive text-to-speech token generation) - main performance win
+- PyTorch for S3Gen (vocoder) - uses MPS acceleration on Apple Silicon
 """
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Union
 import logging
+import re
 
 import numpy as np
 
 try:
     import mlx.core as mx
+    import mlx.nn as nn
     MLX_AVAILABLE = True
 except ImportError:
     MLX_AVAILABLE = False
@@ -28,14 +34,17 @@ except ImportError:
 if not MLX_AVAILABLE:
     raise ImportError(_mlx_import_error)
 
-from huggingface_hub import snapshot_download
+import torch
+import torch.nn.functional as F
+from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file
 
 from .models.t3_mlx.t3_mlx import T3MLX
 from .models.t3_mlx.modules.cond_enc_mlx import T3CondMLX
-from .models.t3_mlx.utils.convert_weights import load_mlx_weights, pytorch_to_mlx_tensor
 from .models.t3.modules.t3_config import T3Config
+from .models.t3.modules.cond_enc import T3Cond
 
-# Keep PyTorch versions for components not yet ported
+# Use PyTorch S3Gen for now (hybrid approach - T3 in MLX, S3Gen in PyTorch/MPS)
 from .models.s3gen import S3Gen, S3GEN_SR
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
 from .models.voice_encoder import VoiceEncoder
@@ -82,24 +91,25 @@ def punc_norm(text: str) -> str:
 @dataclass
 class ConditionalsMLX:
     """
-    Conditionals for T3 MLX and S3Gen (PyTorch).
-    Hybrid dataclass supporting both frameworks.
+    Conditionals for T3 MLX and S3Gen MLX.
     """
     t3: T3CondMLX
-    gen: dict  # S3Gen still uses PyTorch dicts
+    gen: dict  # Reference dict for S3Gen
 
     def to_device(self):
         """MLX uses unified memory, no-op for compatibility."""
-        self.t3 = self.t3.to_device()
         return self
 
 
 class ChatterboxTTSMLX:
     """
     MLX-optimized Chatterbox TTS pipeline.
-
-    Provides 2-3x speedup on Apple Silicon compared to PyTorch MPS backend.
-    Uses MLX for T3 model, while keeping other components in PyTorch for now.
+    
+    Uses a hybrid approach for best performance on Apple Silicon:
+    - MLX for T3 (autoregressive token generation) - main speedup
+    - PyTorch/MPS for S3Gen (vocoder) - fast on Apple Silicon
+    
+    This provides 2-3x speedup compared to pure PyTorch MPS backend.
     """
 
     ENC_COND_LEN = 6 * S3_SR
@@ -108,19 +118,21 @@ class ChatterboxTTSMLX:
     def __init__(
         self,
         t3: T3MLX,
-        s3gen: S3Gen,
+        s3gen: S3Gen,  # PyTorch S3Gen for now
         ve: VoiceEncoder,
         tokenizer: EnTokenizer,
-        conds: Optional[ConditionalsMLX] = None,
+        device: str = "mps",
+        conds = None,  # Conditionals from tts.py
     ):
         """
-        Initialize MLX TTS pipeline.
+        Initialize hybrid MLX/PyTorch TTS pipeline.
 
         Args:
-            t3: T3MLX model
+            t3: T3MLX model (MLX)
             s3gen: S3Gen vocoder (PyTorch)
             ve: Voice encoder (PyTorch)
             tokenizer: Text tokenizer
+            device: PyTorch device for S3Gen ("mps" or "cpu")
             conds: Optional pre-computed conditioning
         """
         self.sr = S3GEN_SR  # Sample rate: 24kHz
@@ -128,6 +140,7 @@ class ChatterboxTTSMLX:
         self.s3gen = s3gen
         self.ve = ve
         self.tokenizer = tokenizer
+        self.device = device
         self.conds = conds
         self.watermarker = perth.PerthImplicitWatermarker()
 
@@ -137,6 +150,7 @@ class ChatterboxTTSMLX:
         cache_dir: Optional[str] = None,
         t3_config: Optional[T3Config] = None,
         use_default_speaker: bool = True,
+        device: str = "mps",
     ) -> 'ChatterboxTTSMLX':
         """
         Load pre-trained Chatterbox TTS model with MLX optimization.
@@ -145,19 +159,25 @@ class ChatterboxTTSMLX:
             cache_dir: Optional cache directory for model files
             t3_config: Optional T3 configuration (default: English-only)
             use_default_speaker: Whether to load default speaker conditioning
+            device: PyTorch device for S3Gen ("mps" or "cpu")
 
         Returns:
             ChatterboxTTSMLX instance
         """
         logger.info("Loading Chatterbox TTS with MLX optimization...")
 
-        # Download model files from HuggingFace
-        if cache_dir is None:
-            cache_dir = snapshot_download(repo_id=REPO_ID)
-        else:
-            cache_dir = Path(cache_dir)
+        # Check MPS availability
+        if device == "mps" and not torch.backends.mps.is_available():
+            logger.warning("MPS not available, falling back to CPU for S3Gen")
+            device = "cpu"
 
-        return cls.from_local(cache_dir, t3_config, use_default_speaker)
+        # Download model files from HuggingFace
+        for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
+            local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
+        
+        ckpt_dir = Path(local_path).parent
+
+        return cls.from_local(ckpt_dir, t3_config, use_default_speaker, device)
 
     @classmethod
     def from_local(
@@ -165,6 +185,7 @@ class ChatterboxTTSMLX:
         ckpt_dir: Path,
         t3_config: Optional[T3Config] = None,
         use_default_speaker: bool = True,
+        device: str = "mps",
     ) -> 'ChatterboxTTSMLX':
         """
         Load model from local checkpoint directory.
@@ -173,20 +194,23 @@ class ChatterboxTTSMLX:
             ckpt_dir: Path to checkpoint directory
             t3_config: Optional T3 configuration
             use_default_speaker: Whether to load default speaker
+            device: PyTorch device for S3Gen
 
         Returns:
             ChatterboxTTSMLX instance
         """
-        import torch
-        from safetensors.torch import load_file
-
         ckpt_dir = Path(ckpt_dir)
 
-        # Load voice encoder (PyTorch - stays on CPU/MPS for now)
+        # Check MPS availability
+        if device == "mps" and not torch.backends.mps.is_available():
+            logger.warning("MPS not available, falling back to CPU")
+            device = "cpu"
+
+        # Load voice encoder (PyTorch)
         logger.info("Loading voice encoder...")
         ve = VoiceEncoder()
         ve.load_state_dict(load_file(ckpt_dir / "ve.safetensors"))
-        ve.eval()
+        ve.to(device).eval()
 
         # Initialize T3 MLX model
         logger.info("Initializing T3 MLX model...")
@@ -195,59 +219,95 @@ class ChatterboxTTSMLX:
 
         t3 = T3MLX(hp=t3_config)
 
-        # Load T3 weights
+        # Load T3 weights and convert to MLX
         logger.info("Loading T3 weights into MLX...")
         t3_ckpt = ckpt_dir / "t3_cfg.safetensors"
-
-        # Option 1: Load PyTorch weights and convert on-the-fly
-        # For now, we'll load PyTorch weights and convert
-        import torch
-        from safetensors.torch import load_file as load_safetensors_torch
-
-        pt_state = load_safetensors_torch(t3_ckpt)
+        pt_state = load_file(t3_ckpt)
         if "model" in pt_state.keys():
             pt_state = pt_state["model"][0]
 
-        # Convert to MLX (simplified - in production, use load_mlx_weights)
+        # Convert PyTorch weights to MLX format
         mlx_state = {}
         for k, v in pt_state.items():
             mlx_state[k] = mx.array(v.cpu().numpy())
+        
+        # Load weights into T3MLX with strict=False to ignore unused embed_tokens
+        t3.load_weights(list(mlx_state.items()), strict=False)
+        t3.eval()  # Set to eval mode to disable dropout
+        logger.info("✓ T3 weights loaded successfully")
 
-        # TODO: Properly load weights into T3MLX model
-        # For now, this is a placeholder - actual weight loading needs proper mapping
-        logger.warning("Weight loading is simplified - needs proper parameter mapping")
-
-        # Load S3Gen (PyTorch)
-        logger.info("Loading S3Gen vocoder...")
+        # Load S3Gen (PyTorch/MPS) - hybrid approach
+        logger.info(f"Loading S3Gen vocoder (PyTorch on {device})...")
         s3gen = S3Gen()
-        s3gen.load_state_dict(load_file(ckpt_dir / "s3gen.safetensors"))
-        s3gen.eval()
+        s3gen.load_state_dict(load_file(ckpt_dir / "s3gen.safetensors"), strict=False)
+        s3gen.to(device).eval()
+        logger.info("✓ S3Gen loaded successfully")
 
         # Load tokenizer
         logger.info("Loading tokenizer...")
-        tokenizer = EnTokenizer.from_pretrained(ckpt_dir / "en_tokenizer.safetensors")
+        tokenizer = EnTokenizer(str(ckpt_dir / "tokenizer.json"))
 
         # Load default conditioning if requested
         conds = None
         if use_default_speaker:
             logger.info("Loading default speaker conditioning...")
-            import torch
             cond_path = ckpt_dir / "conds.pt"
             if cond_path.exists():
-                pt_conds = torch.load(cond_path, map_location="cpu", weights_only=True)
-                # Convert to MLX format (simplified)
-                # TODO: Proper conversion
-                logger.warning("Conditioning conversion is simplified")
+                from .tts import Conditionals
+                conds = Conditionals.load(cond_path, map_location=device)
+                logger.info("✓ Default speaker conditioning loaded")
 
         logger.info("✅ ChatterboxTTSMLX loaded successfully!")
+        logger.info(f"   T3: MLX (Apple Silicon optimized)")
+        logger.info(f"   S3Gen: PyTorch on {device}")
 
         return cls(
             t3=t3,
             s3gen=s3gen,
             ve=ve,
             tokenizer=tokenizer,
+            device=device,
             conds=conds,
         )
+
+    def prepare_conditionals(self, wav_fpath: str, exaggeration: float = 0.5):
+        """
+        Prepare conditioning from a reference audio file.
+        
+        Args:
+            wav_fpath: Path to reference audio file
+            exaggeration: Emotion exaggeration factor (0.0 to 1.0)
+        """
+        from .tts import Conditionals
+        
+        # Load reference wav
+        s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
+        ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+        
+        s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
+        
+        # Get S3Gen reference embedding (PyTorch)
+        s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
+        
+        # Speech cond prompt tokens for T3
+        t3_cond_prompt_tokens = None
+        if hasattr(self.t3, 'hp') and self.t3.hp.speech_cond_prompt_len:
+            plen = self.t3.hp.speech_cond_prompt_len
+            s3_tokzr = self.s3gen.tokenizer
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav[:self.ENC_COND_LEN]], max_len=plen)
+            t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
+        
+        # Voice-encoder speaker embedding  
+        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR))
+        ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
+        
+        t3_cond = T3Cond(
+            speaker_emb=ve_embed,
+            cond_prompt_speech_tokens=t3_cond_prompt_tokens,
+            emotion_adv=exaggeration * torch.ones(1, 1, 1),
+        ).to(device=self.device)
+        
+        self.conds = Conditionals(t3_cond, s3gen_ref_dict)
 
     def generate(
         self,
@@ -257,12 +317,12 @@ class ChatterboxTTSMLX:
         cfg_weight: float = 0.5,
         max_new_tokens: Optional[int] = None,
         temperature: float = 0.8,
-        top_p: float = 0.95,
+        top_p: float = 1.0,
         min_p: float = 0.05,
         repetition_penalty: float = 1.2,
-    ) -> np.ndarray:
+    ) -> torch.Tensor:
         """
-        Generate speech from text using MLX-optimized T3.
+        Generate speech from text using hybrid MLX/PyTorch pipeline.
 
         Args:
             text: Input text to synthesize
@@ -276,95 +336,751 @@ class ChatterboxTTSMLX:
             repetition_penalty: Repetition penalty factor
 
         Returns:
-            Generated audio waveform as numpy array
+            Generated audio waveform as torch tensor
         """
-        # Normalize text
-        text = punc_norm(text)
-        logger.info(f"Generating speech for: '{text}'")
-
-        # Tokenize text
-        text_tokens = self.tokenizer.encode(text)
-        text_tokens_mx = mx.array([text_tokens])  # MLX array
-
-        # Prepare conditioning
-        if audio_prompt_path is not None:
-            conds = self._prepare_conditioning_from_audio(audio_prompt_path, exaggeration)
-        elif self.conds is not None:
-            conds = self.conds
-            # Update exaggeration
-            conds.t3.emotion_adv = exaggeration
+        # Prepare conditioning if audio prompt provided
+        if audio_prompt_path:
+            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
-            raise ValueError("No conditioning available. Provide audio_prompt_path or load default speaker.")
+            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+        
+        # Update exaggeration if needed
+        if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
+            _cond = self.conds.t3
+            self.conds.t3 = T3Cond(
+                speaker_emb=_cond.speaker_emb,
+                cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
+                emotion_adv=exaggeration * torch.ones(1, 1, 1),
+            ).to(device=self.device)
+
+        # Normalize and tokenize text
+        text = punc_norm(text)
+        logger.info(f"Generating speech for: '{text[:50]}...' ({len(text)} chars)")
+
+        text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
+
+        # Add start/end tokens for CFG
+        if cfg_weight > 0.0:
+            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)
+        
+        sot = self.t3.hp.start_text_token
+        eot = self.t3.hp.stop_text_token
+        text_tokens = F.pad(text_tokens, (1, 0), value=sot)
+        text_tokens = F.pad(text_tokens, (0, 1), value=eot)
+        
+        # Convert to MLX for T3 inference
+        text_tokens_mx = mx.array(text_tokens.cpu().numpy())
+        
+        # Convert T3 conditioning to MLX
+        t3_cond_mx = T3CondMLX(
+            speaker_emb=mx.array(self.conds.t3.speaker_emb.cpu().numpy()) if self.conds.t3.speaker_emb is not None else None,
+            cond_prompt_speech_tokens=mx.array(self.conds.t3.cond_prompt_speech_tokens.cpu().numpy()) if self.conds.t3.cond_prompt_speech_tokens is not None else None,
+            emotion_adv=float(self.conds.t3.emotion_adv[0, 0, 0].item()),
+        )
 
         # Generate speech tokens with T3 MLX
         logger.info("Generating speech tokens with T3 MLX...")
-        speech_tokens_mx = self.t3.generate(
-            t3_cond=conds.t3,
-            text_tokens=text_tokens_mx,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            min_p=min_p,
-            repetition_penalty=repetition_penalty,
-            cfg_weight=cfg_weight,
-        )
+        with torch.inference_mode():
+            speech_tokens_mx = self.t3.inference(
+                t3_cond=t3_cond_mx,
+                text_tokens=text_tokens_mx,
+                max_new_tokens=max_new_tokens or self.t3.hp.max_speech_tokens,
+                temperature=temperature,
+                cfg_weight=cfg_weight,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
+            )
+        
+        # Extract conditional batch (first one)
+        speech_tokens = speech_tokens_mx[0] if len(speech_tokens_mx.shape) > 1 else speech_tokens_mx
 
-        # Convert MLX array to numpy for S3Gen (PyTorch)
-        speech_tokens_np = np.array(speech_tokens_mx[0])  # Remove batch dim
+        # Convert back to PyTorch for S3Gen
+        speech_tokens_np = np.array(speech_tokens).astype(np.int64)
+        speech_tokens_pt = torch.from_numpy(speech_tokens_np)
+        
+        # Drop invalid tokens (SOS/EOS) - needs PyTorch tensor
+        speech_tokens_pt = drop_invalid_tokens(speech_tokens_pt)
+        
+        # Filter out tokens >= 6561 (special tokens)
+        speech_tokens_pt = speech_tokens_pt[speech_tokens_pt < 6561]
+        speech_tokens_pt = speech_tokens_pt.to(self.device)
 
-        # Drop invalid tokens
-        speech_tokens_np = drop_invalid_tokens(speech_tokens_np)
+        # Generate waveform with S3Gen (PyTorch/MPS)
+        logger.info(f"Generating waveform with S3Gen (PyTorch on {self.device})...")
+        with torch.inference_mode():
+            wav, _ = self.s3gen.inference(
+                speech_tokens=speech_tokens_pt,
+                ref_dict=self.conds.gen,
+            )
+            wav = wav.squeeze(0).detach().cpu().numpy()
+            watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
 
-        # Generate waveform with S3Gen (PyTorch)
-        logger.info("Generating waveform with S3Gen...")
-        import torch
-        speech_tokens_pt = torch.from_numpy(speech_tokens_np).unsqueeze(0)
+        logger.info(f"✅ Generated {len(watermarked_wav)/self.sr:.2f}s of audio")
 
-        wav = self.s3gen.inference(
-            token=speech_tokens_pt,
-            **conds.gen
-        )
+        return torch.from_numpy(watermarked_wav).unsqueeze(0)
 
-        # Watermark the audio
-        wav = self.watermarker.encode_watermark(wav, sample_rate=self.sr)
-
-        logger.info(f"✅ Generated {len(wav)/self.sr:.2f}s of audio")
-
-        return wav
-
-    def _prepare_conditioning_from_audio(self, audio_path: str, exaggeration: float) -> ConditionalsMLX:
+    def _split_text_intelligently(self, text: str, target_words_per_chunk: int = 50) -> List[str]:
         """
-        Prepare conditioning from reference audio file.
+        Split text at sentence/phrase boundaries for chunked generation.
+        
+        Args:
+            text: Input text to split
+            target_words_per_chunk: Target number of words per chunk
+        
+        Returns:
+            List of text chunks
+        """
+        # Split AFTER punctuation using lookbehind
+        sentence_pattern = r'(?<=[.!?])\s+'
+        
+        # Split into sentences
+        sentences = [s.strip() for s in re.split(sentence_pattern, text) if s.strip()]
+        
+        # Group sentences into chunks of approximately target_words_per_chunk
+        chunks = []
+        current_chunk = []
+        current_word_count = 0
+        
+        for sentence in sentences:
+            if not sentence.strip():
+                continue
+            word_count = len(sentence.split())
+            
+            if current_word_count + word_count > target_words_per_chunk and current_chunk:
+                # Start new chunk
+                chunks.append(' '.join(current_chunk))
+                current_chunk = [sentence]
+                current_word_count = word_count
+            else:
+                current_chunk.append(sentence)
+                current_word_count += word_count
+        
+        # Add remaining chunk
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+        
+        return chunks if chunks else [text]
+
+    def _crossfade_chunks(self, chunks: List[torch.Tensor], overlap_duration: float = 0.1) -> torch.Tensor:
+        """
+        Concatenate audio chunks with crossfading.
+        
+        Args:
+            chunks: List of audio torch tensors
+            overlap_duration: Duration of crossfade in seconds
+        
+        Returns:
+            Single concatenated audio tensor
+        """
+        if len(chunks) == 0:
+            return torch.tensor([], dtype=torch.float32)
+        if len(chunks) == 1:
+            chunk = chunks[0]
+            if chunk.dim() == 2:
+                chunk = chunk.squeeze(0)
+            return chunk
+        
+        overlap_samples = int(overlap_duration * self.sr)
+        
+        # Process chunks - convert to numpy for processing
+        processed = []
+        for chunk in chunks:
+            if isinstance(chunk, torch.Tensor):
+                chunk = chunk.cpu().numpy()
+            if chunk.ndim == 2:
+                chunk = chunk.squeeze(0)
+            processed.append(chunk)
+        
+        # Simple concatenation with crossfade
+        result = processed[0]
+        for chunk in processed[1:]:
+            if len(result) > overlap_samples and len(chunk) > overlap_samples:
+                # Create crossfade
+                fade_out = np.linspace(1, 0, overlap_samples)
+                fade_in = np.linspace(0, 1, overlap_samples)
+                
+                # Apply crossfade
+                result_end = result[-overlap_samples:] * fade_out
+                chunk_start = chunk[:overlap_samples] * fade_in
+                
+                # Combine
+                result = np.concatenate([
+                    result[:-overlap_samples],
+                    result_end + chunk_start,
+                    chunk[overlap_samples:]
+                ])
+            else:
+                result = np.concatenate([result, chunk])
+        
+        return torch.from_numpy(result)
+
+    def generate_long(
+        self,
+        text: str,
+        audio_prompt_path: Optional[str] = None,
+        exaggeration: float = 0.5,
+        cfg_weight: float = 0.5,
+        chunk_size_words: int = 50,
+        overlap_duration: float = 0.1,
+        **kwargs
+    ) -> torch.Tensor:
+        """
+        Generate long-form speech by chunking text and crossfading.
+        
+        Args:
+            text: Input text to synthesize
+            audio_prompt_path: Optional path to reference audio
+            exaggeration: Emotion exaggeration factor
+            cfg_weight: Classifier-free guidance weight
+            chunk_size_words: Target words per chunk
+            overlap_duration: Crossfade duration in seconds
+            **kwargs: Additional arguments passed to generate()
+        
+        Returns:
+            Generated audio waveform as torch tensor
+        """
+        # Split text into chunks
+        chunks = self._split_text_intelligently(text, chunk_size_words)
+        logger.info(f"Split text into {len(chunks)} chunks")
+        
+        # Generate each chunk
+        audio_chunks = []
+        for i, chunk_text in enumerate(chunks):
+            logger.info(f"Generating chunk {i+1}/{len(chunks)}: '{chunk_text[:30]}...'")
+            chunk_audio = self.generate(
+                chunk_text,
+                audio_prompt_path=audio_prompt_path if i == 0 else None,
+                exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
+                **kwargs
+            )
+            audio_chunks.append(chunk_audio)
+        
+        # Crossfade chunks together
+        result = self._crossfade_chunks(audio_chunks, overlap_duration)
+        
+        return result.unsqueeze(0)  # Return with batch dim
+
+
+class ChatterboxTTSPureMLX:
+    """
+    Pure MLX Chatterbox TTS pipeline.
+    
+    Uses MLX for both T3 and S3Gen for maximum Apple Silicon optimization.
+    - T3: MLX (autoregressive token generation)
+    - S3Gen: MLX (flow matching + HiFiGAN vocoder)
+    
+    This provides the best performance on Apple Silicon but requires 
+    all operations to be implemented in MLX.
+    """
+
+    ENC_COND_LEN = 6 * S3_SR
+    DEC_COND_LEN = 10 * S3GEN_SR
+
+    def __init__(
+        self,
+        t3: T3MLX,
+        s3gen_mlx,  # S3Token2WavMLX
+        ve: VoiceEncoder,
+        tokenizer: EnTokenizer,
+        device: str = "cpu",  # For VE only
+        conds = None,
+        ckpt_dir: Optional[Path] = None,
+    ):
+        """
+        Initialize pure MLX TTS pipeline.
 
         Args:
-            audio_path: Path to reference audio
-            exaggeration: Emotion exaggeration factor
+            t3: T3MLX model (MLX)
+            s3gen_mlx: S3Token2WavMLX model (MLX)
+            ve: Voice encoder (PyTorch - used for conditioning)
+            tokenizer: Text tokenizer
+            device: PyTorch device for voice encoder
+            conds: Optional pre-computed conditioning
+            ckpt_dir: Path to checkpoint directory (for loading PyTorch S3Gen when needed)
+        """
+        self.sr = S3GEN_SR
+        self.t3 = t3
+        self.s3gen = s3gen_mlx
+        self.ve = ve
+        self.tokenizer = tokenizer
+        self.device = device
+        self.conds = conds
+        self._ckpt_dir = ckpt_dir
+        self._pt_s3gen = None  # Lazy-loaded PyTorch S3Gen for conditioning
+        self.watermarker = perth.PerthImplicitWatermarker()
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        cache_dir: Optional[str] = None,
+        t3_config: Optional[T3Config] = None,
+        use_default_speaker: bool = True,
+    ) -> 'ChatterboxTTSPureMLX':
+        """
+        Load pre-trained Chatterbox TTS model with pure MLX.
+
+        Args:
+            cache_dir: Optional cache directory for model files
+            t3_config: Optional T3 configuration (default: English-only)
+            use_default_speaker: Whether to load default speaker conditioning
 
         Returns:
-            ConditionalsMLX object
+            ChatterboxTTSPureMLX instance
         """
-        import torch
+        logger.info("Loading Chatterbox TTS with pure MLX optimization...")
 
-        # Load and process audio
-        audio, sr = librosa.load(audio_path, sr=None)
-        if sr != S3_SR:
-            audio = librosa.resample(audio, orig_sr=sr, target_sr=S3_SR)
+        # Download model files from HuggingFace
+        for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
+            local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
+        
+        ckpt_dir = Path(local_path).parent
 
-        # Extract speaker embedding
-        with torch.no_grad():
-            speaker_emb = self.ve.encode_wav(torch.from_numpy(audio).unsqueeze(0))
+        return cls.from_local(ckpt_dir, t3_config, use_default_speaker)
 
-        # Convert to MLX
-        speaker_emb_mx = mx.array(speaker_emb.cpu().numpy())
+    @classmethod
+    def from_local(
+        cls,
+        ckpt_dir: Path,
+        t3_config: Optional[T3Config] = None,
+        use_default_speaker: bool = True,
+    ) -> 'ChatterboxTTSPureMLX':
+        """
+        Load model from local checkpoint directory using pure MLX.
 
-        # Create T3 conditioning
-        t3_cond = T3CondMLX(
-            speaker_emb=speaker_emb_mx,
-            emotion_adv=exaggeration,
+        Args:
+            ckpt_dir: Path to checkpoint directory
+            t3_config: Optional T3 configuration
+            use_default_speaker: Whether to load default speaker
+
+        Returns:
+            ChatterboxTTSPureMLX instance
+        """
+        from .models.s3gen_mlx.s3gen_mlx import S3Token2WavMLX
+        from .models.s3gen_mlx.convert_weights import convert_and_load_weights
+        
+        ckpt_dir = Path(ckpt_dir)
+        device = "cpu"  # VE on CPU for compatibility
+
+        # Load voice encoder (PyTorch - needed for conditioning)
+        logger.info("Loading voice encoder...")
+        ve = VoiceEncoder()
+        ve.load_state_dict(load_file(ckpt_dir / "ve.safetensors"))
+        ve.to(device).eval()
+
+        # Initialize T3 MLX model
+        logger.info("Initializing T3 MLX model...")
+        if t3_config is None:
+            t3_config = T3Config.english_only()
+
+        t3 = T3MLX(hp=t3_config)
+
+        # Load T3 weights
+        logger.info("Loading T3 weights into MLX...")
+        t3_ckpt = ckpt_dir / "t3_cfg.safetensors"
+        pt_state = load_file(t3_ckpt)
+        if "model" in pt_state.keys():
+            pt_state = pt_state["model"][0]
+
+        mlx_state = {}
+        for k, v in pt_state.items():
+            mlx_state[k] = mx.array(v.cpu().numpy())
+        
+        t3.load_weights(list(mlx_state.items()), strict=False)
+        t3.eval()  # Set to eval mode to disable dropout
+        logger.info("✓ T3 weights loaded successfully")
+
+        # Load S3Gen MLX
+        logger.info("Loading S3Gen MLX vocoder...")
+        s3gen = S3Token2WavMLX()
+        s3gen_weights = convert_and_load_weights(str(ckpt_dir / "s3gen.safetensors"))
+        s3gen_weights = {k: mx.array(v) for k, v in s3gen_weights.items()}
+        s3gen.load_weights(list(s3gen_weights.items()), strict=False)
+        s3gen.eval()  # Set to eval mode
+        logger.info("✓ S3Gen MLX loaded successfully")
+
+        # Load tokenizer
+        logger.info("Loading tokenizer...")
+        tokenizer = EnTokenizer(str(ckpt_dir / "tokenizer.json"))
+
+        # Load default conditioning if requested
+        conds = None
+        if use_default_speaker:
+            logger.info("Loading default speaker conditioning...")
+            cond_path = ckpt_dir / "conds.pt"
+            if cond_path.exists():
+                from .tts import Conditionals
+                conds = Conditionals.load(cond_path, map_location=device)
+                logger.info("✓ Default speaker conditioning loaded")
+
+        logger.info("✅ ChatterboxTTSPureMLX loaded successfully!")
+        logger.info("   T3: MLX (Apple Silicon optimized)")
+        logger.info("   S3Gen: MLX (Apple Silicon optimized)")
+
+        return cls(
+            t3=t3,
+            s3gen_mlx=s3gen,
+            ve=ve,
+            tokenizer=tokenizer,
+            device=device,
+            conds=conds,
+            ckpt_dir=ckpt_dir,
+        )
+    
+    def _get_pt_s3gen(self):
+        """Lazy-load PyTorch S3Gen for conditioning extraction."""
+        if self._pt_s3gen is None:
+            if self._ckpt_dir is None:
+                raise ValueError("Cannot load PyTorch S3Gen: ckpt_dir not set")
+            from .models.s3gen import S3Gen
+            logger.info("Loading PyTorch S3Gen for conditioning...")
+            self._pt_s3gen = S3Gen()
+            self._pt_s3gen.load_state_dict(load_file(self._ckpt_dir / "s3gen.safetensors"), strict=False)
+            self._pt_s3gen.to(self.device).eval()
+        return self._pt_s3gen
+
+    def prepare_conditionals(self, wav_fpath: str, exaggeration: float = 0.5):
+        """
+        Prepare conditioning from a reference audio file.
+        
+        Uses PyTorch S3Gen's embed_ref for conditioning extraction (same as hybrid),
+        then converts to MLX arrays for Pure MLX inference pipeline.
+        
+        Args:
+            wav_fpath: Path to reference audio file
+            exaggeration: Emotion exaggeration factor (0.0 to 1.0)
+        """
+        from .tts import Conditionals
+        
+        # Load reference wav at S3GEN_SR (24kHz)
+        s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
+        ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+        
+        # Truncate to max conditioning length
+        s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
+        
+        # Use loaded PyTorch S3Gen to compute reference embedding (consistent with hybrid)
+        # This ensures mel, tokens, and speaker embedding are computed exactly the same way
+        pt_s3gen = self._get_pt_s3gen()
+        with torch.inference_mode():
+            pt_ref_dict = pt_s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
+        
+        # Convert PyTorch tensors to MLX arrays
+        ref_mel_mx = mx.array(pt_ref_dict['prompt_feat'].cpu().numpy())  # [B, T, 80]
+        ref_speech_tokens_mx = mx.array(pt_ref_dict['prompt_token'].cpu().numpy())  # [B, T]
+        spk_embed_mx = mx.array(pt_ref_dict['embedding'].cpu().numpy())  # [B, 192]
+        
+        # Get VE embedding for T3 (256 dims) - same as hybrid
+        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR))
+        ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
+        
+        # Speech tokens for T3 conditioning (truncated to prompt length)
+        t3_cond_prompt_tokens = None
+        if hasattr(self.t3, 'hp') and self.t3.hp.speech_cond_prompt_len:
+            plen = self.t3.hp.speech_cond_prompt_len
+            s3_tokzr = pt_s3gen.tokenizer
+            t3_tokens, _ = s3_tokzr.forward([ref_16k_wav[:self.ENC_COND_LEN]], max_len=plen)
+            t3_cond_prompt_tokens = torch.atleast_2d(t3_tokens).to(self.device)
+        
+        # Create reference dict for S3Gen MLX with MLX arrays
+        s3gen_ref_dict = {
+            'prompt_token': ref_speech_tokens_mx,  # [B, T] speech tokens from reference
+            'prompt_token_len': int(pt_ref_dict['prompt_token_len'][0].item()),
+            'prompt_feat': ref_mel_mx,  # [B, T, 80] mel features
+            'prompt_feat_len': ref_mel_mx.shape[1],
+            'embedding': spk_embed_mx,  # [B, 192] speaker embedding
+        }
+        
+        t3_cond = T3Cond(
+            speaker_emb=ve_embed,
+            cond_prompt_speech_tokens=t3_cond_prompt_tokens,
+            emotion_adv=exaggeration * torch.ones(1, 1, 1),
+        ).to(device=self.device)
+        
+        self.conds = Conditionals(t3_cond, s3gen_ref_dict)
+
+    def generate(
+        self,
+        text: str,
+        audio_prompt_path: Optional[str] = None,
+        exaggeration: float = 0.5,
+        cfg_weight: float = 0.5,
+        max_new_tokens: Optional[int] = None,
+        temperature: float = 0.8,
+        top_p: float = 1.0,
+        min_p: float = 0.05,
+        repetition_penalty: float = 1.2,
+    ) -> torch.Tensor:
+        """
+        Generate speech from text using pure MLX pipeline.
+
+        Args:
+            text: Input text to synthesize
+            audio_prompt_path: Optional path to reference audio for voice cloning
+            exaggeration: Emotion exaggeration factor (0.0 to 1.0)
+            cfg_weight: Classifier-free guidance weight
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Nucleus sampling threshold
+            min_p: Minimum probability threshold
+            repetition_penalty: Repetition penalty factor
+
+        Returns:
+            Generated audio waveform as torch tensor
+        """
+        # Prepare conditioning if audio prompt provided
+        if audio_prompt_path:
+            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
+        else:
+            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+        
+        # Update exaggeration if needed
+        if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
+            _cond = self.conds.t3
+            self.conds.t3 = T3Cond(
+                speaker_emb=_cond.speaker_emb,
+                cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
+                emotion_adv=exaggeration * torch.ones(1, 1, 1),
+            ).to(device=self.device)
+
+        # Normalize and tokenize text
+        text = punc_norm(text)
+        logger.info(f"[PureMLX] Generating speech for: '{text[:50]}...' ({len(text)} chars)")
+
+        text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
+
+        # Add start/end tokens for CFG
+        if cfg_weight > 0.0:
+            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)
+        
+        sot = self.t3.hp.start_text_token
+        eot = self.t3.hp.stop_text_token
+        text_tokens = F.pad(text_tokens, (1, 0), value=sot)
+        text_tokens = F.pad(text_tokens, (0, 1), value=eot)
+        
+        # Convert to MLX for T3 inference
+        text_tokens_mx = mx.array(text_tokens.cpu().numpy())
+        
+        # Convert T3 conditioning to MLX
+        t3_cond_mx = T3CondMLX(
+            speaker_emb=mx.array(self.conds.t3.speaker_emb.cpu().numpy()) if self.conds.t3.speaker_emb is not None else None,
+            cond_prompt_speech_tokens=mx.array(self.conds.t3.cond_prompt_speech_tokens.cpu().numpy()) if self.conds.t3.cond_prompt_speech_tokens is not None else None,
+            emotion_adv=float(self.conds.t3.emotion_adv[0, 0, 0].item()),
         )
 
-        # Create S3Gen conditioning (stays in PyTorch)
-        # TODO: Extract proper conditioning for S3Gen
-        gen_cond = {}
+        # Generate speech tokens with T3 MLX
+        logger.info("[PureMLX] Generating speech tokens with T3 MLX...")
+        with torch.inference_mode():
+            speech_tokens_mx = self.t3.inference(
+                t3_cond=t3_cond_mx,
+                text_tokens=text_tokens_mx,
+                max_new_tokens=max_new_tokens or self.t3.hp.max_speech_tokens,
+                temperature=temperature,
+                cfg_weight=cfg_weight,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
+            )
+        
+        # Extract conditional batch (first one)
+        speech_tokens = speech_tokens_mx[0] if len(speech_tokens_mx.shape) > 1 else speech_tokens_mx
 
-        return ConditionalsMLX(t3=t3_cond, gen=gen_cond)
+        # Clean up tokens
+        speech_tokens_np = np.array(speech_tokens).astype(np.int64)
+        # Filter out special tokens (>= 6561)
+        valid_mask = speech_tokens_np < 6561
+        speech_tokens_np = speech_tokens_np[valid_mask]
+        
+        # Convert to MLX array
+        speech_tokens_mlx = mx.array(speech_tokens_np.reshape(1, -1))
+
+        # Get prompt tokens from conditioning
+        prompt_tokens = self.conds.gen.get('prompt_token')
+        if prompt_tokens is None:
+            # Use tokens from T3 cond
+            if self.conds.t3.cond_prompt_speech_tokens is not None:
+                prompt_tokens = mx.array(self.conds.t3.cond_prompt_speech_tokens.cpu().numpy())
+            else:
+                prompt_tokens = mx.zeros((1, 1), dtype=mx.int32)
+        elif isinstance(prompt_tokens, torch.Tensor):
+            prompt_tokens = mx.array(prompt_tokens.cpu().numpy())
+        elif not isinstance(prompt_tokens, mx.array):
+            prompt_tokens = mx.array(prompt_tokens)
+        
+        # Convert prompt_feat to MLX if it's a PyTorch tensor
+        prompt_feat = self.conds.gen.get('prompt_feat')
+        if isinstance(prompt_feat, torch.Tensor):
+            prompt_feat = mx.array(prompt_feat.cpu().numpy())
+        elif prompt_feat is not None and not isinstance(prompt_feat, mx.array):
+            prompt_feat = mx.array(prompt_feat)
+        
+        # Convert embedding to MLX if it's a PyTorch tensor
+        embedding = self.conds.gen.get('embedding')
+        if isinstance(embedding, torch.Tensor):
+            embedding = mx.array(embedding.detach().cpu().numpy())
+        elif embedding is not None and not isinstance(embedding, mx.array):
+            embedding = mx.array(embedding)
+        
+        # Prepare ref_dict for S3Gen MLX
+        ref_dict = {
+            'prompt_token': prompt_tokens,
+            'prompt_token_len': int(prompt_tokens.shape[1]) if hasattr(prompt_tokens, 'shape') else 1,
+            'prompt_feat': prompt_feat,
+            'prompt_feat_len': int(prompt_feat.shape[1]) if prompt_feat is not None and hasattr(prompt_feat, 'shape') else 0,
+            'embedding': embedding,
+        }
+
+        # Generate waveform with S3Gen MLX
+        logger.info("[PureMLX] Generating waveform with S3Gen MLX...")
+        wav_mlx, _ = self.s3gen.inference(speech_tokens_mlx, ref_dict, finalize=True)
+        wav = np.array(wav_mlx.squeeze(0))
+        
+        # Apply watermark
+        watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
+
+        logger.info(f"[PureMLX] ✅ Generated {len(watermarked_wav)/self.sr:.2f}s of audio")
+
+        return torch.from_numpy(watermarked_wav).unsqueeze(0)
+
+    def _split_text_intelligently(self, text: str, target_words_per_chunk: int = 50) -> List[str]:
+        """
+        Split text at sentence/phrase boundaries for chunked generation.
+        
+        Args:
+            text: Input text to split
+            target_words_per_chunk: Target number of words per chunk
+        
+        Returns:
+            List of text chunks
+        """
+        # Split AFTER punctuation using lookbehind
+        sentence_pattern = r'(?<=[.!?])\s+'
+        
+        # Split into sentences
+        sentences = [s.strip() for s in re.split(sentence_pattern, text) if s.strip()]
+        
+        # Group sentences into chunks of approximately target_words_per_chunk
+        chunks = []
+        current_chunk = []
+        current_word_count = 0
+        
+        for sentence in sentences:
+            if not sentence.strip():
+                continue
+            word_count = len(sentence.split())
+            
+            if current_word_count + word_count > target_words_per_chunk and current_chunk:
+                # Start new chunk
+                chunks.append(' '.join(current_chunk))
+                current_chunk = [sentence]
+                current_word_count = word_count
+            else:
+                current_chunk.append(sentence)
+                current_word_count += word_count
+        
+        # Add remaining chunk
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+        
+        return chunks if chunks else [text]
+
+    def _crossfade_chunks(self, chunks: List[torch.Tensor], overlap_duration: float = 0.1) -> torch.Tensor:
+        """
+        Concatenate audio chunks with crossfading.
+        
+        Args:
+            chunks: List of audio torch tensors
+            overlap_duration: Duration of crossfade in seconds
+        
+        Returns:
+            Single concatenated audio tensor
+        """
+        if len(chunks) == 0:
+            return torch.tensor([], dtype=torch.float32)
+        if len(chunks) == 1:
+            chunk = chunks[0]
+            if chunk.dim() == 2:
+                chunk = chunk.squeeze(0)
+            return chunk
+        
+        overlap_samples = int(overlap_duration * self.sr)
+        
+        # Process chunks - convert to numpy for processing
+        processed = []
+        for chunk in chunks:
+            if isinstance(chunk, torch.Tensor):
+                chunk = chunk.cpu().numpy()
+            if chunk.ndim == 2:
+                chunk = chunk.squeeze(0)
+            processed.append(chunk)
+        
+        # Simple concatenation with crossfade
+        result = processed[0]
+        for chunk in processed[1:]:
+            if len(result) > overlap_samples and len(chunk) > overlap_samples:
+                # Create crossfade
+                fade_out = np.linspace(1, 0, overlap_samples)
+                fade_in = np.linspace(0, 1, overlap_samples)
+                
+                # Apply crossfade
+                result_end = result[-overlap_samples:] * fade_out
+                chunk_start = chunk[:overlap_samples] * fade_in
+                
+                # Combine
+                result = np.concatenate([
+                    result[:-overlap_samples],
+                    result_end + chunk_start,
+                    chunk[overlap_samples:]
+                ])
+            else:
+                result = np.concatenate([result, chunk])
+        
+        return torch.from_numpy(result)
+
+    def generate_long(
+        self,
+        text: str,
+        audio_prompt_path: Optional[str] = None,
+        exaggeration: float = 0.5,
+        cfg_weight: float = 0.5,
+        chunk_size_words: int = 50,
+        overlap_duration: float = 0.1,
+        **kwargs
+    ) -> torch.Tensor:
+        """
+        Generate long-form speech by chunking text and crossfading.
+        
+        Args:
+            text: Input text to synthesize
+            audio_prompt_path: Optional path to reference audio
+            exaggeration: Emotion exaggeration factor
+            cfg_weight: Classifier-free guidance weight
+            chunk_size_words: Target words per chunk
+            overlap_duration: Crossfade duration in seconds
+            **kwargs: Additional arguments passed to generate()
+        
+        Returns:
+            Generated audio waveform as torch tensor
+        """
+        # Split text into chunks
+        chunks = self._split_text_intelligently(text, chunk_size_words)
+        logger.info(f"[PureMLX] Split text into {len(chunks)} chunks")
+        
+        # Generate each chunk
+        audio_chunks = []
+        for i, chunk_text in enumerate(chunks):
+            logger.info(f"[PureMLX] Generating chunk {i+1}/{len(chunks)}: '{chunk_text[:30]}...'")
+            chunk_audio = self.generate(
+                chunk_text,
+                audio_prompt_path=audio_prompt_path if i == 0 else None,
+                exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
+                **kwargs
+            )
+            audio_chunks.append(chunk_audio)
+        
+        # Crossfade chunks together
+        result = self._crossfade_chunks(audio_chunks, overlap_duration)
+        
+        return result.unsqueeze(0)  # Return with batch dim
