@@ -358,9 +358,8 @@ class HiFTGeneratorMLX(nn.Module):
         
         # Pre-conv (x is already in MLX [B, T, C] format)
         x = self.conv_pre(x)  # [B, T, C_out]
-        
-        # Force evaluation after STFT and pre-conv to limit graph size
-        mx.eval(x, s_stft)
+
+        # Note: Removed mx.eval() here - let MLX fuse operations
         
         # Upsample and fuse with source
         for i in range(self.num_ups):
@@ -388,9 +387,8 @@ class HiFTGeneratorMLX(nn.Module):
                 else:
                     xs = xs + resblock(x)
             x = xs / self.num_kernels
-            
-            # Evaluate after each upsample block to prevent graph explosion
-            mx.eval(x)
+
+            # Note: Removed mx.eval() here - let MLX fuse across upsample blocks
         
         x = nn.leaky_relu(x, self.lrelu_slope)
         x = self.conv_post(x)  # [B, T, n_fft+2]
@@ -402,14 +400,16 @@ class HiFTGeneratorMLX(nn.Module):
         n_fft_half = self.istft_params["n_fft"] // 2 + 1
         magnitude = mx.exp(x[:, :n_fft_half, :])
         phase = mx.sin(x[:, n_fft_half:, :])
-        
-        # Evaluate before ISTFT
-        mx.eval(magnitude, phase)
+
+        # Note: Removed mx.eval() here - let ISTFT fuse with magnitude/phase
         
         # ISTFT
         result = self._istft(magnitude, phase)
         result = mx.clip(result, -self.audio_limit, self.audio_limit)
-        
+
+        # Single mx.eval() at the very end - allows MLX to fuse all operations
+        mx.eval(result)
+
         return result
 
     def _reflect_pad_1d(self, x: mx.array, pad_left: int, pad_right: int) -> mx.array:
@@ -478,16 +478,15 @@ class HiFTGeneratorMLX(nn.Module):
         return mx.real(spectrum), mx.imag(spectrum)
 
     def _istft(self, magnitude: mx.array, phase: mx.array) -> mx.array:
-        """Compute inverse STFT with overlap-add.
-        
-        Uses vectorized scatter-add to avoid Metal resource limit issues.
-        The original loop-based approach created too many MLX graph nodes,
-        exceeding macOS's 499,000 Metal buffer allocation limit.
-        
+        """Compute inverse STFT with fully vectorized overlap-add.
+
+        OPTIMIZED: Uses vectorized scatter-add instead of frame-by-frame loop.
+        This allows MLX to fuse operations and prevents graph explosion.
+
         Args:
             magnitude: Magnitude spectrogram [batch, freq_bins, n_frames]
             phase: Phase spectrogram [batch, freq_bins, n_frames]
-            
+
         Returns:
             Reconstructed signal [batch, time]
         """
@@ -495,62 +494,61 @@ class HiFTGeneratorMLX(nn.Module):
         n_fft = self.istft_params["n_fft"]
         hop_len = self.istft_params["hop_len"]
         window = self.stft_window
-        
+
         # Build complex spectrum from magnitude and phase
         real = magnitude * mx.cos(phase)
         imag = magnitude * mx.sin(phase)
         spectrum = real + 1j * imag  # [batch, freq_bins, n_frames]
-        
+
         # Transpose to [batch, n_frames, freq_bins]
         spectrum = spectrum.transpose(0, 2, 1)
         batch_size, n_frames, freq_bins = spectrum.shape
-        
+
         # IRFFT to get time-domain frames
         frames = mx.fft.irfft(spectrum, n=n_fft, axis=-1)  # [batch, n_frames, n_fft]
-        
-        # Force evaluation to materialize IRFFT results before overlap-add
-        mx.eval(frames)
-        
+
         # Apply window to all frames at once (vectorized)
         windowed_frames = frames * window[None, None, :]  # [batch, n_frames, n_fft]
-        
+
         # Compute output length
         output_len = (n_frames - 1) * hop_len + n_fft
-        
-        # === Vectorized overlap-add using batched processing ===
-        # Instead of n_frames iterations (could be 27,000+), we batch the work
-        # to limit graph size while still being efficient.
-        
-        BATCH_SIZE = 500  # Process 500 frames at a time to limit Metal allocations
-        
-        output = mx.zeros((batch_size, output_len))
-        window_sum = mx.zeros((1, output_len))
+
+        # === Vectorized overlap-add using scatter indices ===
+        # Create index tensor for scatter-add: shape [n_frames, n_fft]
+        frame_starts = mx.arange(n_frames) * hop_len  # [n_frames]
+        sample_offsets = mx.arange(n_fft)  # [n_fft]
+        indices = frame_starts[:, None] + sample_offsets[None, :]  # [n_frames, n_fft]
+
+        # Flatten for scatter
+        flat_indices = indices.flatten()  # [n_frames * n_fft]
+
+        # Process batch dimension - typically batch_size=1 for inference
+        # Stack results for each batch element
+        outputs = []
+        for b in range(batch_size):
+            flat_values = windowed_frames[b].flatten()  # [n_frames * n_fft]
+            # Use at-indexing with accumulated addition
+            output_b = mx.zeros((output_len,))
+            output_b = output_b.at[flat_indices].add(flat_values)
+            outputs.append(output_b)
+
+        # Stack batch results
+        output = mx.stack(outputs, axis=0)  # [batch, output_len]
+
+        # Compute window normalization (same for all batches)
         window_sq = window ** 2
-        
-        for batch_start in range(0, n_frames, BATCH_SIZE):
-            batch_end = min(batch_start + BATCH_SIZE, n_frames)
-            
-            # Process this batch of frames
-            for i in range(batch_start, batch_end):
-                start = i * hop_len
-                output = output.at[:, start:start+n_fft].add(windowed_frames[:, i, :])
-                window_sum = window_sum.at[:, start:start+n_fft].add(window_sq[None, :])
-            
-            # Force evaluation after each batch to materialize results
-            # This prevents the computation graph from growing unbounded
-            mx.eval(output, window_sum)
-        
+        window_norm = mx.zeros((output_len,))
+        window_sq_repeated = mx.broadcast_to(window_sq[None, :], (n_frames, n_fft)).flatten()
+        window_norm = window_norm.at[flat_indices].add(window_sq_repeated)
+
         # Normalize by window sum (avoid division by zero)
-        window_sum = mx.maximum(window_sum, 1e-8)
-        output = output / window_sum
-        
+        window_norm = mx.maximum(window_norm, 1e-8)
+        output = output / window_norm[None, :]
+
         # Remove center padding
         pad_len = n_fft // 2
         output = output[:, pad_len:-pad_len]
-        
-        # Final evaluation before returning
-        mx.eval(output)
-        
+
         return output
 
     def inference(self, speech_feat: mx.array, cache_source: Optional[mx.array] = None) -> tuple:
