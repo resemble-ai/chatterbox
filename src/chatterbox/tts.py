@@ -348,11 +348,6 @@ class ChatterboxTTS:
         )
         wav = wav.squeeze(0).detach().cpu().numpy()
 
-        for i in range(len(wav)):
-            if wav[i] == 0:
-                print(f"{len(wav)}-{i}")
-
-
         # If we have context tokens, crop out the samples corresponding to them
         # TODO -> this seems impercise considering different tokens may have different audio lengths. Something to consider.
         if context_length > 0:

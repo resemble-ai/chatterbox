@@ -23,8 +23,8 @@ import socket
 
 SAMPLE_RATE = 24000
 
-FADE_DURATION = 0.01
-CONTEXT_WINDOW = 250
+FADE_DURATION = 0.03
+CONTEXT_WINDOW = 300
 
 EXAGGERATION = 0.5
 CFG_WEIGHT = 0.3
@@ -85,6 +85,7 @@ def process_chunks(
 ):
     prev_tail = None # Keeps track of the previous chunk tail for cross fading
     all_tokens_processed = [] # Stores previous tokens to fill context window
+    audio = np.zeros(0, dtype=np.float32)
 
     while True:
         # Wait on generated tokens
@@ -116,6 +117,7 @@ def process_chunks(
                 metrics.first_chunk_time = time.time()
             metrics.audio_duration += len(audio_chunk) / SAMPLE_RATE
 
+            audio = np.concatenate([audio, audio_chunk])
             # Send audio over TCP
             data = audio_chunk.tobytes()
             conn.sendall(data)
@@ -130,6 +132,7 @@ def process_chunks(
             all_tokens_processed = torch.cat([all_tokens_processed, token_chunk], dim=-1)
 
     metrics.generation_end_time = time.time()
+    sf.write(f"{FADE_DURATION}_{CHUNK_SIZE}_{CONTEXT_WINDOW}.wav", audio, samplerate=24000, subtype="FLOAT")
 
 def main():
     # Initialize metrics
@@ -172,7 +175,9 @@ def main():
     time.sleep(5.0)
 
     # Send request
-    request = "Active-duty U S military personnel get special baggage allowances with Delta. When traveling on orders or for personal travel, you’ll receive baggage fee exceptions and extra checked bag benefits. These allowances apply to all branches, including the Marine Corps, Army, Air Force, Space Force, Navy, and Coast Guard. There may be some regional weight or embargo restrictions. Would you like me to text you a link with the full details for military baggage policies?" 
+    #request = "Active-duty US military personnel get special baggage allowances with Delta. When traveling on orders or for personal travel, you’ll receive baggage fee exceptions and extra checked bag benefits. These allowances apply to all branches, including the Marine Corps, Army, Air Force, Space Force, Navy, and Coast Guard. There may be some regional weight or embargo restrictions. Would you like me to text you a link with the full details for military baggage policies?" 
+    request = "You can submit a claim for delayed, damaged, or lost baggage by filling out Delta’s online baggage claim form. You’ll need the file reference number you received from the Baggage Service Center at the airport, along with any supporting documents. Would you like me to text you the link to the claim form for easy access? I can send an SMS to the number you're using. Just a quick heads-up — message and data rates may apply."
+    #request = "Delta Gift Cards can be shipped to valid street addresses within the fifty United States. We don't ship physical gift cards to P O Boxes or to addresses outside the U S. If you need an eGift card, those can be purchased by customers with billing addresses in all U S territories, including Puerto Rico and the U S Virgin Islands. Would you like more details on how to purchase a Delta Gift Card?"
     request_queue.put(request)
     metrics.start_time = time.time()
 
