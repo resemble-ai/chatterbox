@@ -301,6 +301,9 @@ class T3(nn.Module):
         length_penalty=1.0,
         repetition_penalty=1.2,
         cfg_weight=0.5,
+        
+        # Progress display
+        show_progress=True,
     ):
         """
         Args:
@@ -432,7 +435,10 @@ class T3(nn.Module):
         clear_device_memory()
 
         # ---- Generation Loop using kv_cache ----
-        for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
+        token_iterator = range(max_new_tokens)
+        if show_progress:
+            token_iterator = tqdm(token_iterator, desc="Sampling", dynamic_ncols=True)
+        for i in token_iterator:
             logits_step = output.logits[:, -1, :]
             # CFG combine  → (1, V)
             if cfg_weight > 0.0:

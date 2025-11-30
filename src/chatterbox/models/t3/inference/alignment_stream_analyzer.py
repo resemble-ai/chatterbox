@@ -82,19 +82,9 @@ class AlignmentStreamAnalyzer:
         target_layer = tfmr.layers[layer_idx].self_attn
         # Register hook and store the handle
         target_layer.register_forward_hook(attention_forward_hook)
-        if hasattr(tfmr, 'config') and hasattr(tfmr.config, 'output_attentions'):
-            self.original_output_attentions = tfmr.config.output_attentions
-            # Switch to eager attention if using sdpa, as sdpa doesn't support output_attentions
-            if hasattr(tfmr.config, '_attn_implementation') and tfmr.config._attn_implementation == 'sdpa':
-                tfmr.config._attn_implementation = 'eager'
-            # Also handle the public attribute if it exists
-            if hasattr(tfmr.config, 'attn_implementation') and tfmr.config.attn_implementation == 'sdpa':
-                tfmr.config.attn_implementation = 'eager'
-            try:
-                tfmr.config.output_attentions = True
-            except ValueError as e:
-                # If still fails, log warning and continue without attention spying
-                logger.warning(f"Could not enable output_attentions: {e}")
+        # Note: output_attentions=True is passed directly in the forward call (t3.py)
+        # The T3 model already configures eager attention at initialization time
+        # so we don't need to modify the config here
 
     def step(self, logits, next_token=None):
         """

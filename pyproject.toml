@@ -20,6 +20,7 @@ dependencies = [
     "resemble-perth==1.0.1",
     "conformer==0.3.2",
     "safetensors>=0.7.0",
+    "spacy>=3.8.3",
     "spacy-pkuseg==1.0.1",
     "pykakasi==2.3.0",
     "russian-text-stresser@git+https://github.com/michaelcreatesstuff/add-stress-to-epub.git@60c5c3d31cd5472e394d64cf74d6f1d7b31425e2",

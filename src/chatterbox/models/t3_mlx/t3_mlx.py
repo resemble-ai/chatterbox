@@ -309,6 +309,7 @@ class T3MLX(nn.Module):
         min_p: float = 0.05,
         repetition_penalty: float = 1.2,
         cfg_weight: float = 0.5,
+        show_progress: bool = True,
     ) -> mx.array:
         """
         Generate speech tokens autoregressively.
@@ -385,7 +386,10 @@ class T3MLX(nn.Module):
         from .inference.sampling_utils_mlx import apply_repetition_penalty, apply_top_p, apply_min_p
 
         # Generation loop
-        for i in tqdm(range(max_new_tokens), desc="Generating", dynamic_ncols=True):
+        token_iterator = range(max_new_tokens)
+        if show_progress:
+            token_iterator = tqdm(token_iterator, desc="Generating", dynamic_ncols=True)
+        for i in token_iterator:
             logits_step = output['logits'][:, -1, :]  # (B, vocab)
 
             # CFG: combine conditional and unconditional predictions
@@ -453,6 +457,7 @@ class T3MLX(nn.Module):
         min_p: float = 0.05,
         repetition_penalty: float = 1.2,
         cfg_weight: float = 0.5,
+        show_progress: bool = True,
         # PyTorch API compatibility - ignored for MLX
         initial_speech_tokens: Optional[mx.array] = None,
         prepend_prompt_speech_tokens: Optional[mx.array] = None,
@@ -495,4 +500,5 @@ class T3MLX(nn.Module):
             min_p=min_p,
             repetition_penalty=repetition_penalty,
             cfg_weight=cfg_weight,
+            show_progress=show_progress,
         )
