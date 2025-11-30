@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 HOST = "195.26.233.44"
-PORT = 34521
+PORT = 57049
 SAMPLE_RATE = 24000
     
 def main():
