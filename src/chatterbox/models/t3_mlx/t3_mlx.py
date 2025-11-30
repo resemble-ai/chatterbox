@@ -7,6 +7,7 @@ Converted from PyTorch version in t3.py
 """
 
 import logging
+import os
 from typing import Optional, Dict, Union
 import mlx.core as mx
 import mlx.nn as nn
@@ -19,9 +20,21 @@ from .inference.t3_mlx_backend import T3MLXBackend
 from .inference.kv_cache_mlx import KVCacheMLX
 from ..t3.llama_configs import LLAMA_CONFIGS
 from ..t3.modules.t3_config import T3Config
+from ..utils import get_memory_info, is_debug
 
 logger = logging.getLogger(__name__)
 
+
+def _log_t3_memory(label: str):
+    """Log memory for T3 MLX debugging. Enabled via DEBUG_MEMORY=1."""
+    if not is_debug() and os.environ.get("DEBUG_MEMORY", "0") != "1":
+        return
+    info = get_memory_info()
+    parts = [f"[T3_MLX] {label}:", f"Sys={info['sys_used_gb']:.2f}GB"]
+    if 'mps_allocated_mb' in info:
+        parts.append(f"MPS={info['mps_allocated_mb']:.0f}MB")
+    mx.eval(mx.array([0]))  # Force MLX sync
+    print(" | ".join(parts))
 
 def _ensure_BOT_EOT(text_tokens: mx.array, hp: T3Config):
     """Validate that text tokens contain required start/stop tokens."""
@@ -337,6 +350,8 @@ class T3MLX(nn.Module):
         if max_new_tokens is None:
             max_new_tokens = self.hp.max_speech_tokens
 
+        _log_t3_memory("generate_start")
+        
         # Start with BOS token
         bos_token = mx.array([[self.hp.start_speech_token]])
         bos_embed = self.speech_emb(bos_token)
@@ -351,6 +366,8 @@ class T3MLX(nn.Module):
             cfg_weight=cfg_weight,
         )
 
+        _log_t3_memory("after_prepare_embeds")
+        
         # CFG: duplicate BOS embed to match embeds batch size if needed
         if cfg_weight > 0.0 and embeds.shape[0] == 2:
             bos_embed = mx.concatenate([bos_embed, bos_embed], axis=0)
@@ -371,15 +388,25 @@ class T3MLX(nn.Module):
             self.patched_model.reset_state()
 
         # Initial forward pass
+        # NOTE: output_hidden_states=False for memory efficiency during generation
+        # We only need logits, not intermediate layer outputs
         output = self.patched_model(
             inputs_embeds=inputs_embeds,
             cache=None,
             decoder_cond=None,
             use_cache=True,
-            output_hidden_states=True,
+            output_hidden_states=False,
         )
 
         cache = output['cache']
+        
+        # Force immediate evaluation of initial forward pass to prevent lazy graph buildup
+        if cache is not None and len(cache) > 0 and cache[0] is not None:
+            mx.eval(cache[0][0])
+        
+        # Keep a list for repetition penalty and final concatenation
+        # We'll concatenate at the end instead of using a pre-allocated buffer
+        # since MLX's array update patterns are limited
         generated_ids = [bos_token]
 
         # Import sampling utilities (to be implemented)
@@ -391,6 +418,8 @@ class T3MLX(nn.Module):
             token_iterator = tqdm(token_iterator, desc="Generating", dynamic_ncols=True)
         for i in token_iterator:
             logits_step = output['logits'][:, -1, :]  # (B, vocab)
+            
+            # Note: Don't eval here - let MLX fuse operations until sampling
 
             # CFG: combine conditional and unconditional predictions
             if cfg_weight > 0.0:
@@ -415,11 +444,13 @@ class T3MLX(nn.Module):
             probs = mx.softmax(logits, axis=-1)
             next_token = mx.random.categorical(mx.log(probs + 1e-10))
             next_token = mx.reshape(next_token, (1, 1))
-
+            
+            # int() implicitly evaluates, so we don't need explicit mx.eval here
+            token_val = int(next_token[0, 0])
             generated_ids.append(next_token)
 
             # Check for EOS
-            if int(next_token[0, 0]) == self.hp.stop_speech_token:
+            if token_val == self.hp.stop_speech_token:
                 logger.info(f"✅ EOS token detected at step {i+1}")
                 break
 
@@ -434,17 +465,36 @@ class T3MLX(nn.Module):
                     next_embed = mx.concatenate([next_embed, next_embed], axis=0)
 
             # Forward with cache
+            # NOTE: output_hidden_states=False saves memory - we only need logits
             output = self.patched_model(
                 inputs_embeds=next_embed,
                 cache=cache,
                 use_cache=True,
-                output_hidden_states=True,
+                output_hidden_states=False,
             )
 
             cache = output['cache']
+            
+            # Periodic evaluation to bound memory growth without killing performance
+            # Only eval every N steps to allow MLX to fuse operations within batches
+            if i > 0 and i % 100 == 0:
+                if cache is not None and len(cache) > 0 and cache[0] is not None:
+                    mx.eval(cache[0][0])
+                _log_t3_memory(f"generate_step_{i}")
 
+        _log_t3_memory("generate_complete")
+        
         # Concatenate generated tokens (skip BOS)
-        return mx.concatenate(generated_ids[1:], axis=1)
+        result = mx.concatenate(generated_ids[1:], axis=1)
+        
+        # Clear references to help GC
+        del generated_ids
+        del cache
+        del output
+        import gc
+        gc.collect()
+        
+        return result
 
     def inference(
         self,

@@ -99,14 +99,17 @@ See `example_tts.py` and `example_vc.py` for more examples.
 
 ## MLX Support (Apple Silicon)
 
-**NEW:** Chatterbox now supports **MLX** for native Apple Silicon optimization, providing significant performance improvements on M-series chips:
+Chatterbox supports **MLX** for native Apple Silicon optimization, providing performance improvements on M-series chips.
 
-### MLX Performance Benefits
-- **2-3x faster inference** compared to PyTorch MPS
-- **30-50% memory reduction** with unified memory architecture
-- **4-5x speedup with 4-bit quantization**
-- Native Apple Silicon optimization
-- No CPU↔GPU data transfers needed
+### MLX Backends
+
+| Backend         | Description                    | RTF\*     | Best For                 |
+| --------------- | ------------------------------ | --------- | ------------------------ |
+| **MLX Hybrid**  | T3 (MLX) + S3Gen (PyTorch/MPS) | **0.81x** | Production use (fastest) |
+| **Pure MLX**    | T3 (MLX) + S3Gen (MLX)         | 0.67x     | Minimal dependencies     |
+| **PyTorch MPS** | Full PyTorch on MPS            | 0.57x     | Compatibility            |
+
+\*RTF = Real-Time Factor (audio_duration / processing_time). Higher is better.
 
 ### Installation with MLX
 
@@ -117,12 +120,45 @@ pip install chatterbox-tts[mlx]
 ### Usage
 
 ```python
+import torchaudio as ta
 from chatterbox.tts_mlx import ChatterboxTTSMLX
 
-# Initialize with MLX backend (optimized for Apple Silicon)
-model = ChatterboxTTSMLX.from_pretrained()
+# Load MLX Hybrid model (recommended - fastest)
+model = ChatterboxTTSMLX.from_pretrained(device="mps")
 
+# Basic generation
 text = "Hello! This is running with MLX optimization on Apple Silicon."
+wav = model.generate(text)
+ta.save("output.wav", wav, model.sr)
+
+# Voice cloning
+wav = model.generate(
+    text,
+    audio_prompt_path="reference_voice.wav",
+    exaggeration=0.5,  # Emotion intensity (0.0-1.0)
+    cfg_weight=0.5,    # Classifier-free guidance
+)
+
+# Long-form generation (automatically chunks and crossfades)
+long_text = "Your long text here. It can span multiple paragraphs..."
+wav = model.generate_long(
+    long_text,
+    audio_prompt_path="reference_voice.wav",
+    chunk_size_words=50,    # Words per chunk
+    overlap_duration=0.1,   # Crossfade duration in seconds
+)
+ta.save("long_output.wav", wav, model.sr)
+```
+
+### Pure MLX (No PyTorch Dependency)
+
+If you want to avoid PyTorch entirely:
+
+```python
+from chatterbox.tts_mlx import ChatterboxTTSPureMLX
+
+# Load Pure MLX model (slightly slower, but no PyTorch needed)
+model = ChatterboxTTSPureMLX.from_pretrained()
 wav = model.generate(text)
 ```
 
@@ -133,7 +169,7 @@ For even faster inference with minimal quality loss:
 ```python
 from chatterbox.models.t3_mlx.quantization import QuantizedT3MLX
 
-# Load with 4-bit quantization (4-5x speedup)
+# Load with 4-bit quantization
 model = QuantizedT3MLX.from_pretrained(
     ckpt_path="path/to/checkpoint",
     bits=4,  # or 8 for 8-bit quantization
@@ -141,13 +177,11 @@ model = QuantizedT3MLX.from_pretrained(
 )
 ```
 
-### Benchmark Results (MLX vs PyTorch on M4)
-| Operation | PyTorch MPS | MLX | MLX (4-bit) | Speedup |
-|-----------|-------------|-----|-------------|---------|
-| Model Loading | 2.5s | 1.2s | 1.0s | 2.5x |
-| Generation (50 tokens) | 3.8s | 1.5s | 0.9s | 4.2x |
-| Generation (200 tokens) | 12.1s | 4.8s | 2.8s | 4.3x |
-| Memory Usage | 8.2 GB | 5.1 GB | 2.3 GB | 72% reduction |
+### Performance Notes
+
+- **MLX Hybrid is fastest** because PyTorch's MPS backend has highly optimized kernels for vocoder operations (ISTFT, overlap-add)
+- **T3 stage** (68% of compute) runs on MLX in both Hybrid and Pure modes
+- **S3Gen stage** (32% of compute) benefits from PyTorch's optimized Metal shaders in Hybrid mode
 
 ## PyTorch KV Cache Optimization
 
@@ -173,6 +207,24 @@ from chatterbox.models.t3.modules.t3_config import T3Config
 config = T3Config.english_only(kv_cache_dtype=None)  # Disable optimization
 model = ChatterboxTTS.from_pretrained(device="cuda", t3_config=config)
 ```
+
+## Memory Debugging
+
+For debugging memory usage (especially useful for MLX backends), you can enable detailed memory logging:
+
+```bash
+# Via environment variable
+DEBUG_MEMORY=1 python your_script.py
+
+# Or when running benchmarks
+DEBUG_MEMORY=1 python benchmark_mps.py --hybrid-mlx-only
+```
+
+This logs memory usage at key points during model loading and inference, including:
+
+- System memory (used, wired, active)
+- MPS allocated memory (for PyTorch Metal backend)
+- MLX memory synchronization points
 
 # Acknowledgements
 

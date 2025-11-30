@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional, List, Union
 import logging
 import re
+import os
 
 import numpy as np
 
@@ -33,6 +34,9 @@ from .generation_utils import (
     TARGET_WORDS_PER_CHUNK,
     split_into_sentences,
 )
+
+# Import memory utilities for debugging
+from .models.utils import get_memory_info, is_debug
 
 try:
     import mlx.core as mx
@@ -72,6 +76,33 @@ import librosa
 logger = logging.getLogger(__name__)
 
 REPO_ID = "ResembleAI/chatterbox"
+
+
+def _log_memory_mlx(label: str):
+    """
+    Log detailed memory info for MLX debugging.
+    Only logs when DEBUG_LOGGING or DEBUG_MEMORY env var is set.
+    Uses get_memory_info() from chatterbox.models.utils.
+    """
+    if not is_debug() and os.environ.get("DEBUG_MEMORY", "0") != "1":
+        return
+    
+    info = get_memory_info()
+    parts = [f"[MLX MEM] {label}:"]
+    parts.append(f"Sys={info['sys_used_gb']:.2f}GB ({info['sys_percent']:.0f}%)")
+    
+    if 'wired_gb' in info:
+        parts.append(f"Wired={info['wired_gb']:.2f}GB")
+    if 'active_gb' in info:
+        parts.append(f"Active={info['active_gb']:.2f}GB")
+    if 'mps_allocated_mb' in info:
+        parts.append(f"MPS={info['mps_allocated_mb']:.0f}MB")
+    
+    # Force MLX to sync
+    mx.eval(mx.array([0]))
+    
+    logger.debug(" | ".join(parts))
+    print(" | ".join(parts))
 
 
 def punc_norm(text: str) -> str:
@@ -357,6 +388,7 @@ class ChatterboxTTSMLX:
         # Clear conditioning cache when conditioning changes
         self._cached_t3_cond_mx = None
         self._cached_cond_hash = None
+        _log_memory_mlx("hybrid_conditionals_prepared")
 
     def _generate_single_sentence(
         self,
@@ -421,6 +453,8 @@ class ChatterboxTTSMLX:
         # Get cached T3 conditioning (avoids re-conversion for each sentence)
         t3_cond_mx = self._get_cached_t3_cond_mx()
 
+        _log_memory_mlx("hybrid_before_t3_inference")
+        
         # Generate speech tokens with T3 MLX
         with torch.inference_mode():
             speech_tokens_mx = self.t3.inference(
@@ -434,6 +468,12 @@ class ChatterboxTTSMLX:
                 top_p=top_p,
                 show_progress=show_progress,
             )
+        
+        # Clear T3's KV cache to free memory after generation
+        if hasattr(self.t3, 'patched_model') and self.t3.patched_model is not None:
+            self.t3.patched_model.reset_state()
+        
+        _log_memory_mlx("hybrid_after_t3_inference")
         
         # Extract conditional batch (first one)
         speech_tokens = speech_tokens_mx[0] if len(speech_tokens_mx.shape) > 1 else speech_tokens_mx
@@ -449,6 +489,8 @@ class ChatterboxTTSMLX:
         speech_tokens_pt = speech_tokens_pt[speech_tokens_pt < 6561]
         speech_tokens_pt = speech_tokens_pt.to(self.device)
 
+        _log_memory_mlx("hybrid_before_s3gen_inference")
+        
         # Generate waveform with S3Gen (PyTorch/MPS)
         with torch.inference_mode():
             wav, _ = self.s3gen.inference(
@@ -460,6 +502,8 @@ class ChatterboxTTSMLX:
             if apply_watermark:
                 wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
 
+        _log_memory_mlx("hybrid_after_s3gen_inference")
+        
         return torch.from_numpy(wav).unsqueeze(0)
 
     def generate(
@@ -582,6 +626,10 @@ class ChatterboxTTSMLX:
             print_chunk_completed(i, num_chunks, chunk_time, chunk_duration)
             
             audio_chunks.append(chunk_audio)
+            
+            # Light cleanup between chunks (avoid aggressive mx.eval/clear_cache which kills perf)
+            import gc
+            gc.collect()
         
         total_time = _time.time() - total_start
         
@@ -1017,6 +1065,7 @@ class ChatterboxTTSPureMLX:
         # Clear conditioning cache when conditioning changes
         self._cached_t3_cond_mx = None
         self._cached_cond_hash = None
+        _log_memory_mlx("pure_mlx_conditionals_prepared")
 
     def _generate_single_sentence(
         self,
@@ -1081,6 +1130,8 @@ class ChatterboxTTSPureMLX:
         # Get cached T3 conditioning (avoids re-conversion for each sentence)
         t3_cond_mx = self._get_cached_t3_cond_mx()
 
+        _log_memory_mlx("pure_mlx_before_t3_inference")
+        
         # Generate speech tokens with T3 MLX
         with torch.inference_mode():
             speech_tokens_mx = self.t3.inference(
@@ -1094,6 +1145,12 @@ class ChatterboxTTSPureMLX:
                 top_p=top_p,
                 show_progress=show_progress,
             )
+        
+        # Clear T3's KV cache to free memory after generation
+        if hasattr(self.t3, 'patched_model') and self.t3.patched_model is not None:
+            self.t3.patched_model.reset_state()
+        
+        _log_memory_mlx("pure_mlx_after_t3_inference")
         
         # Extract conditional batch (first one)
         speech_tokens = speech_tokens_mx[0] if len(speech_tokens_mx.shape) > 1 else speech_tokens_mx
@@ -1143,9 +1200,13 @@ class ChatterboxTTSPureMLX:
             'embedding': embedding,
         }
 
+        _log_memory_mlx("pure_mlx_before_s3gen_inference")
+        
         # Generate waveform with S3Gen MLX
         wav_mlx, _ = self.s3gen.inference(speech_tokens_mlx, ref_dict, finalize=True)
         wav = np.array(wav_mlx.squeeze(0))
+        
+        _log_memory_mlx("pure_mlx_after_s3gen_inference")
         
         if apply_watermark:
             wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
@@ -1272,6 +1333,10 @@ class ChatterboxTTSPureMLX:
             print_chunk_completed(i, num_chunks, chunk_time, chunk_duration)
             
             audio_chunks.append(chunk_audio)
+            
+            # Light cleanup between chunks (avoid aggressive mx.eval/clear_cache which kills perf)
+            import gc
+            gc.collect()
         
         total_time = _time.time() - total_start
         

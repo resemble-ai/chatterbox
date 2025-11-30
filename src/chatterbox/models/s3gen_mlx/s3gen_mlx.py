@@ -21,6 +21,7 @@ Combines token-to-mel (CFM) and mel-to-waveform (HiFiGAN) stages.
 """
 
 import logging
+import os
 from typing import Optional, Dict, Tuple
 from functools import lru_cache
 
@@ -37,12 +38,25 @@ from .transformer.upsample_encoder_mlx import UpsampleConformerEncoderMLX
 from .flow_matching_mlx import CausalConditionalCFMMLX
 from .decoder_mlx import ConditionalDecoderMLX
 from .utils.mel_mlx import mel_spectrogram_mlx
+from ..utils import get_memory_info, is_debug
 
 logger = logging.getLogger(__name__)
 
 # Constants from original implementation
 S3GEN_SR = 24000  # 24kHz output sample rate
 S3_SR = 16000  # 16kHz for S3 tokenizer
+
+
+def _log_s3gen_memory(label: str):
+    """Log memory for S3Gen MLX debugging. Enabled via DEBUG_MEMORY=1."""
+    if not is_debug() and os.environ.get("DEBUG_MEMORY", "0") != "1":
+        return
+    info = get_memory_info()
+    parts = [f"[S3GEN_MLX] {label}:", f"Sys={info['sys_used_gb']:.2f}GB"]
+    if 'mps_allocated_mb' in info:
+        parts.append(f"MPS={info['mps_allocated_mb']:.0f}MB")
+    mx.eval(mx.array([0]))  # Force MLX sync
+    print(" | ".join(parts))
 
 
 class CFMParams:
@@ -312,7 +326,10 @@ class S3Token2WavMLX(S3Token2MelMLX):
         Returns:
             Generated mel spectrogram
         """
-        return S3Token2MelMLX.__call__(self, speech_tokens, ref_dict, finalize)
+        result = S3Token2MelMLX.__call__(self, speech_tokens, ref_dict, finalize)
+        # Force evaluation to prevent lazy computation graph buildup
+        mx.eval(result)
+        return result
     
     def hift_inference(
         self,
@@ -332,10 +349,15 @@ class S3Token2WavMLX(S3Token2MelMLX):
         if cache_source is None:
             cache_source = mx.zeros((1, 1, 0))
         
-        return self.mel2wav.inference(
+        _log_s3gen_memory("hift_inference_start")
+        result = self.mel2wav.inference(
             speech_feat=speech_feat,
             cache_source=cache_source
         )
+        # Force evaluation to prevent lazy computation graph buildup
+        mx.eval(result[0])
+        _log_s3gen_memory("hift_inference_end")
+        return result
     
     def inference(
         self,
@@ -355,9 +377,12 @@ class S3Token2WavMLX(S3Token2MelMLX):
             Generated waveform, source signal
         """
         logger.debug("[MLX] Running full inference pipeline")
+        _log_s3gen_memory("s3gen_inference_start")
         
         # Flow inference (token -> mel)
+        _log_s3gen_memory("before_flow_inference")
         output_mels = self.flow_inference(speech_tokens, ref_dict, finalize)
+        _log_s3gen_memory("after_flow_inference")
         
         # HiFiGAN inference (mel -> waveform)
         output_wavs, output_sources = self.hift_inference(output_mels)
@@ -367,6 +392,7 @@ class S3Token2WavMLX(S3Token2MelMLX):
         if output_wavs.shape[-1] >= fade_len:
             output_wavs = output_wavs.at[:, :fade_len].multiply(self.trim_fade)
         
+        _log_s3gen_memory("s3gen_inference_end")
         return output_wavs, output_sources
 
 

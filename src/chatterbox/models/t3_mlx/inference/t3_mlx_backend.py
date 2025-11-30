@@ -94,7 +94,8 @@ class T3MLXBackend(nn.Module):
             output_attentions=output_attentions,
         )
 
-        # Get final hidden states
+        # Get final hidden states for logits projection
+        # When output_hidden_states=False, hidden_states only contains final output
         hidden_states = tfmr_out['hidden_states'][-1]  # (B, seq, dim)
 
         # Project to speech logits
@@ -103,8 +104,9 @@ class T3MLXBackend(nn.Module):
         return {
             'logits': logits,
             'cache': tfmr_out.get('cache'),
-            'hidden_states': tfmr_out.get('hidden_states'),
-            'last_hidden_state': tfmr_out.get('last_hidden_state'),
+            # Only include hidden_states if requested (saves memory during generation)
+            'hidden_states': tfmr_out.get('hidden_states') if output_hidden_states else None,
+            'last_hidden_state': hidden_states,
         }
 
     def prepare_inputs_for_generation(
