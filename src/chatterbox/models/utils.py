@@ -175,7 +175,7 @@ def set_mlx_cache_limit(limit_gb: float = 4.0):
         return None
     try:
         limit_bytes = int(limit_gb * 1024 * 1024 * 1024)
-        old_limit = mx.metal.set_cache_limit(limit_bytes)
+        old_limit = mx.set_cache_limit(limit_bytes)
         old_limit_gb = old_limit / (1024 * 1024 * 1024)
         logger.info(f"[MLX MEMORY] Set cache limit to {limit_gb}GB (was {old_limit_gb:.1f}GB)")
         return old_limit_gb
@@ -202,7 +202,7 @@ def set_mlx_memory_limit(limit_gb: float = 8.0):
         return None
     try:
         limit_bytes = int(limit_gb * 1024 * 1024 * 1024)
-        old_limit = mx.metal.set_memory_limit(limit_bytes)
+        old_limit = mx.set_memory_limit(limit_bytes)
         old_limit_gb = old_limit / (1024 * 1024 * 1024)
         logger.info(f"[MLX MEMORY] Set memory limit to {limit_gb}GB (was {old_limit_gb:.1f}GB)")
         return old_limit_gb
