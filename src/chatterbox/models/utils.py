@@ -1,8 +1,11 @@
 from os import environ
 import gc
+import logging
 import torch
 from torch import bfloat16, float16, float32, cuda, backends, mps
 from psutil import virtual_memory
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -139,6 +142,73 @@ def clear_device_memory():
     elif hasattr(backends, 'mps') and backends.mps.is_available():
         mps.empty_cache()
         mps.synchronize()
+
+
+# =============================================================================
+# MLX Memory Management
+# =============================================================================
+
+def _get_mlx():
+    """Safely import MLX if available."""
+    try:
+        import mlx.core as mx
+        return mx
+    except ImportError:
+        return None
+
+
+def set_mlx_cache_limit(limit_gb: float = 4.0):
+    """
+    Set MLX cache memory limit to prevent unbounded growth.
+    
+    The cache holds reusable memory allocations. Setting a limit prevents
+    MLX from holding onto too much cached memory between operations.
+    
+    Args:
+        limit_gb: Maximum cache size in GB (default: 4GB)
+    
+    Returns:
+        Previous cache limit in GB, or None if MLX unavailable
+    """
+    mx = _get_mlx()
+    if mx is None:
+        return None
+    try:
+        limit_bytes = int(limit_gb * 1024 * 1024 * 1024)
+        old_limit = mx.metal.set_cache_limit(limit_bytes)
+        old_limit_gb = old_limit / (1024 * 1024 * 1024)
+        logger.info(f"[MLX MEMORY] Set cache limit to {limit_gb}GB (was {old_limit_gb:.1f}GB)")
+        return old_limit_gb
+    except Exception as e:
+        logger.warning(f"Could not set MLX cache limit: {e}")
+        return None
+
+
+def set_mlx_memory_limit(limit_gb: float = 8.0):
+    """
+    Set MLX total memory limit to prevent system instability.
+    
+    This controls the maximum total memory MLX can allocate. Setting this
+    prevents MLX from consuming all available system memory.
+    
+    Args:
+        limit_gb: Maximum memory in GB (default: 8GB)
+    
+    Returns:
+        Previous memory limit in GB, or None if MLX unavailable
+    """
+    mx = _get_mlx()
+    if mx is None:
+        return None
+    try:
+        limit_bytes = int(limit_gb * 1024 * 1024 * 1024)
+        old_limit = mx.metal.set_memory_limit(limit_bytes)
+        old_limit_gb = old_limit / (1024 * 1024 * 1024)
+        logger.info(f"[MLX MEMORY] Set memory limit to {limit_gb}GB (was {old_limit_gb:.1f}GB)")
+        return old_limit_gb
+    except Exception as e:
+        logger.warning(f"Could not set MLX memory limit: {e}")
+        return None
 
 
 class AttrDict(dict):

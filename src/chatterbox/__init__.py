@@ -9,7 +9,12 @@ __version__ = version("chatterbox")
 from .tts import ChatterboxTTS
 from .vc import ChatterboxVC
 from .mtl_tts import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
-from .models import DEBUG_LOGGING, is_debug
+from .models import (
+    DEBUG_LOGGING,
+    is_debug,
+    set_mlx_cache_limit,
+    set_mlx_memory_limit,
+)
 
 __all__ = [
     "ChatterboxTTS",
@@ -18,4 +23,6 @@ __all__ = [
     "SUPPORTED_LANGUAGES",
     "DEBUG_LOGGING",
     "is_debug",
+    "set_mlx_cache_limit",
+    "set_mlx_memory_limit",
 ]
