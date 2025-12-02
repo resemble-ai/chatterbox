@@ -452,8 +452,8 @@ class ChatterboxBenchmark:
                     print("  Applying 4-bit quantization...")
                     log_memory_detailed("mlx_q4_before_quantize", device)
                     from chatterbox.models.t3_mlx.quantization.quantize_mlx import QuantizedT3MLX
-                    # Quantize the underlying T3 model
-                    self.model.model = QuantizedT3MLX(self.model.model, bits=4, group_size=64).model
+                    # Quantize the underlying T3 model (stored as .t3 in ChatterboxTTSPureMLX)
+                    self.model.t3 = QuantizedT3MLX(self.model.t3, bits=4, group_size=64).model
                     log_memory_detailed("mlx_q4_after_quantize", device)
                     print("  ✓ Quantization complete")
             except (ImportError, RuntimeError, AttributeError) as e:
