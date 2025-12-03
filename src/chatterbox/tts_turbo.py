@@ -104,7 +104,7 @@ class Conditionals:
         return cls(T3Cond(**kwargs['t3']), kwargs['gen'])
 
 
-class ChatterboxTTS:
+class ChatterboxTurboTTS:
     ENC_COND_LEN = 15 * S3_SR
     DEC_COND_LEN = 10 * S3GEN_SR
 
@@ -136,11 +136,11 @@ class ChatterboxTTS:
         else:
             map_location = None
 
-        ve = VoiceEncoder()
-        ve.load_state_dict(
-            load_file(ckpt_dir / "ve.safetensors")
-        )
-        ve.to(device).eval()
+        # ve = VoiceEncoder()
+        # ve.load_state_dict(
+        #     load_file(ckpt_dir / "ve.safetensors")
+        # )
+        # ve.to(device).eval()
 
         # Turbo specific hp
         hp = T3Config(text_tokens_dict_size=50276)
@@ -152,11 +152,16 @@ class ChatterboxTTS:
         hp.emotion_adv = False
 
         t3 = T3(hp)
-        t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
+        t3_state = load_file(ckpt_dir / "t3_turbo_v1.pth.safetensors")
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
-        t3.load_state_dict(t3_state)
+        load_msg = t3.load_state_dict(t3_state)
         t3.to(device).eval()
+        del t3.tfmr.wte
+
+        print(t3)
+        print(load_msg)
+        exit()
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
