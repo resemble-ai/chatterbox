@@ -15,6 +15,7 @@ from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 from .models.t3.modules.t3_config import T3Config
+from transformers import AutoTokenizer
 
 
 REPO_ID = "ResembleAI/chatterbox-turbo"
@@ -136,11 +137,11 @@ class ChatterboxTurboTTS:
         else:
             map_location = None
 
-        # ve = VoiceEncoder()
-        # ve.load_state_dict(
-        #     load_file(ckpt_dir / "ve.safetensors")
-        # )
-        # ve.to(device).eval()
+        ve = VoiceEncoder()
+        ve.load_state_dict(
+            load_file(ckpt_dir / "ve.safetensors")
+        )
+        ve.to(device).eval()
 
         # Turbo specific hp
         hp = T3Config(text_tokens_dict_size=50276)
@@ -152,16 +153,12 @@ class ChatterboxTurboTTS:
         hp.emotion_adv = False
 
         t3 = T3(hp)
-        t3_state = load_file(ckpt_dir / "t3_turbo_v1.pth.safetensors")
+        t3_state = load_file(ckpt_dir / "t3_turbo_v1.safetensors")
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
-        load_msg = t3.load_state_dict(t3_state)
-        t3.to(device).eval()
+        t3.load_state_dict(t3_state)
         del t3.tfmr.wte
-
-        print(t3)
-        print(load_msg)
-        exit()
+        t3.to(device).eval()
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
@@ -169,9 +166,9 @@ class ChatterboxTurboTTS:
         )
         s3gen.to(device).eval()
 
-        tokenizer = EnTokenizer(
-            str(ckpt_dir / "tokenizer.json")
-        )
+        tokenizer = AutoTokenizer.from_pretrained(ckpt_dir)
+        if len(tokenizer) != 50276:
+            print(f"WARNING: Tokenizer len {len(tokenizer)} != 50276")
 
         conds = None
         builtin_voice = ckpt_dir / "conds.pt"
