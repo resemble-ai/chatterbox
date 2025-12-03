@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -5,8 +6,10 @@ import librosa
 import torch
 import perth
 import torch.nn.functional as F
-from huggingface_hub import hf_hub_download
+
 from safetensors.torch import load_file
+from huggingface_hub import snapshot_download
+from transformers import AutoTokenizer
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -15,7 +18,6 @@ from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 from .models.t3.modules.t3_config import T3Config
-from transformers import AutoTokenizer
 
 
 REPO_ID = "ResembleAI/chatterbox-turbo"
@@ -128,7 +130,7 @@ class ChatterboxTurboTTS:
         self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
+    def from_local(cls, ckpt_dir, device) -> 'ChatterboxTurboTTS':
         ckpt_dir = Path(ckpt_dir)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
@@ -178,7 +180,7 @@ class ChatterboxTurboTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTTS':
+    def from_pretrained(cls, device) -> 'ChatterboxTurboTTS':
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -187,10 +189,14 @@ class ChatterboxTurboTTS:
                 print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
             device = "cpu"
 
-        for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
-            local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
+        local_path = snapshot_download(
+            repo_id=REPO_ID,
+            token=os.getenv("HF_TOKEN"),
+            # Optional: Filter to download only what you need
+            allow_patterns=["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"]
+        )
 
-        return cls.from_local(Path(local_path).parent, device)
+        return cls.from_local(local_path, device)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
