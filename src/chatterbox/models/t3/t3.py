@@ -53,7 +53,6 @@ class T3(nn.Module):
         if self.is_gpt:
             self.cfg = GPT2Config(**config_dict)
             self.tfmr = GPT2Model(self.cfg)
-            del self.tfmr.wte
         else:
             self.cfg = LlamaConfig(**config_dict)
             self.tfmr = LlamaModel(self.cfg)
@@ -78,7 +77,7 @@ class T3(nn.Module):
 
         # logit projection
         self.text_head = nn.Linear(self.cfg.hidden_size, hp.text_tokens_dict_size, bias=False)
-        self.speech_head = nn.Linear(self.cfg.hidden_size, hp.speech_tokens_dict_size, bias=False)
+        self.speech_head = nn.Linear(self.cfg.hidden_size, hp.speech_tokens_dict_size, bias=self.is_gpt)
         self.compiled = False
 
     @property
