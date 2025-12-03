@@ -9,7 +9,7 @@ from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
-from transformers import LlamaModel, LlamaConfig
+from transformers import LlamaModel, LlamaConfig, GPT2Config, GPT2Model
 from transformers.generation.logits_process import TopPLogitsWarper, RepetitionPenaltyLogitsProcessor, MinPLogitsWarper
 
 from .modules.learned_pos_emb import LearnedPositionEmbeddings
@@ -43,11 +43,21 @@ class T3(nn.Module):
 
     def __init__(self, hp=None):
         if hp is None:
-            hp = T3Config.english_only()  # Default to English-only config for backward compatibility
+            hp = T3Config.english_only()
         super().__init__()
         self.hp = hp
-        self.cfg = LlamaConfig(**LLAMA_CONFIGS[hp.llama_config_name])
-        self.tfmr = LlamaModel(self.cfg)
+
+        config_dict = LLAMA_CONFIGS[hp.llama_config_name]
+        self.is_gpt = config_dict.get("model_type") == "gpt2"
+
+        if self.is_gpt:
+            self.cfg = GPT2Config(**config_dict)
+            self.tfmr = GPT2Model(self.cfg)
+            del self.tfmr.wte
+        else:
+            self.cfg = LlamaConfig(**config_dict)
+            self.tfmr = LlamaModel(self.cfg)
+
         self.dim = self.cfg.hidden_size
         self.deepspeed_patch_applied = False
 
@@ -57,6 +67,8 @@ class T3(nn.Module):
         self.speech_emb = nn.Embedding(hp.speech_tokens_dict_size, self.dim)
 
         # custom position embedding
+        self.text_pos_emb = None
+        self.speech_pos_emb = None
         if hp.input_pos_emb == "learned":
             max_text_seq_len = hp.max_text_tokens + 2
             self.text_pos_emb = LearnedPositionEmbeddings(max_text_seq_len, self.dim)
