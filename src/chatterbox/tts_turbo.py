@@ -231,8 +231,8 @@ class ChatterboxTurboTTS:
         min_p=0.05,
         top_p=1.0,
         audio_prompt_path=None,
-        exaggeration=0.5,
-        cfg_weight=0.5,
+        exaggeration=0.0,
+        cfg_weight=0.0,
         temperature=0.8,
     ):
         if audio_prompt_path:
@@ -240,52 +240,29 @@ class ChatterboxTurboTTS:
         else:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
-        # Update exaggeration if needed
-        if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
-            _cond: T3Cond = self.conds.t3
-            self.conds.t3 = T3Cond(
-                speaker_emb=_cond.speaker_emb,
-                cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
-                emotion_adv=exaggeration * torch.ones(1, 1, 1),
-            ).to(device=self.device)
-
         # Norm and tokenize text
         text = punc_norm(text)
-        text_tokens = self.tokenizer.text_to_tokens(text).to(self.device)
+        text_tokens = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+        text_tokens = text_tokens.input_ids.to(self.device)
 
-        if cfg_weight > 0.0:
-            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
+        speech_tokens = self.t3.inference_turbo(
+            t3_cond=self.conds.t3,
+            text_tokens=text_tokens,
+        )
+        # Extract only the conditional batch.
 
-        sot = self.t3.hp.start_text_token
-        eot = self.t3.hp.stop_text_token
-        text_tokens = F.pad(text_tokens, (1, 0), value=sot)
-        text_tokens = F.pad(text_tokens, (0, 1), value=eot)
 
-        with torch.inference_mode():
-            speech_tokens = self.t3.inference(
-                t3_cond=self.conds.t3,
-                text_tokens=text_tokens,
-                max_new_tokens=1000,  # TODO: use the value in config
-                temperature=temperature,
-                cfg_weight=cfg_weight,
-                repetition_penalty=repetition_penalty,
-                min_p=min_p,
-                top_p=top_p,
-            )
-            # Extract only the conditional batch.
-            speech_tokens = speech_tokens[0]
+        # TODO: output becomes 1D
+        # speech_tokens = drop_invalid_tokens(speech_tokens)
 
-            # TODO: output becomes 1D
-            speech_tokens = drop_invalid_tokens(speech_tokens)
-            
-            speech_tokens = speech_tokens[speech_tokens < 6561]
+        speech_tokens = speech_tokens[speech_tokens < 6561]
 
-            speech_tokens = speech_tokens.to(self.device)
+        speech_tokens = speech_tokens.to(self.device)
 
-            wav, _ = self.s3gen.inference(
-                speech_tokens=speech_tokens,
-                ref_dict=self.conds.gen,
-            )
-            wav = wav.squeeze(0).detach().cpu().numpy()
-            watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
+        wav, _ = self.s3gen.inference(
+            speech_tokens=speech_tokens,
+            ref_dict=self.conds.gen,
+        )
+        wav = wav.squeeze(0).detach().cpu().numpy()
+        watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
         return torch.from_numpy(watermarked_wav).unsqueeze(0)
