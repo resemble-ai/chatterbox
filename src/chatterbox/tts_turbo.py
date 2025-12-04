@@ -163,9 +163,10 @@ class ChatterboxTurboTTS:
         del t3.tfmr.wte
         t3.to(device).eval()
 
-        s3gen = S3Gen()
+        s3gen = S3Gen(meanflow=True)
+        weights = load_file(ckpt_dir / "s3gen_meanflow.safetensors")
         s3gen.load_state_dict(
-            load_file(ckpt_dir / "s3gen.safetensors"), strict=False
+            weights, strict=True
         )
         s3gen.to(device).eval()
 
@@ -268,6 +269,7 @@ class ChatterboxTurboTTS:
         wav, _ = self.s3gen.inference(
             speech_tokens=speech_tokens,
             ref_dict=self.conds.gen,
+            n_cfm_timesteps=2,
         )
         wav = wav.squeeze(0).detach().cpu().numpy()
         watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
