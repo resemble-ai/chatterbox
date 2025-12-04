@@ -227,7 +227,8 @@ class ChatterboxTurboTTS:
         ).to(device=self.device)
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
 
-    def generate(self,
+    def generate(
+        self,
         text,
         repetition_penalty=1.2,
         min_p=0.00,
@@ -243,8 +244,8 @@ class ChatterboxTurboTTS:
         else:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
-        if cfg_weight > 0.0 or exaggeration > 0.0:
-            logger.warning("CFG and exaggeration are not supported by Turbo version and will be ignored.")
+        if cfg_weight > 0.0 or exaggeration > 0.0 or min_p > 0.0:
+            logger.warning("CFG, min_p and exaggeration are not supported by Turbo version and will be ignored.")
 
         # Norm and tokenize text
         text = punc_norm(text)
