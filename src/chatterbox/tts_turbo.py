@@ -18,7 +18,8 @@ from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 from .models.t3.modules.t3_config import T3Config
-
+import logging
+logger = logging.getLogger(__name__)
 
 REPO_ID = "ResembleAI/chatterbox-turbo"
 
@@ -193,7 +194,7 @@ class ChatterboxTurboTTS:
 
         local_path = snapshot_download(
             repo_id=REPO_ID,
-            token=os.getenv("HF_TOKEN"),
+            token=os.getenv("HF_TOKEN") or True,
             # Optional: Filter to download only what you need
             allow_patterns=["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"]
         )
@@ -226,21 +227,24 @@ class ChatterboxTurboTTS:
         ).to(device=self.device)
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
 
-    def generate(
-        self,
+    def generate(self,
         text,
         repetition_penalty=1.2,
-        min_p=0.05,
-        top_p=1.0,
+        min_p=0.00,
+        top_p=0.95,
         audio_prompt_path=None,
         exaggeration=0.0,
         cfg_weight=0.0,
         temperature=0.8,
+        top_k=1000,
     ):
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+
+        if cfg_weight > 0.0 or exaggeration > 0.0:
+            logger.warning("CFG and exaggeration are not supported by Turbo version and will be ignored.")
 
         # Norm and tokenize text
         text = punc_norm(text)
@@ -250,12 +254,11 @@ class ChatterboxTurboTTS:
         speech_tokens = self.t3.inference_turbo(
             t3_cond=self.conds.t3,
             text_tokens=text_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
         )
-        # Extract only the conditional batch.
-
-
-        # TODO: output becomes 1D
-        # speech_tokens = drop_invalid_tokens(speech_tokens)
 
         speech_tokens = speech_tokens[speech_tokens < 6561]
 
