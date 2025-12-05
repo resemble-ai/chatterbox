@@ -6,6 +6,65 @@ from chatterbox.tts_turbo import ChatterboxTurboTTS
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+EVENT_TAGS = [
+    "[clear throat]", "[sigh]", "[shush]", "[cough]", "[groan]",
+    "[sniff]", "[gasp]", "[chuckle]", "[laugh]"
+]
+
+# --- REFINED CSS ---
+# 1. tag-container: Forces the row to wrap items instead of scrolling. Removes borders/backgrounds.
+# 2. tag-btn: Sets the specific look (indigo theme) and stops them from stretching.
+CUSTOM_CSS = """
+.tag-container {
+    display: flex !important;
+    flex-wrap: wrap !important; /* This fixes the one-per-line issue */
+    gap: 8px !important;
+    margin-top: 5px !important;
+    margin-bottom: 10px !important;
+    border: none !important;
+    background: transparent !important;
+}
+
+.tag-btn {
+    min-width: fit-content !important;
+    width: auto !important;
+    height: 32px !important;
+    font-size: 13px !important;
+    background: #eef2ff !important;
+    border: 1px solid #c7d2fe !important;
+    color: #3730a3 !important;
+    border-radius: 6px !important;
+    padding: 0 10px !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+}
+
+.tag-btn:hover {
+    background: #c7d2fe !important;
+    transform: translateY(-1px);
+}
+"""
+
+INSERT_TAG_JS = """
+(tag_val, current_text) => {
+    const textarea = document.querySelector('#main_textbox textarea');
+    if (!textarea) return current_text + " " + tag_val; 
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+
+    let prefix = " ";
+    let suffix = " ";
+
+    if (start === 0) prefix = "";
+    else if (current_text[start - 1] === ' ') prefix = "";
+
+    if (end < current_text.length && current_text[end] === ' ') suffix = "";
+
+    return current_text.slice(0, start) + prefix + tag_val + suffix + current_text.slice(end);
+}
+"""
+
 
 def set_seed(seed: int):
     torch.manual_seed(seed)
@@ -52,18 +111,34 @@ def generate(
     return (model.sr, wav.squeeze(0).numpy())
 
 
-with gr.Blocks(title="Chatterbox Turbo") as demo:
+with gr.Blocks(title="Chatterbox Turbo", css=CUSTOM_CSS) as demo:
     gr.Markdown("# ⚡ Chatterbox Turbo")
 
-    model_state = gr.State(None)  # Loaded once per session/user
+    model_state = gr.State(None)
 
     with gr.Row():
         with gr.Column():
             text = gr.Textbox(
                 value="Congratulations Miss Connor! [chuckle] Um anyway, we do have a new model in store. It's the SkyNet T-800 series and it's got basically everything. Including AI integration with ChatGPT and all that jazz. Would you like me to get some prices for you?",
                 label="Text to synthesize (max chars 300)",
-                max_lines=5
+                max_lines=5,
+                elem_id="main_textbox"
             )
+
+            # --- Event Tags ---
+            # Switched back to Row, but applied specific CSS to force wrapping
+            with gr.Row(elem_classes=["tag-container"]):
+                for tag in EVENT_TAGS:
+                    # elem_classes targets the button specifically
+                    btn = gr.Button(tag, elem_classes=["tag-btn"])
+
+                    btn.click(
+                        fn=None,
+                        inputs=[btn, text],
+                        outputs=text,
+                        js=INSERT_TAG_JS
+                    )
+
             ref_wav = gr.Audio(
                 sources=["upload", "microphone"],
                 type="filepath",
@@ -85,7 +160,6 @@ with gr.Blocks(title="Chatterbox Turbo") as demo:
         with gr.Column():
             audio_output = gr.Audio(label="Output Audio")
 
-    # Load model on startup
     demo.load(fn=load_model, inputs=[], outputs=model_state)
 
     run_btn.click(
