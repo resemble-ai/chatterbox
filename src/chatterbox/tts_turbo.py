@@ -19,7 +19,7 @@ from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 from .models.t3.modules.t3_config import T3Config
-
+from .models.s3gen.const import S3GEN_SIL
 import logging
 logger = logging.getLogger(__name__)
 
@@ -280,9 +280,11 @@ class ChatterboxTurboTTS:
             repetition_penalty=repetition_penalty,
         )
 
+        # Remove OOV tokens and add silence to end
         speech_tokens = speech_tokens[speech_tokens < 6561]
-
         speech_tokens = speech_tokens.to(self.device)
+        silence = torch.tensor([S3GEN_SIL, S3GEN_SIL, S3GEN_SIL]).long().to(self.device)
+        speech_tokens = torch.cat([speech_tokens, silence])
 
         wav, _ = self.s3gen.inference(
             speech_tokens=speech_tokens,
