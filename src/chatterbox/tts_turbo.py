@@ -1,23 +1,25 @@
 import os
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
 import librosa
 import torch
 import perth
-import torch.nn.functional as F
+import pyloudnorm as ln
 
 from safetensors.torch import load_file
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
 from .models.t3 import T3
-from .models.s3tokenizer import S3_SR, drop_invalid_tokens
+from .models.s3tokenizer import S3_SR
 from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 from .models.t3.modules.t3_config import T3Config
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -41,11 +43,8 @@ def punc_norm(text: str) -> str:
 
     # Replace uncommon/llm punc
     punc_to_replace = [
-        ("...", ", "),
         ("…", ", "),
         (":", ","),
-        (" - ", ", "),
-        (";", ", "),
         ("—", "-"),
         ("–", "-"),
         (" ,", ","),
@@ -202,9 +201,27 @@ class ChatterboxTurboTTS:
 
         return cls.from_local(local_path, device)
 
-    def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
-        ## Load reference wav
+    def norm_loudness(self, wav, sr, target_lufs=-27):
+        try:
+            meter = ln.Meter(sr)
+            loudness = meter.integrated_loudness(wav)
+            gain_db = target_lufs - loudness
+            gain_linear = 10.0 ** (gain_db / 20.0)
+            if math.isfinite(gain_linear) and gain_linear > 0.0:
+                wav = wav * gain_linear
+        except Exception as e:
+            print(f"Warning: Error in norm_loudness, skipping: {e}")
+
+        return wav
+
+    def prepare_conditionals(self, wav_fpath, exaggeration=0.5, norm_loudness=True):
+        ## Load and norm reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
+
+        assert len(s3gen_ref_wav) / _sr > 5.0, "Audio prompt must be longer than 5 seconds!"
+
+        if norm_loudness:
+            s3gen_ref_wav = self.norm_loudness(s3gen_ref_wav, _sr)
 
         ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
 
@@ -239,9 +256,10 @@ class ChatterboxTurboTTS:
         cfg_weight=0.0,
         temperature=0.8,
         top_k=1000,
+        norm_loudness=True,
     ):
         if audio_prompt_path:
-            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
+            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, norm_loudness=norm_loudness)
         else:
             assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
