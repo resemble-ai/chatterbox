@@ -146,6 +146,11 @@ with gr.Blocks(title="Chatterbox Turbo", css=CUSTOM_CSS) as demo:
                 value="https://storage.googleapis.com/chatterbox-demo-samples/prompts/female_random_podcast.wav"
             )
 
+            run_btn = gr.Button("Generate ⚡", variant="primary")
+
+        with gr.Column():
+            audio_output = gr.Audio(label="Output Audio")
+
             with gr.Accordion("Advanced Options", open=False):
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")
                 temp = gr.Slider(0.05, 2.0, step=.05, label="Temperature", value=0.8)
@@ -153,12 +158,7 @@ with gr.Blocks(title="Chatterbox Turbo", css=CUSTOM_CSS) as demo:
                 top_k = gr.Slider(0, 1000, step=10, label="Top K", value=1000)
                 repetition_penalty = gr.Slider(1.00, 2.00, step=0.05, label="Repetition Penalty", value=1.2)
                 min_p = gr.Slider(0.00, 1.00, step=0.01, label="Min P (Set to 0 to disable)", value=0.00)
-                norm_loudness = gr.Checkbox(value=True, label="Normalize Loudness (Match prompt volume)")
-
-            run_btn = gr.Button("Generate ⚡", variant="primary")
-
-        with gr.Column():
-            audio_output = gr.Audio(label="Output Audio")
+                norm_loudness = gr.Checkbox(value=True, label="Normalize Loudness (-27 LUFS)")
 
     demo.load(fn=load_model, inputs=[], outputs=model_state)
 
