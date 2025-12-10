@@ -1,3 +1,4 @@
+import os
 import logging
 import json
 
@@ -167,12 +168,19 @@ class ChineseCangjieConverter:
     def _load_cangjie_mapping(self, model_dir=None):
         """Load Cangjie mapping from HuggingFace model repository."""        
         try:
-            cangjie_file = hf_hub_download(
-                repo_id=REPO_ID,
-                filename="Cangjie5_TC.json",
-                cache_dir=model_dir
-            )
-            
+            cangjie_file_exists = False
+            if model_dir is not None:
+                cangjie_file = os.path.join(model_dir, "Cangjie5_TC.json")
+                if os.path.exists(cangjie_file):
+                    cangjie_file_exists = True
+
+            if not cangjie_file_exists:
+                cangjie_file = hf_hub_download(
+                    repo_id=REPO_ID,
+                    filename="Cangjie5_TC.json",
+                    cache_dir=model_dir
+                )
+
             with open(cangjie_file, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
             
@@ -221,7 +229,10 @@ class ChineseCangjieConverter:
             if category(t) == "Lo":
                 cangjie = self._cangjie_encode(t)
                 if cangjie is None:
-                    output.append(t)
+                    # 避免将无法转换的字符加入输出，否则可能导致意外的杂音。
+                    # Do not append unconvertable characters to output,
+                    # otherwise it may cause unexpected noise.
+                    # output.append(t)
                     continue
                 code = []
                 for c in cangjie:

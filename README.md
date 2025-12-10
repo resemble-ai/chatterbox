@@ -16,6 +16,12 @@ Whether you're working on memes, videos, games, or AI agents, Chatterbox brings 
 
 If you like the model but need to scale or tune it for higher accuracy, check out our competitively priced TTS service (<a href="https://resemble.ai">link</a>). It delivers reliable performance with ultra-low latency of sub 200ms—ideal for production use in agents, applications, or interactive media.
 
+## Service Deployment
+
+Want to deploy Chatterbox TTS as a service? Check out our service deployment guides:
+- [English Service Guide](README_service.md) - Complete guide for setting up and running the FastAPI service
+- [中文服务指南](README_service_zh.md) - FastAPI 服务部署完整指南
+
 # Key Details
 - Multilingual, zero-shot TTS supporting 23 languages
 - SoTA zeroshot English TTS
