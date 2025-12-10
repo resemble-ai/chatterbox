@@ -258,31 +258,58 @@ class MTLTokenizer:
         model_dir = Path(vocab_file_path).parent
         self.cangjie_converter = ChineseCangjieConverter(model_dir)
         self.check_vocabset_sot_eot()
+        # Enable debug logging for tokenizer
+        self._debug = True
 
     def check_vocabset_sot_eot(self):
         voc = self.tokenizer.get_vocab()
         assert SOT in voc
         assert EOT in voc
 
-    def preprocess_text(self, raw_text: str, language_id: str = None, lowercase: bool = True, nfkd_normalize: bool = True):
+    def preprocess_text(self, raw_text: str, language_id: str = None, lowercase: bool = True, normalize_unicode: bool = True):
         """
-        Text preprocessor that handles lowercase conversion and NFKD normalization.
+        Text preprocessor that handles lowercase conversion and Unicode normalization.
+        
+        Uses NFC normalization (composed form) instead of NFKD (decomposed) because:
+        1. The vocabulary contains composed accented characters (á, é, í, ó, ú, ñ, etc.)
+        2. NFKD decomposes these into base + combining marks, using different tokens
+        3. The model was likely trained on NFC-normalized text (more common)
+        4. Using composed form produces better pronunciation for Spanish, French, Portuguese, etc.
         """
         preprocessed_text = raw_text
         if lowercase:
             preprocessed_text = preprocessed_text.lower()
-        if nfkd_normalize:
-            preprocessed_text = normalize("NFKD", preprocessed_text)
+        if normalize_unicode:
+            # Use NFC (Canonical Decomposition, followed by Canonical Composition)
+            # This keeps accented characters as single codepoints (e.g., á stays as U+00E1)
+            # rather than decomposing to base + combining mark (a + U+0301)
+            preprocessed_text = normalize("NFC", preprocessed_text)
         
         return preprocessed_text
 
-    def text_to_tokens(self, text: str, language_id: str = None, lowercase: bool = True, nfkd_normalize: bool = True):
-        text_tokens = self.encode(text, language_id=language_id, lowercase=lowercase, nfkd_normalize=nfkd_normalize)
+    def text_to_tokens(self, text: str, language_id: str = None, lowercase: bool = True, normalize_unicode: bool = True):
+        text_tokens = self.encode(text, language_id=language_id, lowercase=lowercase, normalize_unicode=normalize_unicode)
         text_tokens = torch.IntTensor(text_tokens).unsqueeze(0)
         return text_tokens
 
-    def encode(self, txt: str, language_id: str = None, lowercase: bool = True, nfkd_normalize: bool = True):
-        txt = self.preprocess_text(txt, language_id=language_id, lowercase=lowercase, nfkd_normalize=nfkd_normalize)
+    def encode(self, txt: str, language_id: str = None, lowercase: bool = True, normalize_unicode: bool = True):
+        original_txt = txt
+        txt = self.preprocess_text(txt, language_id=language_id, lowercase=lowercase, normalize_unicode=normalize_unicode)
+        
+        # DEBUG: Log preprocessing results
+        if self._debug:
+            logger.info(f"[MTLTokenizer DEBUG] Original text: {repr(original_txt[:200])}")
+            logger.info(f"[MTLTokenizer DEBUG] After preprocess (NFC): {repr(txt[:200])}")
+            # Show character-by-character differences for debugging
+            if original_txt.lower() != txt:
+                diff_chars = []
+                original_lower = original_txt.lower()
+                for i, (c1, c2) in enumerate(zip(original_lower, txt)):
+                    if c1 != c2:
+                        diff_chars.append(f"pos {i}: '{c1}' (U+{ord(c1):04X}) -> '{c2}' (U+{ord(c2):04X})")
+                if diff_chars:
+                    logger.info(f"[MTLTokenizer DEBUG] Character changes: {diff_chars[:10]}")
+        
         # Language-specific text processing
         if language_id == 'zh':
             txt = self.cangjie_converter(txt)
@@ -299,8 +326,28 @@ class MTLTokenizer:
         if language_id:
             txt = f"[{language_id.lower()}]{txt}"
         
+        txt_before_space_replace = txt
         txt = txt.replace(' ', SPACE)
-        return self.tokenizer.encode(txt).ids
+        
+        # DEBUG: Log final text and tokenization
+        if self._debug:
+            logger.info(f"[MTLTokenizer DEBUG] Final text for tokenization: {repr(txt[:200])}")
+        
+        token_ids = self.tokenizer.encode(txt).ids
+        
+        # DEBUG: Log token count and decoded result
+        if self._debug:
+            logger.info(f"[MTLTokenizer DEBUG] Token count: {len(token_ids)}")
+            # Decode tokens to see what the model will "see"
+            decoded = self.tokenizer.decode(token_ids, skip_special_tokens=False)
+            logger.info(f"[MTLTokenizer DEBUG] Decoded tokens: {repr(decoded[:200])}")
+            # Show any UNK tokens
+            unk_id = self.tokenizer.get_vocab().get(UNK, -1)
+            unk_positions = [i for i, t in enumerate(token_ids) if t == unk_id]
+            if unk_positions:
+                logger.warning(f"[MTLTokenizer DEBUG] UNK tokens at positions: {unk_positions}")
+        
+        return token_ids
 
     def decode(self, seq):
         if isinstance(seq, torch.Tensor):
