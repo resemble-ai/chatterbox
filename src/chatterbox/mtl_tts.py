@@ -69,12 +69,18 @@ SUPPORTED_LANGUAGES = {
   "zh": "Chinese",
 }
 
+# Module-level logger for debugging
+import logging as _mtl_logging
+_mtl_logger = _mtl_logging.getLogger(__name__)
 
-def punc_norm(text: str) -> str:
+
+def punc_norm(text: str, debug: bool = True) -> str:
     """
         Quick cleanup func for punctuation from LLMs or
         containing chars not seen often in the dataset
     """
+    original_text = text
+    
     if len(text) == 0:
         return "You need to add some text for me to talk."
 
@@ -108,6 +114,11 @@ def punc_norm(text: str) -> str:
     sentence_enders = {".", "!", "?", "-", ",","、","，","。","？","！"}
     if not any(text.endswith(p) for p in sentence_enders):
         text += "."
+
+    # DEBUG: Log punc_norm changes
+    if debug and original_text != text:
+        _mtl_logger.info(f"[punc_norm DEBUG] Input:  {repr(original_text[:200])}")
+        _mtl_logger.info(f"[punc_norm DEBUG] Output: {repr(text[:200])}")
 
     return text
 

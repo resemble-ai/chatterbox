@@ -104,17 +104,15 @@ SUPPORTED_LANGUAGES = {
 }
 
 
-def punc_norm(text: str) -> str:
+def punc_norm(text: str, debug: bool = True) -> str:
     """
     Quick cleanup func for punctuation from LLMs or
     containing chars not seen often in the dataset
     """
+    original_text = text
+    
     if len(text) == 0:
         return "You need to add some text for me to talk."
-
-    # Capitalise first letter
-    if text[0].islower():
-        text = text[0].upper() + text[1:]
 
     # Remove multiple space chars
     text = " ".join(text.split())
@@ -129,19 +127,57 @@ def punc_norm(text: str) -> str:
         ("—", "-"),
         ("–", "-"),
         (" ,", ","),
-        (""", "\""),
-        (""", "\""),
+        (""", '"'),
+        (""", '"'),
         ("'", "'"),
         ("'", "'"),
     ]
     for old_char_sequence, new_char in punc_to_replace:
         text = text.replace(old_char_sequence, new_char)
 
+    # Clean up leading quotes and spaces
+    # This handles sentences that start with: '" "No entendía...' -> 'No entendía...'
+    import re
+    while text and text[0] in '"\'':
+        text = text[1:].lstrip()
+    
+    # Clean up trailing quotes and spaces in various patterns
+    # Remove trailing whitespace first
+    text = text.rstrip()
+    
+    # Remove standalone quotes at end (with or without spaces before them)
+    # This handles: '." "' -> '."' and then '."' -> '.'
+    while text and text[-1] in '"\'':
+        text = text[:-1].rstrip()
+    
+    # Now handle punctuation followed by quotes: '."' -> '.'
+    text = re.sub(r'([.!?,])["\']+$', r'\1', text)
+    text = re.sub(r'["\']+([.!?,])$', r'\1', text)
+    
+    # Clean up double punctuation (e.g., ".." or ",," but not "...")
+    text = re.sub(r'([.!?,])\1+', r'\1', text)
+    
+    # Clean up double spaces that may have been introduced
+    text = " ".join(text.split())
+    
+    # Skip empty text after cleanup
+    if len(text) == 0:
+        return ""
+
+    # Capitalise first letter
+    if text[0].islower():
+        text = text[0].upper() + text[1:]
+
     # Add full stop if no ending punc
     text = text.rstrip(" ")
     sentence_enders = {".", "!", "?", "-", ",", "、", "，", "。", "？", "！"}
     if not any(text.endswith(p) for p in sentence_enders):
         text += "."
+
+    # DEBUG: Log punc_norm changes
+    if debug and original_text != text:
+        logger.info(f"[punc_norm DEBUG] Input:  {repr(original_text[:200])}")
+        logger.info(f"[punc_norm DEBUG] Output: {repr(text[:200])}")
 
     return text
 
@@ -481,6 +517,11 @@ class ChatterboxMultilingualTTSMLX:
             sentences = split_into_sentences(text, lang=lang)
         else:
             sentences = [text]
+        
+        # Clean up each sentence (remove orphaned quotes from splitting)
+        sentences = [punc_norm(s, debug=False) for s in sentences]
+        # Filter out empty sentences
+        sentences = [s for s in sentences if s and s.strip()]
         
         total_words = len(text.split())
         num_chunks = len(sentences)
