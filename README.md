@@ -3,6 +3,10 @@
 
 # Chatterbox TTS
 
+## For multimodel use tts_multi_gradio.py
+
+## I forked the og because Chatterbox-TTS-Extended managed to lower the output quality
+
 [![Alt Text](https://img.shields.io/badge/listen-demo_samples-blue)](https://resemble-ai.github.io/chatterbox_demopage/)
 [![Alt Text](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/ResembleAI/Chatterbox)
 [![Alt Text](https://static-public.podonos.com/badges/insight-on-pdns-sm-dark.svg)](https://podonos.com/resembleai/chatterbox)

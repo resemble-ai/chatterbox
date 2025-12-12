@@ -3,9 +3,19 @@ import numpy as np
 import torch
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
 import gradio as gr
+from safetensors.torch import load_file as load_safetensors
+import os
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"🚀 Running on device: {DEVICE}")
+
+# --- Custom T3 Model Configuration ---
+CUSTOM_T3_MODELS = {
+    "Default": None,
+    "Czech (t3_cs)": "C:/ChatterboxTraining/t3/t3_cs.safetensors",  # FIXED: Full path with extension
+    # Add more custom models here:
+    # "Another Language": "C:/path/to/model.safetensors",
+}
 
 # --- Global Model Initialization ---
 MODEL = None
@@ -14,6 +24,10 @@ LANGUAGE_CONFIG = {
     "ar": {
         "audio": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/ar_f/ar_prompts2.flac",
         "text": "في الشهر الماضي، وصلنا إلى معلم جديد بمليارين من المشاهدات على قناتنا على يوتيوب."
+    },
+    "cs": {  # Add Czech language
+        "audio": None,
+        "text": "Dobrý den, vítáme vás v našem testu syntézy řeči"
     },
     "da": {
         "audio": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/da_m1.flac",
@@ -101,7 +115,7 @@ LANGUAGE_CONFIG = {
     },
     "zh": {
         "audio": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/zh_f2.flac",
-        "text": "上个月，我们达到了一个新的里程碑. 我们的YouTube频道观看次数达到了二十亿次，这绝对令人难以置信。"
+        "text": "上个月,我们达到了一个新的里程碑. 我们的YouTube频道观看次数达到了二十亿次,这绝对令人难以置信。"
     },
 }
 
@@ -116,8 +130,12 @@ def default_text_for_ui(lang: str) -> str:
 
 def get_supported_languages_display() -> str:
     """Generate a formatted display of all supported languages."""
+    # Combine base supported languages with any custom ones
+    all_langs = dict(SUPPORTED_LANGUAGES)
+    all_langs.update({"cs": "Czech"})  # Add custom languages here
+    
     language_items = []
-    for code, name in sorted(SUPPORTED_LANGUAGES.items()):
+    for code, name in sorted(all_langs.items()):
         language_items.append(f"**{name}** (`{code}`)")
     
     # Split into 2 lines
@@ -126,7 +144,7 @@ def get_supported_languages_display() -> str:
     line2 = " • ".join(language_items[mid:])
     
     return f"""
-### 🌍 Supported Languages ({len(SUPPORTED_LANGUAGES)} total)
+### 🌍 Supported Languages ({len(all_langs)} total)
 {line1}
 
 {line2}
@@ -134,26 +152,100 @@ def get_supported_languages_display() -> str:
 
 
 def get_or_load_model():
-    """Loads the ChatterboxMultilingualTTS model if it hasn't been loaded already,
-    and ensures it's on the correct device."""
+    """Loads the ChatterboxMultilingualTTS model if it hasn't been loaded already."""
     global MODEL
     if MODEL is None:
         print("Model not loaded, initializing...")
         try:
             MODEL = ChatterboxMultilingualTTS.from_pretrained(DEVICE)
-            if hasattr(MODEL, 'to') and str(MODEL.device) != DEVICE:
-                MODEL.to(DEVICE)
-            print(f"Model loaded successfully. Internal device: {getattr(MODEL, 'device', 'N/A')}")
+            # FIXED: Force model to device explicitly
+            if hasattr(MODEL, 'to'):
+                MODEL = MODEL.to(DEVICE)
+                print(f"✓ Model moved to {DEVICE}")
+            
+            # Also move submodules if they exist
+            if hasattr(MODEL, 't3') and hasattr(MODEL.t3, 'to'):
+                MODEL.t3 = MODEL.t3.to(DEVICE)
+            if hasattr(MODEL, 't2') and hasattr(MODEL.t2, 'to'):
+                MODEL.t2 = MODEL.t2.to(DEVICE)
+            if hasattr(MODEL, 't1') and hasattr(MODEL.t1, 'to'):
+                MODEL.t1 = MODEL.t1.to(DEVICE)
+                
+            print(f"✓ Model loaded successfully on {DEVICE}")
+            
+            # Print actual device locations for debugging
+            if hasattr(MODEL, 't3'):
+                try:
+                    t3_device = next(MODEL.t3.parameters()).device
+                    print(f"  T3 device: {t3_device}")
+                except:
+                    pass
+                    
         except Exception as e:
             print(f"Error loading model: {e}")
+            import traceback
+            traceback.print_exc()
             raise
     return MODEL
+
+
+def switch_t3_model(model_choice: str):
+    """Switch the T3 model to a custom version"""
+    global MODEL
+    
+    if MODEL is None:
+        MODEL = get_or_load_model()
+    
+    custom_path = CUSTOM_T3_MODELS.get(model_choice)
+    
+    if custom_path:
+        # FIXED: Better path handling
+        if not os.path.exists(custom_path):
+            # Try adding .safetensors if not present
+            if not custom_path.endswith('.safetensors'):
+                alt_path = custom_path + '.safetensors'
+                if os.path.exists(alt_path):
+                    custom_path = alt_path
+                else:
+                    return f"❌ Error: Model file not found at {custom_path} or {alt_path}"
+            else:
+                return f"❌ Error: Model file not found: {custom_path}"
+        
+        print(f"Loading custom T3 model from: {custom_path}")
+        try:
+            # FIXED: Load directly to target device, not CPU first
+            t3_state = load_safetensors(custom_path, device=str(DEVICE))
+            MODEL.t3.load_state_dict(t3_state, strict=False)  # Added strict=False for safety
+            MODEL.t3.to(DEVICE).eval()
+            
+            # Verify device
+            t3_device = next(MODEL.t3.parameters()).device
+            print(f"✓ Loaded custom T3 model: {model_choice} on {t3_device}")
+            return f"✓ Loaded: {model_choice}\n📍 Device: {t3_device}\n📁 From: {custom_path}"
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Error details:\n{error_details}")
+            return f"❌ Error loading model: {str(e)}\n\nFull traceback in console."
+    else:
+        print("Reloading default T3 model...")
+        try:
+            # Reload the entire model to get default T3
+            MODEL = ChatterboxMultilingualTTS.from_pretrained(DEVICE)
+            MODEL = MODEL.to(DEVICE)
+            MODEL.t3.to(DEVICE).eval()
+            print("✓ Loaded default T3 model")
+            return f"✓ Loaded: Default T3 model\n📍 Device: {DEVICE}"
+        except Exception as e:
+            return f"❌ Error loading model: {str(e)}"
+
 
 # Attempt to load the model at startup.
 try:
     get_or_load_model()
 except Exception as e:
     print(f"CRITICAL: Failed to load model on startup. Application may not function. Error: {e}")
+
 
 def set_seed(seed: int):
     """Sets the random seed for reproducibility across torch, numpy, and random."""
@@ -163,16 +255,6 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
     random.seed(seed)
     np.random.seed(seed)
-    
-def resolve_audio_prompt(language_id: str, provided_path: str | None) -> str | None:
-    """
-    Decide which audio prompt to use:
-    - If user provided a path (upload/mic/url), use it.
-    - Else, fall back to language-specific default (if any).
-    """
-    if provided_path and str(provided_path).strip():
-        return provided_path
-    return LANGUAGE_CONFIG.get(language_id, {}).get("audio")
 
 
 def generate_tts_audio(
@@ -184,26 +266,7 @@ def generate_tts_audio(
     seed_num_input: int = 0,
     cfgw_input: float = 0.5
 ) -> tuple[int, np.ndarray]:
-    """
-    Generate high-quality speech audio from text using Chatterbox Multilingual model with optional reference audio styling.
-    Supported languages: English, French, German, Spanish, Italian, Portuguese, and Hindi.
-    
-    This tool synthesizes natural-sounding speech from input text. When a reference audio file 
-    is provided, it captures the speaker's voice characteristics and speaking style. The generated audio 
-    maintains the prosody, tone, and vocal qualities of the reference speaker, or uses default voice if no reference is provided.
-
-    Args:
-        text_input (str): The text to synthesize into speech (maximum 300 characters)
-        language_id (str): The language code for synthesis (eg. en, fr, de, es, it, pt, hi)
-        audio_prompt_path_input (str, optional): File path or URL to the reference audio file that defines the target voice style. Defaults to None.
-        exaggeration_input (float, optional): Controls speech expressiveness (0.25-2.0, neutral=0.5, extreme values may be unstable). Defaults to 0.5.
-        temperature_input (float, optional): Controls randomness in generation (0.05-5.0, higher=more varied). Defaults to 0.8.
-        seed_num_input (int, optional): Random seed for reproducible results (0 for random generation). Defaults to 0.
-        cfgw_input (float, optional): CFG/Pace weight controlling generation guidance (0.2-1.0). Defaults to 0.5, 0 for language transfer. 
-
-    Returns:
-        tuple[int, np.ndarray]: A tuple containing the sample rate (int) and the generated audio waveform (numpy.ndarray)
-    """
+    """Generate TTS audio with custom T3 model support"""
     current_model = get_or_load_model()
 
     if current_model is None:
@@ -212,7 +275,14 @@ def generate_tts_audio(
     if seed_num_input != 0:
         set_seed(int(seed_num_input))
 
-    print(f"Generating audio for text: '{text_input[:50]}...'")
+    print(f"Generating audio for text: '{text_input[:50]}...' in language: {language_id}")
+    
+    # FIXED: Verify model is on correct device before generation
+    if hasattr(current_model, 't3'):
+        t3_device = next(current_model.t3.parameters()).device
+        print(f"  T3 currently on: {t3_device}")
+        if str(t3_device) != DEVICE and DEVICE == "cuda":
+            print(f"  ⚠️ WARNING: T3 is on {t3_device} but should be on {DEVICE}")
     
     # Handle optional audio prompt
     chosen_prompt = audio_prompt_path_input or default_audio_for_ui(language_id)
@@ -234,29 +304,52 @@ def generate_tts_audio(
         **generate_kwargs
     )
     print("Audio generation complete.")
-    return (current_model.sr, wav.squeeze(0).numpy())
+    return (current_model.sr, wav.squeeze(0).cpu().numpy())  # FIXED: Added .cpu() before .numpy()
 
-with gr.Blocks() as demo:
+
+with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown(
         """
-        # Chatterbox Multilingual Demo
-        Generate high-quality multilingual speech from text with reference audio styling, supporting 23 languages.
+        # 🎙️ Chatterbox Multilingual Demo with Custom T3 Support
+        Generate high-quality multilingual speech from text with reference audio styling and custom model support.
         """
     )
     
     # Display supported languages
     gr.Markdown(get_supported_languages_display())
+    
     with gr.Row():
         with gr.Column():
-            initial_lang = "fr"
+            # Model Selection Section
+            gr.Markdown("### 🔧 Model Configuration")
+            t3_model_dropdown = gr.Dropdown(
+                choices=list(CUSTOM_T3_MODELS.keys()),
+                value="Default",
+                label="T3 Model",
+                info="Select which T3 model to use"
+            )
+            model_status = gr.Textbox(
+                label="Model Status",
+                value="Default model loaded",
+                interactive=False,
+                lines=2
+            )
+            load_t3_btn = gr.Button("🔄 Load Selected T3 Model", variant="secondary", size="sm")
+            
+            gr.Markdown("---")
+            
+            # TTS Controls
+            initial_lang = "cs"  # Default to Czech for testing
             text = gr.Textbox(
                 value=default_text_for_ui(initial_lang),
                 label="Text to synthesize (max chars 300)",
                 max_lines=5
             )
             
+            # Get all supported languages including custom ones
+            all_language_codes = list(SUPPORTED_LANGUAGES.keys()) + ["cs"]
             language_id = gr.Dropdown(
-                choices=list(ChatterboxMultilingualTTS.get_supported_languages().keys()),
+                choices=sorted(set(all_language_codes)),
                 value=initial_lang,
                 label="Language",
                 info="Select the language for text-to-speech synthesis"
@@ -270,35 +363,63 @@ with gr.Blocks() as demo:
             )
             
             gr.Markdown(
-                "💡 **Note**: Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip's language. To mitigate this, set the CFG weight to 0.",
+                "💡 **Note**: Ensure that the reference clip matches the specified language tag. For custom languages, set CFG weight to 0 if experiencing accent issues.",
                 elem_classes=["audio-note"]
             )
             
             exaggeration = gr.Slider(
-                0.25, 2, step=.05, label="Exaggeration (Neutral = 0.5, extreme values can be unstable)", value=.5
+                0.25, 2, step=.05, label="Exaggeration (Neutral = 0.5)", value=.5
             )
             cfg_weight = gr.Slider(
-                0.2, 1, step=.05, label="CFG/Pace", value=0.5
+                0.0, 1, step=.05, label="CFG/Pace (0 for language transfer)", value=0.5
             )
 
             with gr.Accordion("More options", open=False):
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")
                 temp = gr.Slider(0.05, 5, step=.05, label="Temperature", value=.8)
 
-            run_btn = gr.Button("Generate", variant="primary")
+            run_btn = gr.Button("🎬 Generate Speech", variant="primary", size="lg")
 
         with gr.Column():
-            audio_output = gr.Audio(label="Output Audio")
+            gr.Markdown("### 📊 Output")
+            audio_output = gr.Audio(label="Generated Audio")
+            
+            gr.Markdown("""
+            ---
+            ### 💡 Tips
+            
+            **Custom T3 Models:**
+            - Load your fine-tuned T3 models for new languages
+            - Use full path with `.safetensors` extension
+            - Example: `C:/ChatterboxTraining/t3/t3_cs.safetensors`
+            - Switch between models without restarting
+            
+            **Voice Cloning:**
+            - Upload 5-10 seconds of clear reference audio
+            - Single speaker, minimal background noise
+            - Match reference language to target language
+            
+            **Parameters:**
+            - **Exaggeration**: Controls emotion intensity
+            - **Temperature**: Higher = more variation
+            - **CFG Weight**: Set to 0 for language transfer without accent
+            """)
 
-        def on_language_change(lang, current_ref, current_text):
-            return default_audio_for_ui(lang), default_text_for_ui(lang)
+    def on_language_change(lang, current_ref, current_text):
+        return default_audio_for_ui(lang), default_text_for_ui(lang)
 
-        language_id.change(
-            fn=on_language_change,
-            inputs=[language_id, ref_wav, text],
-            outputs=[ref_wav, text],
-            show_progress=False
-        )
+    language_id.change(
+        fn=on_language_change,
+        inputs=[language_id, ref_wav, text],
+        outputs=[ref_wav, text],
+        show_progress=False
+    )
+    
+    load_t3_btn.click(
+        fn=switch_t3_model,
+        inputs=[t3_model_dropdown],
+        outputs=[model_status]
+    )
 
     run_btn.click(
         fn=generate_tts_audio,
@@ -314,4 +435,24 @@ with gr.Blocks() as demo:
         outputs=[audio_output],
     )
 
-demo.launch(mcp_server=True)
+if __name__ == "__main__":
+    print("\n" + "="*60)
+    print("🎙️  CHATTERBOX MULTILINGUAL TTS - CUSTOM T3 EDITION")
+    print("="*60)
+    print(f"Device: {DEVICE}")
+    if DEVICE == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA Version: {torch.version.cuda}")
+    print(f"Available T3 models: {len(CUSTOM_T3_MODELS)}")
+    for model_name, path in CUSTOM_T3_MODELS.items():
+        if path:
+            exists = "✓" if os.path.exists(path) or os.path.exists(path + ".safetensors") else "✗"
+            print(f"  {exists} {model_name}: {path}")
+        else:
+            print(f"  ✓ {model_name} (built-in)")
+    print("="*60 + "\n")
+    
+    demo.queue(
+        max_size=50,
+        default_concurrency_limit=1,
+    ).launch(share=True)
