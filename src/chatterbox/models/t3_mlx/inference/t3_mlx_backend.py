@@ -51,6 +51,9 @@ class T3MLXBackend(nn.Module):
         self._added_cond = False
         if self.alignment_stream_analyzer is not None:
             self.alignment_stream_analyzer.reset()
+        
+        # Clear MLX cache to release GPU memory from previous generation
+        mx.clear_cache()
 
     def __call__(
         self,

@@ -627,9 +627,14 @@ class ChatterboxTTSMLX:
             
             audio_chunks.append(chunk_audio)
             
-            # Light cleanup between chunks (avoid aggressive mx.eval/clear_cache which kills perf)
+            # Memory cleanup between chunks
+            # Note: mx.clear_cache() is already called in T3's generate() and reset_state()
             import gc
             gc.collect()
+            
+            # Clear PyTorch MPS cache periodically (every 3 chunks)
+            if i > 0 and i % 3 == 0 and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
         
         total_time = _time.time() - total_start
         
@@ -773,6 +778,14 @@ class ChatterboxTTSMLX:
             print_chunk_completed(i, num_chunks, chunk_time, chunk_duration)
             
             audio_chunks.append(chunk_audio)
+            
+            # Memory cleanup between chunks
+            import gc
+            gc.collect()
+            
+            # Clear PyTorch MPS cache periodically (every 3 chunks)
+            if i > 0 and i % 3 == 0 and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
         
         total_time = _time.time() - total_start
         
@@ -1334,9 +1347,14 @@ class ChatterboxTTSPureMLX:
             
             audio_chunks.append(chunk_audio)
             
-            # Light cleanup between chunks (avoid aggressive mx.eval/clear_cache which kills perf)
+            # Memory cleanup between chunks
+            # Note: mx.clear_cache() is already called in T3's generate() and reset_state()
             import gc
             gc.collect()
+            
+            # Clear PyTorch MPS cache periodically (every 3 chunks)
+            if i > 0 and i % 3 == 0 and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
         
         total_time = _time.time() - total_start
         
@@ -1480,6 +1498,14 @@ class ChatterboxTTSPureMLX:
             print_chunk_completed(i, num_chunks, chunk_time, chunk_duration)
             
             audio_chunks.append(chunk_audio)
+            
+            # Memory cleanup between chunks
+            import gc
+            gc.collect()
+            
+            # Clear PyTorch MPS cache periodically (every 3 chunks)
+            if i > 0 and i % 3 == 0 and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
         
         total_time = _time.time() - total_start
         

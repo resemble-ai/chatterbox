@@ -1,0 +1,73 @@
+{
+  "config": {
+    "warmup_runs": 0,
+    "benchmark_runs": 1,
+    "audio_prompt_path": "earl-nightingale.wav",
+    "test_devices": [
+      "mlx",
+      "mps",
+      "hybrid-mlx"
+    ],
+    "test_languages": [
+      "es"
+    ]
+  },
+  "system": {
+    "mps_available": true,
+    "pytorch_version": "2.8.0",
+    "total_ram_gb": 32.0
+  },
+  "results": [
+    {
+      "device": "mlx",
+      "language_code": "es",
+      "language_name": "Spanish",
+      "text_preview": "Hola, esta es una prueba de síntesis de voz multil...",
+      "text_length_words": 22,
+      "text_length_chars": 138,
+      "mean_time_seconds": 32.115965366363525,
+      "std_time_seconds": 0,
+      "min_time_seconds": 32.115965366363525,
+      "max_time_seconds": 32.115965366363525,
+      "mean_realtime_factor": 0.5875582373047203,
+      "chars_per_second": 4.296928285535316,
+      "words_per_second": 0.6850175527664996,
+      "audio_duration_seconds": 18.87,
+      "peak_memory_mb": 11877.53125
+    },
+    {
+      "device": "mps",
+      "language_code": "es",
+      "language_name": "Spanish",
+      "text_preview": "Hola, esta es una prueba de síntesis de voz multil...",
+      "text_length_words": 22,
+      "text_length_chars": 138,
+      "mean_time_seconds": 21.271661043167114,
+      "std_time_seconds": 0,
+      "min_time_seconds": 21.271661043167114,
+      "max_time_seconds": 21.271661043167114,
+      "mean_realtime_factor": 0.45647587089204056,
+      "chars_per_second": 6.4875046532545415,
+      "words_per_second": 1.0342398722579704,
+      "audio_duration_seconds": 9.71,
+      "peak_memory_mb": 11408.453125
+    },
+    {
+      "device": "hybrid-mlx",
+      "language_code": "es",
+      "language_name": "Spanish",
+      "text_preview": "Hola, esta es una prueba de síntesis de voz multil...",
+      "text_length_words": 22,
+      "text_length_chars": 138,
+      "mean_time_seconds": 82.04168510437012,
+      "std_time_seconds": 0,
+      "min_time_seconds": 82.04168510437012,
+      "max_time_seconds": 82.04168510437012,
+      "mean_realtime_factor": 0.21489075922284903,
+      "chars_per_second": 1.6820717398044907,
+      "words_per_second": 0.2681563643166579,
+      "audio_duration_seconds": 17.63,
+      "peak_memory_mb": 10345.640625
+    }
+  ]
+}

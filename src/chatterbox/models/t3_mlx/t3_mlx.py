@@ -8,7 +8,7 @@ Converted from PyTorch version in t3.py
 
 import logging
 import os
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Union, List
 import mlx.core as mx
 import mlx.nn as nn
 from tqdm import tqdm
@@ -350,6 +350,11 @@ class T3MLX(nn.Module):
         if max_new_tokens is None:
             max_new_tokens = self.hp.max_speech_tokens
 
+        # Set memory limits to prevent excessive memory usage
+        # Cache limit of 0 forces immediate reclamation (more aggressive)
+        # This helps prevent memory spikes during long generations
+        mx.set_cache_limit(0)
+        
         _log_t3_memory("generate_start")
         
         # Start with BOS token
@@ -404,12 +409,13 @@ class T3MLX(nn.Module):
         if cache is not None and len(cache) > 0 and cache[0] is not None:
             mx.eval(cache[0][0])
         
-        # Keep a list for repetition penalty and final concatenation
-        # We'll concatenate at the end instead of using a pre-allocated buffer
-        # since MLX's array update patterns are limited
-        generated_ids = [bos_token]
+        # Track generated tokens:
+        # - generated_token_ids: Python ints for repetition penalty (memory efficient)
+        # - generated_tokens: MLX arrays for final concatenation
+        generated_token_ids: List[int] = []  # For repetition penalty
+        generated_tokens: List[mx.array] = []  # For final result
 
-        # Import sampling utilities (to be implemented)
+        # Import sampling utilities
         from .inference.sampling_utils_mlx import apply_repetition_penalty, apply_top_p, apply_min_p
 
         # Generation loop
@@ -418,8 +424,6 @@ class T3MLX(nn.Module):
             token_iterator = tqdm(token_iterator, desc="Generating", dynamic_ncols=True)
         for i in token_iterator:
             logits_step = output['logits'][:, -1, :]  # (B, vocab)
-            
-            # Note: Don't eval here - let MLX fuse operations until sampling
 
             # CFG: combine conditional and unconditional predictions
             if cfg_weight > 0.0:
@@ -429,8 +433,8 @@ class T3MLX(nn.Module):
             else:
                 logits = logits_step[0:1, :]
 
-            # Apply repetition penalty
-            logits = apply_repetition_penalty(logits, generated_ids, repetition_penalty)
+            # Apply repetition penalty (uses Python ints, no MLX array concatenation)
+            logits = apply_repetition_penalty(logits, generated_token_ids, repetition_penalty)
 
             # Apply temperature
             if temperature != 1.0:
@@ -445,9 +449,12 @@ class T3MLX(nn.Module):
             next_token = mx.random.categorical(mx.log(probs + 1e-10))
             next_token = mx.reshape(next_token, (1, 1))
             
-            # int() implicitly evaluates, so we don't need explicit mx.eval here
+            # int() implicitly evaluates
             token_val = int(next_token[0, 0])
-            generated_ids.append(next_token)
+            
+            # Store token value (Python int) and tensor separately
+            generated_token_ids.append(token_val)
+            generated_tokens.append(next_token)
 
             # Check for EOS
             if token_val == self.hp.stop_speech_token:
@@ -465,7 +472,6 @@ class T3MLX(nn.Module):
                     next_embed = mx.concatenate([next_embed, next_embed], axis=0)
 
             # Forward with cache
-            # NOTE: output_hidden_states=False saves memory - we only need logits
             output = self.patched_model(
                 inputs_embeds=next_embed,
                 cache=cache,
@@ -475,22 +481,34 @@ class T3MLX(nn.Module):
 
             cache = output['cache']
             
-            # Periodic evaluation to bound memory growth without killing performance
-            # Only eval every N steps to allow MLX to fuse operations within batches
-            if i > 0 and i % 100 == 0:
+            # More aggressive memory management to prevent spikes
+            # Eval every 25 steps to bound lazy evaluation graph
+            if i > 0 and i % 25 == 0:
                 if cache is not None and len(cache) > 0 and cache[0] is not None:
                     mx.eval(cache[0][0])
-                _log_t3_memory(f"generate_step_{i}")
+                # Clear MLX cache periodically to release intermediate computations
+                mx.clear_cache()
 
         _log_t3_memory("generate_complete")
         
-        # Concatenate generated tokens (skip BOS)
-        result = mx.concatenate(generated_ids[1:], axis=1)
+        # Concatenate generated tokens
+        if len(generated_tokens) > 0:
+            result = mx.concatenate(generated_tokens, axis=1)
+        else:
+            result = mx.array([[]], dtype=mx.int32)
+        
+        # Force evaluation before clearing references
+        mx.eval(result)
         
         # Clear references to help GC
-        del generated_ids
+        del generated_tokens
+        del generated_token_ids
         del cache
         del output
+        
+        # Clear MLX memory cache to prevent accumulation across generations
+        mx.clear_cache()
+        
         import gc
         gc.collect()
         

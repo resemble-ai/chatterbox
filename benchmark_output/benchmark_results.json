@@ -1,0 +1,68 @@
+{
+  "config": {
+    "warmup_runs": 0,
+    "benchmark_runs": 1,
+    "model_type": "standard",
+    "test_devices": [
+      "mlx-q4"
+    ]
+  },
+  "system": {
+    "mps_available": true,
+    "pytorch_version": "2.8.0",
+    "total_ram_gb": 32.0
+  },
+  "results": [
+    {
+      "device": "mlx-q4",
+      "text_category": "short",
+      "text_length_words": 5,
+      "text_length_chars": 25,
+      "mean_time_seconds": 2.3087570667266846,
+      "std_time_seconds": 0,
+      "min_time_seconds": 2.3087570667266846,
+      "max_time_seconds": 2.3087570667266846,
+      "mean_realtime_factor": 1.1521350766329441,
+      "chars_per_second": 10.828337186399851,
+      "words_per_second": 2.16566743727997,
+      "audio_duration_seconds": 2.66,
+      "peak_memory_mb": 16265.515625,
+      "transcription": "Hello, how are you today?",
+      "word_error_rate": 0.0
+    },
+    {
+      "device": "mlx-q4",
+      "text_category": "medium",
+      "text_length_words": 31,
+      "text_length_chars": 256,
+      "mean_time_seconds": 22.8471999168396,
+      "std_time_seconds": 0,
+      "min_time_seconds": 22.8471999168396,
+      "max_time_seconds": 22.8471999168396,
+      "mean_realtime_factor": 0.8981406944697704,
+      "chars_per_second": 11.204874161026376,
+      "words_per_second": 1.3568402304367877,
+      "audio_duration_seconds": 20.52,
+      "peak_memory_mb": 11802.65625,
+      "transcription": "Machine learning is transforming how we interact with computers. Natural language processing enables machines to understand and generate human speech. This technology has applications in virtual assistance, accessibility tools, and entertainment.",
+      "word_error_rate": 0.03225806451612903
+    },
+    {
+      "device": "mlx-q4",
+      "text_category": "long",
+      "text_length_words": 94,
+      "text_length_chars": 700,
+      "mean_time_seconds": 65.86609625816345,
+      "std_time_seconds": 0,
+      "min_time_seconds": 65.86609625816345,
+      "max_time_seconds": 65.86609625816345,
+      "mean_realtime_factor": 0.7855331185440847,
+      "chars_per_second": 10.627622400093916,
+      "words_per_second": 1.4271378651554687,
+      "audio_duration_seconds": 51.74,
+      "peak_memory_mb": 12016.859375,
+      "transcription": "Artificial intelligence has made remarkable strides in recent years, particularly in the field of natural language processing. Text-to-speech systems have evolved from robotic-sounding voices to remarkably natural human-like speech. These advances are powered by deep-learning models that learn from vast amounts of human speech data. The ability to generate natural-sounding speech has numerous applications from making content accessible to visually impaired users, to creating audio books, to powering virtual assistants that feel more human. As the technology continues to improve, we can expect even more, life-like and expressive synthetic voices in the near future.",
+      "word_error_rate": 0.07446808510638298
+    }
+  ]
+}
