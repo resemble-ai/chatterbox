@@ -47,7 +47,30 @@ pip install -e .
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
 # Usage
+
+#### Chatterbox-Turbo
+
 ```python
+import torchaudio as ta
+import torch
+from chatterbox.tts_turbo import ChatterboxTurboTTS
+
+# Load the Turbo model
+model = ChatterboxTurboTTS.from_pretrained(device="cuda")
+
+# Generate with Paralinguistic Tags
+text = "Hi there, Sarah here from MochaFone calling you back [chuckle], have you got one minute to chat about the billing issue?"
+
+# Generate audio (requires a reference clip for voice cloning)
+wav = model.generate(text, audio_prompt_path="your_10s_ref_clip.wav")
+
+ta.save("test-turbo.wav", wav, model.sr)
+```
+
+#### Chatterbox and Chatterbox-Multilingual
+
+```python
+
 import torchaudio as ta
 from chatterbox.tts import ChatterboxTTS
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
@@ -74,7 +97,22 @@ ta.save("test-chinese.wav", wav_chinese, model.sr)
 AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
 ta.save("test-2.wav", wav, model.sr)
+
 ```
+# Supported Languages 
+Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • Spanish (es) • Finnish (fi) • French (fr) • Hebrew (he) • Hindi (hi) • Italian (it) • Japanese (ja) • Korean (ko) • Malay (ms) • Dutch (nl) • Norwegian (no) • Polish (pl) • Portuguese (pt) • Russian (ru) • Swedish (sv) • Swahili (sw) • Turkish (tr) • Chinese (zh)
+
+# Original Chatterbox Tips
+- **General Use (TTS and Voice Agents):**
+  - Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip’s language. To mitigate this, set `cfg_weight` to `0`.
+  - The default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts across all languages.
+  - If the reference speaker has a fast speaking style, lowering `cfg_weight` to around `0.3` can improve pacing.
+
+- **Expressive or Dramatic Speech:**
+  - Try lower `cfg_weight` values (e.g. `~0.3`) and increase `exaggeration` to around `0.7` or higher.
+  - Higher `exaggeration` tends to speed up speech; reducing `cfg_weight` helps compensate with slower, more deliberate pacing.
+
+
 See `example_tts.py` and `example_vc.py` for more examples.
 
 # Acknowledgements
