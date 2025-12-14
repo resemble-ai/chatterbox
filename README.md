@@ -30,7 +30,7 @@ Choose the right model for your application.
 | Chatterbox-Multilingual [(Language list)](#updatelater) | 500M | 23+ | Zero-shot cloning, Multiple Languages                   | Global applications, Localization            | [Demo](https://huggingface.co/spaces/ResembleAI/Chatterbox-Multilingual-TTS) | [Listen](https://resemble-ai.github.io/chatterbox_demopage/) |
 | Chatterbox [(Tips and Tricks)](#updatelater)            | 500M | English | CFG & Exaggeration tuning                               | General zero-shot TTS with creative controls | [Demo](https://huggingface.co/spaces/ResembleAI/Chatterbox)              | [Listen](https://resemble-ai.github.io/chatterbox_demopage/) |
 
-# Installation
+### Installation
 ```shell
 pip install chatterbox-tts
 ```
@@ -46,9 +46,9 @@ pip install -e .
 ```
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
-# Usage
+### Usage
 
-#### Chatterbox-Turbo
+##### Chatterbox-Turbo
 
 ```python
 import torchaudio as ta
@@ -67,7 +67,7 @@ wav = model.generate(text, audio_prompt_path="your_10s_ref_clip.wav")
 ta.save("test-turbo.wav", wav, model.sr)
 ```
 
-#### Chatterbox and Chatterbox-Multilingual
+##### Chatterbox and Chatterbox-Multilingual
 
 ```python
 
@@ -99,10 +99,10 @@ wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
 ta.save("test-2.wav", wav, model.sr)
 
 ```
-# Supported Languages 
+### Supported Languages 
 Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • Spanish (es) • Finnish (fi) • French (fr) • Hebrew (he) • Hindi (hi) • Italian (it) • Japanese (ja) • Korean (ko) • Malay (ms) • Dutch (nl) • Norwegian (no) • Polish (pl) • Portuguese (pt) • Russian (ru) • Swedish (sv) • Swahili (sw) • Turkish (tr) • Chinese (zh)
 
-# Original Chatterbox Tips
+### Original Chatterbox Tips
 - **General Use (TTS and Voice Agents):**
   - Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip’s language. To mitigate this, set `cfg_weight` to `0`.
   - The default settings (`exaggeration=0.5`, `cfg_weight=0.5`) work well for most prompts across all languages.
