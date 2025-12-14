@@ -1,5 +1,4 @@
-
-=![resemble+cbturbo-1600x900](https://github.com/user-attachments/assets/09395613-2532-455d-a26f-373f1cc160f1)
+![resemble+cbturbo-1600x900](https://github.com/user-attachments/assets/09395613-2532-455d-a26f-373f1cc160f1)
 
 
 # Chatterbox TTS
