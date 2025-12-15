@@ -1,5 +1,5 @@
+![resemble+cbturbo-1600x900](https://github.com/user-attachments/assets/09395613-2532-455d-a26f-373f1cc160f1)
 
-<img width="1200" height="600" alt="Chatterbox-Multilingual" src="https://www.resemble.ai/wp-content/uploads/2025/09/Chatterbox-Multilingual-1.png" />
 
 # Chatterbox TTS
 
