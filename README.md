@@ -39,7 +39,20 @@ Arabic (ar) • Danish (da) • German (de) • Greek (el) • English (en) • 
   - Try lower `cfg_weight` values (e.g. `~0.3`) and increase `exaggeration` to around `0.7` or higher.
   - Higher `exaggeration` tends to speed up speech; reducing `cfg_weight` helps compensate with slower, more deliberate pacing.
 
-
+# Testing using Docker
+First, build the docker image with the command below
+```
+cd chatterbox
+docker build -t chatterbox-tts .
+```
+then, run it with
+```
+docker run -it -p 7860:7860 chatterbox-tts:latest
+```
+when inside container, use regular command like 
+```
+python gradio_tts_app.py
+``` 
 # Installation
 ```shell
 pip install chatterbox-tts
