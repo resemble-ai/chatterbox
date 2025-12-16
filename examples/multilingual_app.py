@@ -1,10 +1,14 @@
+"""
+uv run examples/multilingual_app.py
+"""
 import random
 import numpy as np
 import torch
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
+from chatterbox.models.utils import get_device
 import gradio as gr
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = get_device()
 print(f"🚀 Running on device: {DEVICE}")
 
 # --- Global Model Initialization ---

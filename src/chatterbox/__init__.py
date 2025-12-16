@@ -3,7 +3,7 @@ try:
 except ImportError:
     from importlib_metadata import version  # For Python <3.8
 
-__version__ = version("chatterbox-tts")
+__version__ = version("chatterbox")
 
 
 from .tts import ChatterboxTTS

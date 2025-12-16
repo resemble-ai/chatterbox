@@ -1,15 +1,13 @@
+"""
+uv run examples/example_tts.py
+"""
 import torchaudio as ta
-import torch
 from chatterbox.tts import ChatterboxTTS
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+from chatterbox.models.utils import get_device
 
 # Automatically detect the best available device
-if torch.cuda.is_available():
-    device = "cuda"
-elif torch.backends.mps.is_available():
-    device = "mps"
-else:
-    device = "cpu"
+device = get_device()
 
 print(f"Using device: {device}")
 

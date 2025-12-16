@@ -1,9 +1,12 @@
-import torch
+"""
+uv run examples/gradio_vc_app.py
+"""
 import gradio as gr
 from chatterbox.vc import ChatterboxVC
+from chatterbox.models.utils import get_device
 
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = get_device()
 
 
 model = ChatterboxVC.from_pretrained(DEVICE)
