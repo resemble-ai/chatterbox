@@ -161,6 +161,12 @@ class ChatterboxMultilingualTTS:
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(ckpt_dir)
 
+        # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
+        if device in ["cpu", "mps"]:
+            map_location = torch.device('cpu')
+        else:
+            map_location = None
+
         ve = VoiceEncoder()
         ve.load_state_dict(
             torch.load(ckpt_dir / "ve.pt", weights_only=True)
@@ -176,7 +182,7 @@ class ChatterboxMultilingualTTS:
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", weights_only=True)
+            torch.load(ckpt_dir / "s3gen.pt", map_location=map_location, weights_only=True)
         )
         s3gen.to(device).eval()
 
