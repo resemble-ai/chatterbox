@@ -31,11 +31,15 @@ Choose the right model for your application.
 | Chatterbox [(Tips and Tricks)](#original-chatterbox-tips)                                                       | 500M | English | CFG & Exaggeration tuning                               | General zero-shot TTS with creative controls | [Demo](https://huggingface.co/spaces/ResembleAI/Chatterbox)              | [Listen](https://resemble-ai.github.io/chatterbox_demopage/) |
 
 ## Installation
+
+### Quick Install (CPU)
 ```shell
 pip install chatterbox-tts
 ```
 
-Alternatively, you can install from source:
+### Install from Source
+
+**For CPU (default):**
 ```shell
 # conda create -yn chatterbox python=3.11
 # conda activate chatterbox
@@ -44,6 +48,19 @@ git clone https://github.com/resemble-ai/chatterbox.git
 cd chatterbox
 pip install -e .
 ```
+
+**For CUDA (recommended for faster inference):**
+```shell
+# For CUDA 12.4
+pip install -e .[cuda] --extra-index-url https://download.pytorch.org/whl/cu124
+
+# For CUDA 11.8
+pip install -e .[cuda] --extra-index-url https://download.pytorch.org/whl/cu118
+
+# Or with uv (faster installation)
+uv pip install -e .[cuda] --extra-index-url https://download.pytorch.org/whl/cu124
+```
+
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
 ## Usage
