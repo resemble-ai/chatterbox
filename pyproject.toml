@@ -1,12 +1,12 @@
 [project]
-name = "chatterbox"
-version = "0.1.5"
-description = "Chatterbox: Open Source TTS and Voice Conversion by Resemble AI"
+name = "chatterbox-mlx"
+version = "0.1.0"
+description = "Chatterbox MLX: Open Source TTS and Voice Conversion for MLX. Based off of Chatterbox by Resemble AI"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
-    {name = "resemble-ai", email = "engineering@resemble.ai"}
+    {name = "michael-yang", email = "contact@michaelyang.ai"}
 ]
 dependencies = [
     "numpy==2.3.5",
