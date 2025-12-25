@@ -51,7 +51,7 @@ class S3Tokenizer(S3TokenizerV2):
         processed_wavs = []
         for wav in wavs:
             if isinstance(wav, np.ndarray):
-                wav = torch.from_numpy(wav)
+                wav = torch.from_numpy(wav).float()
             if wav.dim() == 1:
                 wav = wav.unsqueeze(0)
 
@@ -72,7 +72,9 @@ class S3Tokenizer(S3TokenizerV2):
         processed_wavs = []
         for wav in wavs:
             if isinstance(wav, np.ndarray):
-                wav = torch.from_numpy(wav)
+                wav = torch.from_numpy(wav).float()
+            if wav.dtype != torch.float32:
+                wav = wav.float()
             if wav.dim() == 1:
                 wav = wav.unsqueeze(0)
 
@@ -113,7 +115,10 @@ class S3Tokenizer(S3TokenizerV2):
         padding: int = 0,
     ):
         if not torch.is_tensor(audio):
-            audio = torch.from_numpy(audio)
+            audio = torch.from_numpy(audio).float()
+        
+        if audio.dtype != torch.float32:
+            audio = audio.float()
 
         audio = audio.to(self.device)
         if padding > 0:
@@ -125,7 +130,7 @@ class S3Tokenizer(S3TokenizerV2):
         )
         magnitudes = stft[..., :-1].abs()**2
 
-        mel_spec = self._mel_filters.to(self.device) @ magnitudes
+        mel_spec = self._mel_filters.to(self.device) @ magnitudes.float()
 
         log_spec = torch.clamp(mel_spec, min=1e-10).log10()
         log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
