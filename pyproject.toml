@@ -23,7 +23,8 @@ dependencies = [
     "pykakasi==2.3.0",
     "gradio==5.44.1",
     "pyloudnorm",
-    "omegaconf"
+    "omegaconf",
+    "dicta-onnx>=1.0.9"
 ]
 
 [project.urls]
