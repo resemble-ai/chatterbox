@@ -1,0 +1,10 @@
+s3tokenizer
+transformers
+diffusers
+safetensors
+pyloudnorm
+numpy
+hf_xet
+soundfile
+# remember to pip install this below after requirements.txt
+# git+https://github.com/BBC-Esq/chatterbox-light.git --no-deps
