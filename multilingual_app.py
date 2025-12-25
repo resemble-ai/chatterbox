@@ -63,6 +63,10 @@ LANGUAGE_CONFIG = {
         "audio": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/ko_f.flac",
         "text": "지난달 우리는 유튜브 채널에서 이십억 조회수라는 새로운 이정표에 도달했습니다."
     },
+    "ml": {  # Added Malayalam support configuration - Contributed by Ahmed Shajahan
+        "audio": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/en_f1.flac", 
+        "text": "കഴിഞ്ഞ മാസം, ഞങ്ങളുടെ YouTube ചാനലിൽ രണ്ട് ബില്യൺ കാഴ്‌ചകൾ എന്ന പുതിയ നാഴികക്കല്ല് ഞങ്ങൾ പിന്നിട്ടു."
+    },
     "ms": {
         "audio": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/ms_f.flac",
         "text": "Bulan lepas, kami mencapai pencapaian baru dengan dua bilion tontonan di saluran YouTube kami."
@@ -236,6 +240,48 @@ def generate_tts_audio(
     print("Audio generation complete.")
     return (current_model.sr, wav.squeeze(0).numpy())
 
+import json
+from pathlib import Path
+from chatterbox.asr import SpeechRecognizer
+
+# --- STT Initialization ---
+STT_MODEL = None
+try:
+    STT_MODEL = SpeechRecognizer()
+    print("STT Model initialized.")
+except Exception as e:
+    print(f"Warning: STT Model failed to initialize: {e}")
+
+# --- Localization ---
+DEFAULT_LOCALE = {
+    "settings": "More options",
+    "start": "Generate",
+    "language": "Language",
+    "microphone": "Microphone (Speech to Text)",
+    "footer": "Malayalam support added by Ahmed Shajahan" 
+}
+
+def load_locale(lang_code):
+    """Load locale data, falling back to English defaults."""
+    if lang_code == "ml":
+        try:
+            with open("locales/ml_IN.json", "r") as f:
+                data = json.load(f)
+                # Map keys to UI element expectations if needed, or use directly
+                return data
+        except Exception as e:
+            print(f"Error loading locale for {lang_code}: {e}")
+    return DEFAULT_LOCALE
+
+def transcribe_audio(audio_path, language_id):
+    """Wrapper for STT transcription."""
+    if not audio_path:
+        return ""
+    if STT_MODEL:
+        return STT_MODEL.transcribe(audio_path, language_id)
+    return "STT Model not available."
+
+
 with gr.Blocks() as demo:
     gr.Markdown(
         """
@@ -246,22 +292,38 @@ with gr.Blocks() as demo:
     
     # Display supported languages
     gr.Markdown(get_supported_languages_display())
+    
+    # Shared State
+    current_locale = gr.State(DEFAULT_LOCALE)
+
     with gr.Row():
         with gr.Column():
             initial_lang = "fr"
+            
+            # LANGUAGE SELECTOR
+            language_id = gr.Dropdown(
+                choices=list(ChatterboxMultilingualTTS.get_supported_languages().keys()),
+                value=initial_lang,
+                label=DEFAULT_LOCALE["language"],
+                info="Select the language for text-to-speech synthesis"
+            )
+            
+            # TEXT INPUT
             text = gr.Textbox(
                 value=default_text_for_ui(initial_lang),
                 label="Text to synthesize (max chars 300)",
                 max_lines=5
             )
-            
-            language_id = gr.Dropdown(
-                choices=list(ChatterboxMultilingualTTS.get_supported_languages().keys()),
-                value=initial_lang,
-                label="Language",
-                info="Select the language for text-to-speech synthesis"
+
+            # STT INPUT (Microphone)
+            # "Microphone" label requested by user
+            stt_input = gr.Audio(
+                sources=["microphone"], 
+                type="filepath", 
+                label=DEFAULT_LOCALE["microphone"]
             )
             
+            # REFERENCE AUDIO
             ref_wav = gr.Audio(
                 sources=["upload", "microphone"],
                 type="filepath",
@@ -281,23 +343,64 @@ with gr.Blocks() as demo:
                 0.2, 1, step=.05, label="CFG/Pace", value=0.5
             )
 
-            with gr.Accordion("More options", open=False):
+            # SETTINGS (Accordion)
+            with gr.Accordion(DEFAULT_LOCALE["settings"], open=False) as settings_acc:
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")
                 temp = gr.Slider(0.05, 5, step=.05, label="Temperature", value=.8)
 
-            run_btn = gr.Button("Generate", variant="primary")
+            # START BUTTON
+            run_btn = gr.Button(DEFAULT_LOCALE["start"], variant="primary")
+            
+            # FOOTER
+            footer_text = gr.Markdown("") 
 
         with gr.Column():
             audio_output = gr.Audio(label="Output Audio")
 
-        def on_language_change(lang, current_ref, current_text):
-            return default_audio_for_ui(lang), default_text_for_ui(lang)
+        def on_language_change(lang, current_text):
+            # 1. Get default text/audio for the language
+            new_text = default_text_for_ui(lang)
+            new_audio_prompt = default_audio_for_ui(lang)
+            
+            # 2. Update Localization
+            loc = load_locale(lang)
+            
+            # 3. Prepare updates for UI components
+            # Note: We update labels using the translation
+            
+            # Footer update logic
+            footer_msg = f"**{loc.get('footer', '')}**" if lang == "ml" else ""
+
+            return (
+                new_audio_prompt,           # ref_wav value
+                new_text,                   # text value
+                gr.update(label=loc["language"]), # language_id label
+                gr.update(label=loc["start"]),    # run_btn label
+                gr.update(label=loc["settings"]), # settings_acc label
+                gr.update(label=loc["microphone"]), # stt_input label
+                footer_msg                  # footer_text value
+            )
 
         language_id.change(
             fn=on_language_change,
-            inputs=[language_id, ref_wav, text],
-            outputs=[ref_wav, text],
+            inputs=[language_id, text],
+            outputs=[
+                ref_wav, 
+                text, 
+                language_id, 
+                run_btn, 
+                settings_acc, 
+                stt_input,
+                footer_text
+            ],
             show_progress=False
+        )
+        
+        # Link STT to Textbox
+        stt_input.change(
+            fn=transcribe_audio,
+            inputs=[stt_input, language_id],
+            outputs=[text]
         )
 
     run_btn.click(
