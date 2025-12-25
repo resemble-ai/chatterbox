@@ -24,6 +24,33 @@ The following dependencies were modified:
 | `pykakasi` | `==2.3.0` | `>=2.3.0` | Relaxed pin. |
 | `gradio` | `==5.44.1` | `>=4.0.0` | Relaxed largely. Gradio 5.x is new, but 4.x is often sufficient. Allowing `>=4.0.0` gives maximum flexibility. |
 
+## File: `src/chatterbox/mtl_tts.py`
+
+**Issue:** The project uses `torch.load` to load model checkpoints (`ve.pt`, `s3gen.pt`). These checkpoints were saved on a CUDA device.
+**Fix:** Added `map_location=torch.device('cpu')` logic when the current device is CPU or MPS. This prevents `RuntimeError: Attempting to deserialize object on a CUDA device...` when running on CPU-only Colab instances.
+
+```python
+# Added to from_local method:
+if device in ["cpu", "mps"]:
+    map_location = torch.device('cpu')
+else:
+    map_location = None
+
+# Applied 'map_location=map_location' to torch.load calls
+```
+
+## File: `src/chatterbox/tts_turbo.py`
+
+**Issue:** `snapshot_download` was forcing `token=True`, causing `LocalTokenNotFoundError` for users without a configured Hugging Face token.
+**Fix:** Changed to `token=os.getenv("HF_TOKEN")` to make authentication optional for public models.
+
+## File: `example_tts.py`
+
+**Issue:** The script crashed with `FileNotFoundError` if the optional `YOUR_FILE.wav` audio prompt didn't exist.
+**Fix:** Added an existence check `if os.path.exists(AUDIO_PROMPT_PATH):` to skip the voice cloning example gracefully if the file is missing.
+
+
+
 ## How to Install in Colab
 
 In a Google Colab notebook cell, running the following should now work without errors:

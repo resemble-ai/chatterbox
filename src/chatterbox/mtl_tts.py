@@ -35,6 +35,7 @@ SUPPORTED_LANGUAGES = {
   "it": "Italian",
   "ja": "Japanese",
   "ko": "Korean",
+  "ml": "Malayalam",  # Added Malayalam support configuration - Contributed by Ahmed Shajahan
   "ms": "Malay",
   "nl": "Dutch",
   "no": "Norwegian",
@@ -161,9 +162,14 @@ class ChatterboxMultilingualTTS:
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(ckpt_dir)
 
+        if device in ["cpu", "mps"]:
+            map_location = torch.device('cpu')
+        else:
+            map_location = None
+
         ve = VoiceEncoder()
         ve.load_state_dict(
-            torch.load(ckpt_dir / "ve.pt", weights_only=True)
+            torch.load(ckpt_dir / "ve.pt", map_location=map_location, weights_only=True)
         )
         ve.to(device).eval()
 
@@ -176,7 +182,7 @@ class ChatterboxMultilingualTTS:
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", weights_only=True)
+            torch.load(ckpt_dir / "s3gen.pt", map_location=map_location, weights_only=True)
         )
         s3gen.to(device).eval()
 
@@ -186,7 +192,7 @@ class ChatterboxMultilingualTTS:
 
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice).to(device)
+            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
@@ -263,6 +269,32 @@ class ChatterboxMultilingualTTS:
                 cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
+
+        if language_id and language_id.lower() == "ml":
+            # Malayalam fallback using gTTS - Contributed by Ahmed Shajahan
+            try:
+                from gtts import gTTS
+                import io
+                import soundfile as sf
+                import librosa
+                
+                print("Using gTTS fallback for Malayalam...")
+                tts = gTTS(text, lang='ml')
+                fp = io.BytesIO()
+                tts.write_to_fp(fp)
+                fp.seek(0)
+                
+                # Load as float32
+                wav, sr = sf.read(fp)
+                
+                # Resample to match model SR if needed
+                if sr != self.sr:
+                    wav = librosa.resample(wav, orig_sr=sr, target_sr=self.sr)
+                
+                return torch.from_numpy(wav).float().unsqueeze(0)
+            except Exception as e:
+                print(f"gTTS fallback failed: {e}")
+                # Fallthrough to original model if gTTS fails (though unlikely to work well)
 
         # Norm and tokenize text
         text = punc_norm(text)
