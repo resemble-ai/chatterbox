@@ -4,10 +4,10 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from .conformer_block import ConformerBlock
 from diffusers.models.activations import get_activation
 from einops import pack, rearrange, repeat
 
-from .conformer_block import ConformerBlock
 from .transformer import BasicTransformerBlock
 
 
@@ -118,19 +118,6 @@ class TimestepEmbedding(nn.Module):
 
 
 class Upsample1D(nn.Module):
-    """A 1D upsampling layer with an optional convolution.
-
-    Parameters:
-        channels (`int`):
-            number of channels in the inputs and outputs.
-        use_conv (`bool`, default `False`):
-            option to use a convolution.
-        use_conv_transpose (`bool`, default `False`):
-            option to use a convolution transpose.
-        out_channels (`int`, optional):
-            number of output channels. Defaults to `channels`.
-    """
-
     def __init__(self, channels, use_conv=False, use_conv_transpose=True, out_channels=None, name="conv"):
         super().__init__()
         self.channels = channels
@@ -159,7 +146,7 @@ class Upsample1D(nn.Module):
 
 
 class ConformerWrapper(ConformerBlock):
-    def __init__(  # pylint: disable=useless-super-delegation
+    def __init__(
         self,
         *,
         dim,
@@ -231,7 +218,7 @@ class Decoder(nn.Module):
         self.up_blocks = nn.ModuleList([])
 
         output_channel = in_channels
-        for i in range(len(channels)):  # pylint: disable=consider-using-enumerate
+        for i in range(len(channels)):
             input_channel = output_channel
             output_channel = channels[i]
             is_last = i == len(channels) - 1
@@ -313,7 +300,6 @@ class Decoder(nn.Module):
         self.final_proj = nn.Conv1d(channels[-1], self.out_channels, 1)
 
         self.initialize_weights()
-        # nn.init.normal_(self.final_proj.weight)
 
     @staticmethod
     def get_block(block_type, dim, attention_head_dim, num_heads, dropout, act_fn):
@@ -361,23 +347,6 @@ class Decoder(nn.Module):
                     nn.init.constant_(m.bias, 0)
 
     def forward(self, x, mask, mu, t, spks=None, cond=None):
-        """Forward pass of the UNet1DConditional model.
-
-        Args:
-            x (torch.Tensor): shape (batch_size, in_channels, time)
-            mask (_type_): shape (batch_size, 1, time)
-            t (_type_): shape (batch_size)
-            spks (_type_, optional): shape: (batch_size, condition_channels). Defaults to None.
-            cond (_type_, optional): placeholder for future use. Defaults to None.
-
-        Raises:
-            ValueError: _description_
-            ValueError: _description_
-
-        Returns:
-            _type_: _description_
-        """
-
         t = self.time_embeddings(t)
         t = self.time_mlp(t)
 
@@ -402,7 +371,7 @@ class Decoder(nn.Module):
                 )
             x = rearrange(x, "b t c -> b c t")
             mask_down = rearrange(mask_down, "b t -> b 1 t")
-            hiddens.append(x)  # Save hidden states for skip connections
+            hiddens.append(x)
             x = downsample(x * mask_down)
             masks.append(mask_down[:, :, ::2])
 
