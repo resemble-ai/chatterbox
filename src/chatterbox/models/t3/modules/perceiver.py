@@ -1,6 +1,3 @@
-# Copyright (c) 2025 Resemble AI
-# Author: Manmay Nakhashi
-# MIT License
 import math
 
 import torch
@@ -64,7 +61,6 @@ class AttentionQKV(nn.Module):
         self.flash_config = self.setup_flash_config() if flash else None
 
     def setup_flash_config(self):
-        # Setup flash attention configuration
         flash_config = {
             'enable_flash': True,
             'enable_math': True,
@@ -111,11 +107,6 @@ class AttentionQKV(nn.Module):
 
 
 class AttentionBlock2(nn.Module):
-    """
-    An attention block that allows spatial positions to attend to each other,
-    using AttentionQKV and separate linear transformations for Q, K, and V.
-    """
-
     def __init__(
         self,
         channels,
@@ -139,7 +130,6 @@ class AttentionBlock2(nn.Module):
 
         self.norm = nn.LayerNorm(channels)
 
-        # Separate linear layers for Q, K, and V
         self.to_q = nn.Linear(channels, channels)
         self.to_k = nn.Linear(channels, channels)
         self.to_v = nn.Linear(channels, channels)
@@ -171,42 +161,21 @@ class AttentionBlock2(nn.Module):
 
 
 class Perceiver(nn.Module):
-    """Inspired by https://arxiv.org/abs/2103.03206"""
     def __init__(self, pre_attention_query_token=32, pre_attention_query_size=1024, embedding_dim=1024, num_attn_heads=4):
-        """
-        Initialize the perceiver module.
-
-        :param pre_attention_query_token: Number of query tokens for pre-attention
-        :param pre_attention_query_size: Size of each query token
-        :param embedding_dim: Dimension of the embedding space
-        :param num_attn_heads: Number of attention heads
-        """
         super().__init__()
 
-        # Initialize the pre-attention query parameter
         self.pre_attention_query = torch.nn.Parameter(
             torch.empty(1, pre_attention_query_token, pre_attention_query_size)
         )
 
-        # Calculate the variance for uniform initialization
         query_variance = math.sqrt(3.0) * math.sqrt(2.0 / (pre_attention_query_token + pre_attention_query_token))
 
-        # Initialize the pre-attention query with uniform distribution
         self.pre_attention_query.data.uniform_(-query_variance, query_variance)
 
-        # Initialize the attention block
         self.attn = AttentionBlock2(embedding_dim, num_attn_heads)
 
     def forward(self, h):
-        """
-        Forward pass of the perceiver module.
-        :param h: Input tensor
-        :return: Output after applying attention mechanisms
-        """
-        # Expand the pre-attention query to match the batch size of the input
         query_ = self.pre_attention_query.expand(h.shape[0], -1, -1)
-        # Apply the first attention mechanism (cross-attention)
         pre_att = self.attn(query_, h)
-        # Apply the second attention mechanism (self-attention)
         attn = self.attn(pre_att, pre_att)
         return attn
