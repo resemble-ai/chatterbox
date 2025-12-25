@@ -4,6 +4,7 @@ import os
 
 import torch
 import torchaudio as ta
+import soundfile as sf
 import torch.nn.functional as F
 from safetensors.torch import load_file as load_safetensors
 from huggingface_hub import snapshot_download
@@ -44,6 +45,13 @@ SUPPORTED_LANGUAGES = {
   "tr": "Turkish",
   "zh": "Chinese",
 }
+
+
+def load_audio(filepath):
+    audio, sr = sf.read(filepath, dtype='float32')
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    return torch.from_numpy(audio).unsqueeze(0), sr
 
 
 def punc_norm(text: str) -> str:
@@ -177,10 +185,10 @@ class ChatterboxMultilingualTTS:
         return cls.from_local(ckpt_dir, device)
     
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
-        s3gen_ref_wav, _sr = ta.load(wav_fpath, backend="soundfile")
+        s3gen_ref_wav, _sr = load_audio(wav_fpath)
         if _sr != S3GEN_SR:
             s3gen_ref_wav = ta.functional.resample(s3gen_ref_wav, orig_freq=_sr, new_freq=S3GEN_SR)
-        s3gen_ref_wav = s3gen_ref_wav.mean(dim=0).numpy()
+        s3gen_ref_wav = s3gen_ref_wav.squeeze(0).numpy()
 
         ref_16k_wav = ta.functional.resample(
             torch.from_numpy(s3gen_ref_wav).unsqueeze(0),

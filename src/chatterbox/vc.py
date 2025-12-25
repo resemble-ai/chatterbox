@@ -2,6 +2,7 @@ from pathlib import Path
 
 import torch
 import torchaudio as ta
+import soundfile as sf
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
@@ -10,6 +11,13 @@ from .models.s3gen import S3GEN_SR, S3Gen
 
 
 REPO_ID = "ResembleAI/chatterbox"
+
+
+def load_audio(filepath):
+    audio, sr = sf.read(filepath, dtype='float32')
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    return torch.from_numpy(audio).unsqueeze(0), sr
 
 
 class ChatterboxVC:
@@ -70,10 +78,10 @@ class ChatterboxVC:
         return cls.from_local(Path(local_path).parent, device)
 
     def set_target_voice(self, wav_fpath):
-        s3gen_ref_wav, _sr = ta.load(wav_fpath, backend="soundfile")
+        s3gen_ref_wav, _sr = load_audio(wav_fpath)
         if _sr != S3GEN_SR:
             s3gen_ref_wav = ta.functional.resample(s3gen_ref_wav, orig_freq=_sr, new_freq=S3GEN_SR)
-        s3gen_ref_wav = s3gen_ref_wav.mean(dim=0).numpy()
+        s3gen_ref_wav = s3gen_ref_wav.squeeze(0).numpy()
 
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         self.ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
@@ -89,10 +97,10 @@ class ChatterboxVC:
             assert self.ref_dict is not None, "Please `prepare_conditionals` first or specify `target_voice_path`"
 
         with torch.inference_mode():
-            audio_16, _sr = ta.load(audio, backend="soundfile")
+            audio_16, _sr = load_audio(audio)
             if _sr != S3_SR:
                 audio_16 = ta.functional.resample(audio_16, orig_freq=_sr, new_freq=S3_SR)
-            audio_16 = audio_16.mean(dim=0).float().to(self.device)[None, ]
+            audio_16 = audio_16.squeeze(0).float().to(self.device)[None, ]
 
             s3_tokens, _ = self.s3gen.tokenizer(audio_16)
             wav, _ = self.s3gen.inference(

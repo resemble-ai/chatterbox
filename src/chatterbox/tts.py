@@ -3,6 +3,7 @@ from pathlib import Path
 
 import torch
 import torchaudio as ta
+import soundfile as sf
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
@@ -16,6 +17,13 @@ from .models.t3.modules.cond_enc import T3Cond
 
 
 REPO_ID = "ResembleAI/chatterbox"
+
+
+def load_audio(filepath):
+    audio, sr = sf.read(filepath, dtype='float32')
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    return torch.from_numpy(audio).unsqueeze(0), sr
 
 
 def punc_norm(text: str) -> str:
@@ -153,10 +161,10 @@ class ChatterboxTTS:
         return cls.from_local(Path(local_path).parent, device)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
-        s3gen_ref_wav, _sr = ta.load(wav_fpath, backend="soundfile")
+        s3gen_ref_wav, _sr = load_audio(wav_fpath)
         if _sr != S3GEN_SR:
             s3gen_ref_wav = ta.functional.resample(s3gen_ref_wav, orig_freq=_sr, new_freq=S3GEN_SR)
-        s3gen_ref_wav = s3gen_ref_wav.mean(dim=0).numpy()
+        s3gen_ref_wav = s3gen_ref_wav.squeeze(0).numpy()
 
         ref_16k_wav = ta.functional.resample(
             torch.from_numpy(s3gen_ref_wav).unsqueeze(0),

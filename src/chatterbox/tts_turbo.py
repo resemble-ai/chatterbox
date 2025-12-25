@@ -5,6 +5,8 @@ from pathlib import Path
 
 import torch
 import torchaudio as ta
+import soundfile as sf
+import numpy as np
 import pyloudnorm as ln
 
 from safetensors.torch import load_file
@@ -23,6 +25,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 REPO_ID = "ResembleAI/chatterbox-turbo"
+
+
+def load_audio(filepath):
+    audio, sr = sf.read(filepath, dtype='float32')
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    return torch.from_numpy(audio).unsqueeze(0), sr
 
 
 def punc_norm(text: str) -> str:
@@ -186,10 +195,10 @@ class ChatterboxTurboTTS:
         return wav
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5, norm_loudness=True):
-        s3gen_ref_wav, _sr = ta.load(wav_fpath, backend="soundfile")
+        s3gen_ref_wav, _sr = load_audio(wav_fpath)
         if _sr != S3GEN_SR:
             s3gen_ref_wav = ta.functional.resample(s3gen_ref_wav, orig_freq=_sr, new_freq=S3GEN_SR)
-        s3gen_ref_wav = s3gen_ref_wav.mean(dim=0).numpy()
+        s3gen_ref_wav = s3gen_ref_wav.squeeze(0).numpy()
 
         assert len(s3gen_ref_wav) / S3GEN_SR > 5.0, "Audio prompt must be longer than 5 seconds!"
 
