@@ -70,7 +70,7 @@ class ChatterboxVC:
         return cls.from_local(Path(local_path).parent, device)
 
     def set_target_voice(self, wav_fpath):
-        s3gen_ref_wav, _sr = ta.load(wav_fpath)
+        s3gen_ref_wav, _sr = ta.load(wav_fpath, backend="soundfile")
         if _sr != S3GEN_SR:
             s3gen_ref_wav = ta.functional.resample(s3gen_ref_wav, orig_freq=_sr, new_freq=S3GEN_SR)
         s3gen_ref_wav = s3gen_ref_wav.mean(dim=0).numpy()
@@ -89,7 +89,7 @@ class ChatterboxVC:
             assert self.ref_dict is not None, "Please `prepare_conditionals` first or specify `target_voice_path`"
 
         with torch.inference_mode():
-            audio_16, _sr = ta.load(audio)
+            audio_16, _sr = ta.load(audio, backend="soundfile")
             if _sr != S3_SR:
                 audio_16 = ta.functional.resample(audio_16, orig_freq=_sr, new_freq=S3_SR)
             audio_16 = audio_16.mean(dim=0).float().to(self.device)[None, ]

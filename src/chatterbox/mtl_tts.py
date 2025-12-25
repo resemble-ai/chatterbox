@@ -177,7 +177,7 @@ class ChatterboxMultilingualTTS:
         return cls.from_local(ckpt_dir, device)
     
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
-        s3gen_ref_wav, _sr = ta.load(wav_fpath)
+        s3gen_ref_wav, _sr = ta.load(wav_fpath, backend="soundfile")
         if _sr != S3GEN_SR:
             s3gen_ref_wav = ta.functional.resample(s3gen_ref_wav, orig_freq=_sr, new_freq=S3GEN_SR)
         s3gen_ref_wav = s3gen_ref_wav.mean(dim=0).numpy()
