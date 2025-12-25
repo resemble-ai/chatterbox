@@ -104,13 +104,19 @@ class T3MLXBackend(nn.Module):
         # Project to speech logits
         logits = self.speech_head(hidden_states)
 
-        return {
+        result = {
             'logits': logits,
             'cache': tfmr_out.get('cache'),
             # Only include hidden_states if requested (saves memory during generation)
             'hidden_states': tfmr_out.get('hidden_states') if output_hidden_states else None,
             'last_hidden_state': hidden_states,
         }
+
+        # Include attention weights if requested
+        if output_attentions and 'attentions' in tfmr_out:
+            result['attentions'] = tfmr_out['attentions']
+
+        return result
 
     def prepare_inputs_for_generation(
         self,

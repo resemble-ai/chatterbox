@@ -31,6 +31,11 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from chatterbox.models.utils import get_memory_info
+from benchmark_audio_quality import (
+    validate_audio_quality,
+    print_quality_report,
+    AudioQualityMetrics,
+)
 
 # Enable verbose memory logging for debugging memory spikes
 DEBUG_MEMORY = os.environ.get("DEBUG_MEMORY", "0") == "1"
@@ -338,8 +343,11 @@ class BenchmarkResult:
     
     # Audio info
     audio_duration_seconds: float
-    
-    # Transcription validation (optional)
+
+    # Audio quality validation (optional)
+    quality_metrics: Optional[AudioQualityMetrics] = None
+
+    # Transcription validation (optional - deprecated, use quality_metrics instead)
     transcription: Optional[str] = None
     word_error_rate: Optional[float] = None
 
@@ -695,18 +703,24 @@ class ChatterboxBenchmark:
                 run_results[-1].wav = None
                 del last_wav
                 clear_memory(self.current_device)
-        
-        # Whisper transcription validation
-        if self.config.validate_transcription and output_path and output_path.exists():
-            print(f"  Validating transcription...")
-            transcription = transcribe_audio_whisper(str(output_path))
-            if transcription:
-                wer = word_error_rate(text, transcription)
-                result.transcription = transcription
-                result.word_error_rate = wer
-                preview_trans = transcription[:60] + "..." if len(transcription) > 60 else transcription
-                print(f"  → Transcription: '{preview_trans}'")
-                print(f"  → Word Error Rate: {wer:.2%}")
+
+                # Comprehensive audio quality validation
+                if self.config.validate_transcription:
+                    print(f"  Validating audio quality...")
+                    quality_metrics = validate_audio_quality(
+                        audio_path=str(output_path),
+                        reference_text=text,
+                        language="en",  # Standard benchmark is English
+                        enable_transcription=True,
+                    )
+                    result.quality_metrics = quality_metrics
+
+                    # Also populate legacy fields for backward compatibility
+                    result.transcription = quality_metrics.transcription
+                    result.word_error_rate = quality_metrics.word_error_rate
+
+                    # Print quality report
+                    print_quality_report(quality_metrics, verbose=True)
 
         # Force aggressive cleanup between benchmarks (if wav was not kept earlier)
         clear_memory(self.current_device)

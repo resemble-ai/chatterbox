@@ -20,7 +20,7 @@ def apply_repetition_penalty(logits: mx.array, generated_ids: List[mx.array], pe
 
     Args:
         logits: Logits tensor of shape (B, vocab_size)
-        generated_ids: List of previously generated token tensors
+        generated_ids: List of previously generated token IDs (can be ints or arrays)
         penalty: Penalty factor (> 1.0 penalizes repetition)
 
     Returns:
@@ -29,11 +29,17 @@ def apply_repetition_penalty(logits: mx.array, generated_ids: List[mx.array], pe
     if len(generated_ids) == 0 or penalty == 1.0:
         return logits
 
-    # Flatten all generated IDs into a single array
-    all_ids = mx.concatenate([mx.reshape(t, [-1]) for t in generated_ids], axis=0)
-    
-    # Get unique token IDs using a set (executed on CPU, but small)
-    unique_ids = list(set(int(x) for x in all_ids.tolist()))
+    # Convert all IDs to integers (handles both int and mx.array)
+    int_ids = []
+    for t in generated_ids:
+        if isinstance(t, int):
+            int_ids.append(t)
+        else:
+            # It's an mx.array, convert to int
+            int_ids.append(int(t.item() if t.size == 1 else t.reshape(-1)[0]))
+
+    # Get unique token IDs using a set
+    unique_ids = list(set(int_ids))
     
     if len(unique_ids) == 0:
         return logits

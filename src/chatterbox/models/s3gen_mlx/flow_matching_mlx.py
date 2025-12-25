@@ -210,14 +210,6 @@ class CausalConditionalCFMMLX(ConditionalCFMMLX):
         if cfm_params is None:
             cfm_params = CFMParamsMLX()
         super().__init__(in_channels, cfm_params, n_spks, spk_emb_dim, estimator)
-        self._rand_noise = None
-
-    def _get_rand_noise(self, size: int, dtype) -> mx.array:
-        """Lazily allocate cached random noise."""
-        if self._rand_noise is None or self._rand_noise.shape[2] < size:
-            alloc_size = max(size, 50 * 300)
-            self._rand_noise = mx.random.normal((1, 80, alloc_size))
-        return self._rand_noise[:, :, :size].astype(dtype)
 
     def __call__(
         self,
@@ -229,7 +221,8 @@ class CausalConditionalCFMMLX(ConditionalCFMMLX):
         cond: Optional[mx.array] = None,
     ) -> Tuple[mx.array, None]:
         """Forward diffusion for causal mode."""
-        z = self._get_rand_noise(mu.shape[2], mu.dtype) * temperature
+        # Generate fresh random noise each time (do NOT cache - causes hiss)
+        z = mx.random.normal(mu.shape) * temperature
         
         t_span = mx.linspace(0, 1, n_timesteps + 1)
         if self.t_scheduler == "cosine":

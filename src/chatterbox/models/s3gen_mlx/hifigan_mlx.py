@@ -114,19 +114,16 @@ class SineGenMLX(nn.Module):
         self.harmonic_num = harmonic_num
         self.sampling_rate = samp_rate
         self.voiced_threshold = voiced_threshold
-        # Use a fixed seed for deterministic inference
-        self._inference_seed = 42
 
     def _f02uv(self, f0: mx.array) -> mx.array:
         """Generate UV (unvoiced) signal."""
         return (f0 > self.voiced_threshold).astype(mx.float32)
 
-    def __call__(self, f0: mx.array, deterministic: bool = True) -> tuple:
+    def __call__(self, f0: mx.array) -> tuple:
         """Generate sine waves from F0.
         
         Args:
             f0: F0 tensor (batch, 1, sample_len) in Hz.
-            deterministic: If True, use fixed seed for reproducible results.
             
         Returns:
             sine_waves: Harmonic sine waves.
@@ -136,9 +133,8 @@ class SineGenMLX(nn.Module):
         batch_size = f0.shape[0]
         sample_len = f0.shape[-1]
         
-        # Set seed for deterministic inference (reduces graininess from random variation)
-        if deterministic:
-            mx.random.seed(self._inference_seed)
+        # NOTE: Do NOT use fixed random seed here - it causes repeating noise
+        # pattern that manifests as constant background "hiss" in the audio.
         
         # Compute frequency matrix for each harmonic using concatenation
         harmonics = []
@@ -499,8 +495,9 @@ class HiFTGeneratorMLX(nn.Module):
         Returns:
             Reconstructed signal [batch, time]
         """
-        # Clip magnitude to prevent numerical issues (use tighter bound)
-        magnitude = mx.clip(magnitude, a_min=1e-8, a_max=1e2)
+        # Clip magnitude to prevent numerical issues (match PyTorch: only clip max)
+        # MLX requires both a_min and a_max, so use None for no lower bound
+        magnitude = mx.clip(magnitude, a_min=None, a_max=1e2)
         n_fft = self.istft_params["n_fft"]
         hop_len = self.istft_params["hop_len"]
         window = self.stft_window
@@ -556,9 +553,9 @@ class HiFTGeneratorMLX(nn.Module):
         window_sq_repeated = mx.broadcast_to(window_sq[None, :], (n_frames, n_fft)).flatten()
         window_norm = window_norm.at[flat_indices].add(window_sq_repeated)
 
-        # Normalize by window sum - use larger epsilon to prevent artifacts
-        # at frame boundaries where window sum may be small
-        window_norm = mx.maximum(window_norm, 1e-5)
+        # Normalize by window sum
+        # Use small epsilon to avoid division by zero but don't add noise floor
+        window_norm = mx.maximum(window_norm, 1e-8)
         output = output / window_norm[None, :]
 
         # Remove center padding
