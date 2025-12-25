@@ -1,0 +1,24 @@
+name: chatterbox
+channels:
+  - defaults
+dependencies:
+  - python>=3.10
+  - pip
+  - pip:
+    - numpy>=1.26.0
+    - librosa>=0.10.0
+    - s3tokenizer
+    - torch>=2.0.0
+    - torchaudio>=2.0.0
+    - transformers>=4.46.0
+    - diffusers>=0.29.0
+    - resemble-perth>=1.0.1
+    - conformer>=0.3.2
+    - safetensors>=0.5.0
+    - spacy-pkuseg
+    - pykakasi>=2.3.0
+    - gradio>=4.0.0
+    - pyloudnorm
+    - omegaconf
+    - gTTS
+    - soundfile
