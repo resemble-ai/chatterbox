@@ -1,22 +1,3 @@
-# jrm: adapted from CosyVoice/cosyvoice/hifigan/generator.py
-#      most modules should be reusable, but I found their SineGen changed a git.
-
-# Copyright (c) 2024 Alibaba Inc (authors: Xiang Lyu, Kai Hu)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""HIFI-GAN"""
-
 from typing import Dict, Optional, List
 import numpy as np
 from scipy.signal import get_window
@@ -32,38 +13,14 @@ from torch.nn import Parameter
 
 
 class Snake(nn.Module):
-    '''
-    Implementation of a sine-based periodic activation function
-    Shape:
-        - Input: (B, C, T)
-        - Output: (B, C, T), same shape as the input
-    Parameters:
-        - alpha - trainable parameter
-    References:
-        - This activation function is from this paper by Liu Ziyin, Tilman Hartwig, Masahito Ueda:
-        https://arxiv.org/abs/2006.08195
-    Examples:
-        >>> a1 = snake(256)
-        >>> x = torch.randn(256)
-        >>> x = a1(x)
-    '''
     def __init__(self, in_features, alpha=1.0, alpha_trainable=True, alpha_logscale=False):
-        '''
-        Initialization.
-        INPUT:
-            - in_features: shape of the input
-            - alpha: trainable parameter
-            alpha is initialized to 1 by default, higher values = higher-frequency.
-            alpha will be trained along with the rest of your model.
-        '''
         super(Snake, self).__init__()
         self.in_features = in_features
 
-        # initialize alpha
         self.alpha_logscale = alpha_logscale
-        if self.alpha_logscale: # log scale alphas initialized to zeros
+        if self.alpha_logscale:
             self.alpha = Parameter(torch.zeros(in_features) * alpha)
-        else: # linear scale alphas initialized to ones
+        else:
             self.alpha = Parameter(torch.ones(in_features) * alpha)
 
         self.alpha.requires_grad = alpha_trainable
@@ -71,12 +28,7 @@ class Snake(nn.Module):
         self.no_div_by_zero = 0.000000001
 
     def forward(self, x):
-        '''
-        Forward pass of the function.
-        Applies the function to the input elementwise.
-        Snake ∶= x + 1/a * sin^2 (xa)
-        '''
-        alpha = self.alpha.unsqueeze(0).unsqueeze(-1) # line up with x to [B, C, T]
+        alpha = self.alpha.unsqueeze(0).unsqueeze(-1)
         if self.alpha_logscale:
             alpha = torch.exp(alpha)
         x = x + (1.0 / (alpha + self.no_div_by_zero)) * pow(sin(x * alpha), 2)
@@ -94,17 +46,7 @@ def init_weights(m, mean=0.0, std=0.01):
         m.weight.data.normal_(mean, std)
 
 
-"""hifigan based generator implementation.
-
-This code is modified from https://github.com/jik876/hifi-gan
- ,https://github.com/kan-bayashi/ParallelWaveGAN and
- https://github.com/NVIDIA/BigVGAN
-
-"""
-
-
 class ResBlock(torch.nn.Module):
-    """Residual block module in HiFiGAN/BigVGAN."""
     def __init__(
         self,
         channels: int = 512,
@@ -167,20 +109,6 @@ class ResBlock(torch.nn.Module):
 
 
 class SineGen(torch.nn.Module):
-    """ Definition of sine generator
-    SineGen(samp_rate, harmonic_num = 0,
-            sine_amp = 0.1, noise_std = 0.003,
-            voiced_threshold = 0,
-            flag_for_pulse=False)
-    samp_rate: sampling rate in Hz
-    harmonic_num: number of harmonic overtones (default 0)
-    sine_amp: amplitude of sine-wavefrom (default 0.1)
-    noise_std: std of Gaussian noise (default 0.003)
-    voiced_thoreshold: F0 threshold for U/V classification (default 0)
-    flag_for_pulse: this SinGen is used inside PulseGen (default False)
-    Note: when flag_for_pulse is True, the first time step of a voiced
-        segment is always sin(np.pi) or cos(0)
-    """
 
     def __init__(self, samp_rate, harmonic_num=0,
                  sine_amp=0.1, noise_std=0.003,
@@ -193,17 +121,11 @@ class SineGen(torch.nn.Module):
         self.voiced_threshold = voiced_threshold
 
     def _f02uv(self, f0):
-        # generate uv signal
         uv = (f0 > self.voiced_threshold).type(torch.float32)
         return uv
 
     @torch.no_grad()
     def forward(self, f0):
-        """
-        :param f0: [B, 1, sample_len], Hz
-        :return: [B, 1, sample_len]
-        """
-
         F_mat = torch.zeros((f0.size(0), self.harmonic_num + 1, f0.size(-1))).to(f0.device)
         for i in range(self.harmonic_num + 1):
             F_mat[:, i: i + 1, :] = f0 * (i + 1) / self.sampling_rate
@@ -213,41 +135,18 @@ class SineGen(torch.nn.Module):
         phase_vec = u_dist.sample(sample_shape=(f0.size(0), self.harmonic_num + 1, 1)).to(F_mat.device)
         phase_vec[:, 0, :] = 0
 
-        # generate sine waveforms
         sine_waves = self.sine_amp * torch.sin(theta_mat + phase_vec)
 
-        # generate uv signal
         uv = self._f02uv(f0)
 
-        # noise: for unvoiced should be similar to sine_amp
-        #        std = self.sine_amp/3 -> max value ~ self.sine_amp
-        # .       for voiced regions is self.noise_std
         noise_amp = uv * self.noise_std + (1 - uv) * self.sine_amp / 3
         noise = noise_amp * torch.randn_like(sine_waves)
 
-        # first: set the unvoiced part to 0 by uv
-        # then: additive noise
         sine_waves = sine_waves * uv + noise
         return sine_waves, uv, noise
 
 
 class SourceModuleHnNSF(torch.nn.Module):
-    """ SourceModule for hn-nsf
-    SourceModule(sampling_rate, harmonic_num=0, sine_amp=0.1,
-                 add_noise_std=0.003, voiced_threshod=0)
-    sampling_rate: sampling_rate in Hz
-    harmonic_num: number of harmonic above F0 (default: 0)
-    sine_amp: amplitude of sine source signal (default: 0.1)
-    add_noise_std: std of additive Gaussian noise (default: 0.003)
-        note that amplitude of noise in unvoiced is decided
-        by sine_amp
-    voiced_threshold: threhold to set U/V given F0 (default: 0)
-    Sine_source, noise_source = SourceModuleHnNSF(F0_sampled)
-    F0_sampled (batchsize, length, 1)
-    Sine_source (batchsize, length, 1)
-    noise_source (batchsize, length 1)
-    uv (batchsize, length, 1)
-    """
 
     def __init__(self, sampling_rate, upsample_scale, harmonic_num=0, sine_amp=0.1,
                  add_noise_std=0.003, voiced_threshod=0):
@@ -256,38 +155,24 @@ class SourceModuleHnNSF(torch.nn.Module):
         self.sine_amp = sine_amp
         self.noise_std = add_noise_std
 
-        # to produce sine waveforms
         self.l_sin_gen = SineGen(sampling_rate, harmonic_num,
                                  sine_amp, add_noise_std, voiced_threshod)
 
-        # to merge source harmonics into a single excitation
         self.l_linear = torch.nn.Linear(harmonic_num + 1, 1)
         self.l_tanh = torch.nn.Tanh()
 
     def forward(self, x):
-        """
-        Sine_source, noise_source = SourceModuleHnNSF(F0_sampled)
-        F0_sampled (batchsize, length, 1)
-        Sine_source (batchsize, length, 1)
-        noise_source (batchsize, length 1)
-        """
-        # source for harmonic branch
         with torch.no_grad():
             sine_wavs, uv, _ = self.l_sin_gen(x.transpose(1, 2))
             sine_wavs = sine_wavs.transpose(1, 2)
             uv = uv.transpose(1, 2)
         sine_merge = self.l_tanh(self.l_linear(sine_wavs))
 
-        # source for noise branch, in the same shape as uv
         noise = torch.randn_like(uv) * self.sine_amp / 3
         return sine_merge, noise, uv
 
 
 class HiFTGenerator(nn.Module):
-    """
-    HiFTNet Generator: Neural Source Filter + ISTFTNet
-    https://arxiv.org/abs/2309.09493
-    """
     def __init__(
             self,
             in_channels: int = 80,
@@ -332,7 +217,6 @@ class HiFTGenerator(nn.Module):
             Conv1d(in_channels, base_channels, 7, 1, padding=3)
         )
 
-        # Up
         self.ups = nn.ModuleList()
         for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
             self.ups.append(
@@ -347,7 +231,6 @@ class HiFTGenerator(nn.Module):
                 )
             )
 
-        # Down
         self.source_downs = nn.ModuleList()
         self.source_resblocks = nn.ModuleList()
         downsample_rates = [1] + upsample_rates[::-1][:-1]
@@ -398,7 +281,7 @@ class HiFTGenerator(nn.Module):
             x,
             self.istft_params["n_fft"], self.istft_params["hop_len"], self.istft_params["n_fft"], window=self.stft_window.to(x.device),
             return_complex=True)
-        spec = torch.view_as_real(spec)  # [B, F, TT, 2]
+        spec = torch.view_as_real(spec)
         return spec[..., 0], spec[..., 1]
 
     def _istft(self, magnitude, phase):
@@ -421,7 +304,6 @@ class HiFTGenerator(nn.Module):
             if i == self.num_upsamples - 1:
                 x = self.reflection_pad(x)
 
-            # fusion
             si = self.source_downs[i](s_stft)
             si = self.source_resblocks[i](si)
             x = x + si
@@ -437,7 +319,7 @@ class HiFTGenerator(nn.Module):
         x = F.leaky_relu(x)
         x = self.conv_post(x)
         magnitude = torch.exp(x[:, :self.istft_params["n_fft"] // 2 + 1, :])
-        phase = torch.sin(x[:, self.istft_params["n_fft"] // 2 + 1:, :])  # actually, sin is redundancy
+        phase = torch.sin(x[:, self.istft_params["n_fft"] // 2 + 1:, :])
 
         x = self._istft(magnitude, phase)
         x = torch.clamp(x, -self.audio_limit, self.audio_limit)
@@ -449,25 +331,19 @@ class HiFTGenerator(nn.Module):
             device: torch.device,
     ) -> Dict[str, Optional[torch.Tensor]]:
         speech_feat = batch['speech_feat'].transpose(1, 2).to(device)
-        # mel->f0
         f0 = self.f0_predictor(speech_feat)
-        # f0->source
-        s = self.f0_upsamp(f0[:, None]).transpose(1, 2)  # bs,n,t
+        s = self.f0_upsamp(f0[:, None]).transpose(1, 2)
         s, _, _ = self.m_source(s)
         s = s.transpose(1, 2)
-        # mel+source->speech
         generated_speech = self.decode(x=speech_feat, s=s)
         return generated_speech, f0
 
     @torch.inference_mode()
     def inference(self, speech_feat: torch.Tensor, cache_source: torch.Tensor = torch.zeros(1, 1, 0)) -> torch.Tensor:
-        # mel->f0
         f0 = self.f0_predictor(speech_feat)
-        # f0->source
-        s = self.f0_upsamp(f0[:, None]).transpose(1, 2)  # bs,n,t
+        s = self.f0_upsamp(f0[:, None]).transpose(1, 2)
         s, _, _ = self.m_source(s)
         s = s.transpose(1, 2)
-        # use cache_source to avoid glitch
         if cache_source.shape[2] != 0:
             s[:, :, :cache_source.shape[2]] = cache_source
         generated_speech = self.decode(x=speech_feat, s=s)

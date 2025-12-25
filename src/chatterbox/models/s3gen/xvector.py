@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-# -*- encoding: utf-8 -*-
-# Copyright FunASR (https://github.com/alibaba-damo-academy/FunASR). All Rights Reserved.
-#  MIT License  (https://opensource.org/licenses/MIT)
-# Modified from 3D-Speaker (https://github.com/alibaba-damo-academy/3D-Speaker)
-
-
 from collections import OrderedDict
 import torch
 import torch.nn.functional as F
@@ -13,25 +6,6 @@ import torchaudio.compliance.kaldi as Kaldi
 
 
 def pad_list(xs, pad_value):
-    """Perform padding for the list of tensors.
-
-    Args:
-        xs (List): List of Tensors [(T_1, `*`), (T_2, `*`), ..., (T_B, `*`)].
-        pad_value (float): Value for padding.
-
-    Returns:
-        Tensor: Padded tensor (B, Tmax, `*`).
-
-    Examples:
-        >>> x = [torch.ones(4), torch.ones(2), torch.ones(1)]
-        >>> x
-        [tensor([1., 1., 1., 1.]), tensor([1., 1.]), tensor([1.])]
-        >>> pad_list(x, 0)
-        tensor([[1., 1., 1., 1.],
-                [1., 1., 0., 0.],
-                [1., 0., 0., 0.]])
-
-    """
     n_batch = len(xs)
     max_len = max(x.size(0) for x in xs)
     pad = xs[0].new(n_batch, max_len, *xs[0].size()[1:]).fill_(pad_value)
@@ -52,9 +26,7 @@ def extract_feature(audio):
         features.append(feature)
         feature_times.append(au.shape[0])
         feature_lengths.append(feature.shape[0])
-    # padding for batch inference
     features_padded = pad_list(features, pad_value=0)
-    # features = torch.cat(features)
     return features_padded, feature_lengths, feature_times
 
 
@@ -336,7 +308,6 @@ class DenseLayer(torch.nn.Module):
         x = self.nonlinear(x)
         return x
 
-# @tables.register("model_classes", "CAMPPlus")
 class CAMPPlus(torch.nn.Module):
     def __init__(
         self,
@@ -415,7 +386,7 @@ class CAMPPlus(torch.nn.Module):
                     torch.nn.init.zeros_(m.bias)
 
     def forward(self, x):
-        x = x.permute(0, 2, 1)  # (B,T,F) => (B,F,T)
+        x = x.permute(0, 2, 1)
         x = self.head(x)
         x = self.xvector(x)
         if self.output_level == "frame":
