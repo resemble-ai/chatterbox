@@ -1,12 +1,24 @@
 [project]
 name = "chatterbox-mlx"
-version = "0.1.0"
+version = "0.1.0-alpha2"
 description = "Chatterbox MLX: Open Source TTS and Voice Conversion for MLX. Based off of Chatterbox by Resemble AI"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {file = "LICENSE"}
+license = "MIT"
 authors = [
     {name = "michael-yang", email = "contact@michaelyang.ai"}
+]
+keywords = ["tts", "text-to-speech", "voice-cloning", "speech-synthesis", "ai", "multilingual", "mlx", "apple-silicon"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
     "numpy==2.3.5",
@@ -20,17 +32,19 @@ dependencies = [
     "resemble-perth==1.0.1",
     "conformer==0.3.2",
     "safetensors>=0.7.0",
+    "huggingface-hub>=0.20.0",
     "spacy>=3.8.3",
     "spacy-pkuseg==1.0.1",
     "pykakasi==2.3.0",
-    "russian-text-stresser@git+https://github.com/michaelcreatesstuff/add-stress-to-epub.git@60c5c3d31cd5472e394d64cf74d6f1d7b31425e2",
-
 ]
 
 [project.optional-dependencies]
 mlx = [
     "mlx>=0.30.0",
     "mlx-lm>=0.28.3",
+]
+dev = [
+    "parakeet-mlx>=0.4.1",
 ]
 
 [project.urls]
