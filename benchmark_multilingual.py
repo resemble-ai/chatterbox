@@ -673,7 +673,7 @@ class MultilingualBenchmark:
                     result.word_error_rate = quality_metrics.word_error_rate
 
                     # Print quality report
-                    print_quality_report(quality_metrics, verbose=True)
+                    print_quality_report(quality_metrics, verbose=True, reference_text=text)
 
         # Force cleanup between benchmarks
         clear_memory(self.current_device)

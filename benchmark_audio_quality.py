@@ -362,13 +362,14 @@ def validate_audio_quality(
     )
 
 
-def print_quality_report(metrics: AudioQualityMetrics, verbose: bool = True):
+def print_quality_report(metrics: AudioQualityMetrics, verbose: bool = True, reference_text: Optional[str] = None):
     """
     Print a formatted quality report.
 
     Args:
         metrics: AudioQualityMetrics to report
         verbose: Whether to print detailed information
+        reference_text: Optional reference text to display
     """
     # Overall status with emoji
     status_emoji = {
@@ -410,6 +411,13 @@ def print_quality_report(metrics: AudioQualityMetrics, verbose: bool = True):
             last_match = "✓" if metrics.has_last_word else "✗"
             print(f"  First word: {first_match} '{metrics.first_word_expected}' → '{metrics.first_word_transcribed}'")
             print(f"  Last word:  {last_match} '{metrics.last_word_expected}' → '{metrics.last_word_transcribed}'")
+
+        # Show expected and transcribed text
+        if reference_text:
+            print(f"\n  Expected text:")
+            print(f"    {reference_text}")
+        print(f"\n  Transcript:")
+        print(f"    {metrics.transcription}")
 
     # Audio fidelity
     if metrics.has_hard_cutoff:

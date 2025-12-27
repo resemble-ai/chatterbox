@@ -720,7 +720,7 @@ class ChatterboxBenchmark:
                     result.word_error_rate = quality_metrics.word_error_rate
 
                     # Print quality report
-                    print_quality_report(quality_metrics, verbose=True)
+                    print_quality_report(quality_metrics, verbose=True, reference_text=text)
 
         # Force aggressive cleanup between benchmarks (if wav was not kept earlier)
         clear_memory(self.current_device)
