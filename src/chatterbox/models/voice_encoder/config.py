@@ -9,7 +9,7 @@ class VoiceEncConfig:
     win_size = 400
     fmax = 8000
     fmin = 0
-    preemphasis = 0.
+    preemphasis = 0.0
     mel_power = 2.0
     mel_type = "amp"
     normalized_mels = False

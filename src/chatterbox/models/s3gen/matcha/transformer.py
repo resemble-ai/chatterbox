@@ -32,7 +32,14 @@ class SnakeBeta(nn.Module):
         >>> x = a1(x)
     """
 
-    def __init__(self, in_features, out_features, alpha=1.0, alpha_trainable=True, alpha_logscale=True):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        alpha=1.0,
+        alpha_trainable=True,
+        alpha_logscale=True,
+    ):
         """
         Initialization.
         INPUT:
@@ -44,7 +51,9 @@ class SnakeBeta(nn.Module):
             alpha will be trained along with the rest of your model.
         """
         super().__init__()
-        self.in_features = out_features if isinstance(out_features, list) else [out_features]
+        self.in_features = (
+            out_features if isinstance(out_features, list) else [out_features]
+        )
         self.proj = LoRACompatibleLinear(in_features, out_features)
 
         # initialize alpha
@@ -75,7 +84,9 @@ class SnakeBeta(nn.Module):
             alpha = self.alpha
             beta = self.beta
 
-        x = x + (1.0 / (beta + self.no_div_by_zero)) * torch.pow(torch.sin(x * alpha), 2)
+        x = x + (1.0 / (beta + self.no_div_by_zero)) * torch.pow(
+            torch.sin(x * alpha), 2
+        )
 
         return x
 
@@ -176,8 +187,12 @@ class BasicTransformerBlock(nn.Module):
         super().__init__()
         self.only_cross_attention = only_cross_attention
 
-        self.use_ada_layer_norm_zero = (num_embeds_ada_norm is not None) and norm_type == "ada_norm_zero"
-        self.use_ada_layer_norm = (num_embeds_ada_norm is not None) and norm_type == "ada_norm"
+        self.use_ada_layer_norm_zero = (
+            num_embeds_ada_norm is not None
+        ) and norm_type == "ada_norm_zero"
+        self.use_ada_layer_norm = (
+            num_embeds_ada_norm is not None
+        ) and norm_type == "ada_norm"
 
         if norm_type in ("ada_norm", "ada_norm_zero") and num_embeds_ada_norm is None:
             raise ValueError(
@@ -215,7 +230,9 @@ class BasicTransformerBlock(nn.Module):
             )
             self.attn2 = Attention(
                 query_dim=dim,
-                cross_attention_dim=cross_attention_dim if not double_self_attention else None,
+                cross_attention_dim=(
+                    cross_attention_dim if not double_self_attention else None
+                ),
                 heads=num_attention_heads,
                 dim_head=attention_head_dim,
                 dropout=dropout,
@@ -229,7 +246,12 @@ class BasicTransformerBlock(nn.Module):
 
         # 3. Feed-forward
         self.norm3 = nn.LayerNorm(dim, elementwise_affine=norm_elementwise_affine)
-        self.ff = FeedForward(dim, dropout=dropout, activation_fn=activation_fn, final_dropout=final_dropout)
+        self.ff = FeedForward(
+            dim,
+            dropout=dropout,
+            activation_fn=activation_fn,
+            final_dropout=final_dropout,
+        )
 
         # let chunk size default to None
         self._chunk_size = None
@@ -261,12 +283,18 @@ class BasicTransformerBlock(nn.Module):
         else:
             norm_hidden_states = self.norm1(hidden_states)
 
-        cross_attention_kwargs = cross_attention_kwargs if cross_attention_kwargs is not None else {}
+        cross_attention_kwargs = (
+            cross_attention_kwargs if cross_attention_kwargs is not None else {}
+        )
 
         attn_output = self.attn1(
             norm_hidden_states,
-            encoder_hidden_states=encoder_hidden_states if self.only_cross_attention else None,
-            attention_mask=encoder_attention_mask if self.only_cross_attention else attention_mask,
+            encoder_hidden_states=(
+                encoder_hidden_states if self.only_cross_attention else None
+            ),
+            attention_mask=(
+                encoder_attention_mask if self.only_cross_attention else attention_mask
+            ),
             **cross_attention_kwargs,
         )
         if self.use_ada_layer_norm_zero:
@@ -276,7 +304,9 @@ class BasicTransformerBlock(nn.Module):
         # 2. Cross-Attention
         if self.attn2 is not None:
             norm_hidden_states = (
-                self.norm2(hidden_states, timestep) if self.use_ada_layer_norm else self.norm2(hidden_states)
+                self.norm2(hidden_states, timestep)
+                if self.use_ada_layer_norm
+                else self.norm2(hidden_states)
             )
 
             attn_output = self.attn2(
@@ -291,7 +321,9 @@ class BasicTransformerBlock(nn.Module):
         norm_hidden_states = self.norm3(hidden_states)
 
         if self.use_ada_layer_norm_zero:
-            norm_hidden_states = norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+            norm_hidden_states = (
+                norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+            )
 
         if self._chunk_size is not None:
             # "feed_forward_chunk_size" can be used to save memory
@@ -302,7 +334,12 @@ class BasicTransformerBlock(nn.Module):
 
             num_chunks = norm_hidden_states.shape[self._chunk_dim] // self._chunk_size
             ff_output = torch.cat(
-                [self.ff(hid_slice) for hid_slice in norm_hidden_states.chunk(num_chunks, dim=self._chunk_dim)],
+                [
+                    self.ff(hid_slice)
+                    for hid_slice in norm_hidden_states.chunk(
+                        num_chunks, dim=self._chunk_dim
+                    )
+                ],
                 dim=self._chunk_dim,
             )
         else:

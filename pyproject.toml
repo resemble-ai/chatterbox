@@ -1,6 +1,6 @@
 [project]
 name = "chatterbox-mlx"
-version = "0.1.0-alpha2"
+version = "0.1.2-alpha5"
 description = "Chatterbox MLX: Open Source TTS and Voice Conversion for MLX. Based off of Chatterbox by Resemble AI"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,16 +36,26 @@ dependencies = [
     "spacy>=3.8.3",
     "spacy-pkuseg==1.0.1",
     "pykakasi==2.3.0",
+    "psutil==7.2.0",
 ]
 
 [project.optional-dependencies]
 mlx = [
-    "mlx>=0.30.0",
-    "mlx-lm>=0.28.3",
+    "mlx==0.29.4",
+    "mlx-lm==0.28.3",
 ]
 dev = [
-    "parakeet-mlx>=0.4.1",
+    "mlx-whisper>=0.4.0",
+    "parakeet-mlx==0.4.1",
+    "black==25.12.0",
+    "ruff==0.14.10",
+    "pytest==9.0.2",
+    "build==1.3.0",
+    "twine==6.2.0",
 ]
+
+[project.scripts]
+chatterbox = "chatterbox.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/michaelcreatesstuff/chatterbox"

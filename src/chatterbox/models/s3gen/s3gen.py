@@ -34,6 +34,7 @@ from .decoder import ConditionalDecoder
 from .configs import CFM_PARAMS
 from chatterbox.models.utils import is_debug, contiguous_transpose
 
+
 def log_message(msg, level="info"):
     """Log a message only when `DEBUG_LOGGING` is enabled.
 
@@ -65,7 +66,10 @@ def get_gpu_memory_mb():
 def log_memory(stage, extra_info=""):
     cpu_mem = get_memory_mb()
     gpu_mem = get_gpu_memory_mb()
-    log_message(f"[MEMORY] {stage}: CPU={cpu_mem:.1f}MB, GPU={gpu_mem:.1f}MB {extra_info}", "debug")
+    log_message(
+        f"[MEMORY] {stage}: CPU={cpu_mem:.1f}MB, GPU={gpu_mem:.1f}MB {extra_info}",
+        "debug",
+    )
 
 
 def log_tensor_info(tensor, name):
@@ -79,7 +83,9 @@ def log_tensor_info(tensor, name):
 
 
 def drop_invalid_tokens(x):
-    assert len(x.shape) <= 2 and x.shape[0] == 1, "only batch size of one allowed for now"
+    assert (
+        len(x.shape) <= 2 and x.shape[0] == 1
+    ), "only batch size of one allowed for now"
     return x[x < SPEECH_VOCAB_SIZE]
 
 
@@ -129,9 +135,9 @@ class S3Token2Mel(torch.nn.Module):
             positional_dropout_rate=0.1,
             attention_dropout_rate=0.1,
             normalize_before=True,
-            input_layer='linear',
-            pos_enc_layer_type='rel_pos_espnet',
-            selfattention_layer_type='rel_selfattn',
+            input_layer="linear",
+            pos_enc_layer_type="rel_pos_espnet",
+            selfattention_layer_type="rel_selfattn",
             input_size=512,
             use_cnn_module=False,
             macaron_style=False,
@@ -150,7 +156,7 @@ class S3Token2Mel(torch.nn.Module):
             n_blocks=4,
             num_mid_blocks=12,
             num_heads=8,
-            act_fn='gelu',
+            act_fn="gelu",
         )
         log_memory("after_estimator")
 
@@ -166,10 +172,7 @@ class S3Token2Mel(torch.nn.Module):
 
         log_message("[INIT] Creating flow...")
         log_memory("before_flow")
-        self.flow = CausalMaskedDiffWithXvec(
-            encoder=encoder,
-            decoder=decoder
-        )
+        self.flow = CausalMaskedDiffWithXvec(encoder=encoder, decoder=decoder)
         log_memory("after_flow")
 
         self.resamplers = {}
@@ -182,11 +185,11 @@ class S3Token2Mel(torch.nn.Module):
         return next(params).device
 
     def embed_ref(
-            self,
-            ref_wav: torch.Tensor,
-            ref_sr: int,
-            device="auto",
-            ref_fade_out=True,
+        self,
+        ref_wav: torch.Tensor,
+        ref_sr: int,
+        device="auto",
+        ref_fade_out=True,
     ):
         log_message(f"[EMBED_REF] Starting reference embedding, ref_sr={ref_sr}")
         log_memory("start_embed_ref")
@@ -222,7 +225,9 @@ class S3Token2Mel(torch.nn.Module):
         log_message("[EMBED_REF] Extracting mel spectrogram...")
         log_memory("before_mel_extraction")
         # transpose creates non-contiguous view - make contiguous for MPS kernels
-        ref_mels_24 = contiguous_transpose(self.mel_extractor(ref_wav_24), 1, 2).to(device)
+        ref_mels_24 = contiguous_transpose(self.mel_extractor(ref_wav_24), 1, 2).to(
+            device
+        )
         log_tensor_info(ref_mels_24, "ref_mels_24")
         log_memory("after_mel_extraction")
         ref_mels_24_len = None
@@ -250,8 +255,10 @@ class S3Token2Mel(torch.nn.Module):
             logging.warning(
                 "Reference mel length is not equal to 2 * reference token length.\n"
             )
-            log_message(f"[EMBED_REF] Adjusting token length: {ref_speech_tokens.shape[1]} -> {ref_mels_24.shape[1] // 2}")
-            ref_speech_tokens = ref_speech_tokens[:, :ref_mels_24.shape[1] // 2]
+            log_message(
+                f"[EMBED_REF] Adjusting token length: {ref_speech_tokens.shape[1]} -> {ref_mels_24.shape[1] // 2}"
+            )
+            ref_speech_tokens = ref_speech_tokens[:, : ref_mels_24.shape[1] // 2]
             ref_speech_token_lens[0] = ref_speech_tokens.shape[1]
             log_tensor_info(ref_speech_tokens, "ref_speech_tokens_adjusted")
 
@@ -273,14 +280,14 @@ class S3Token2Mel(torch.nn.Module):
         return result
 
     def forward(
-            self,
-            speech_tokens: torch.LongTensor,
-            # locally-computed ref embedding (mutex with ref_dict)
-            ref_wav: Optional[torch.Tensor],
-            ref_sr: Optional[int],
-            # pre-computed ref embedding (prod API)
-            ref_dict: Optional[dict] = None,
-            finalize: bool = False,
+        self,
+        speech_tokens: torch.LongTensor,
+        # locally-computed ref embedding (mutex with ref_dict)
+        ref_wav: Optional[torch.Tensor],
+        ref_sr: Optional[int],
+        # pre-computed ref embedding (prod API)
+        ref_dict: Optional[dict] = None,
+        finalize: bool = False,
     ):
         """
         Generate waveforms from S3 speech tokens and a reference waveform, which the speaker timbre is inferred from.
@@ -290,7 +297,8 @@ class S3Token2Mel(torch.nn.Module):
         log_tensor_info(speech_tokens, "input_speech_tokens")
 
         assert (ref_wav is None) ^ (
-                    ref_dict is None), f"Must provide exactly one of ref_wav or ref_dict (got {ref_wav} and {ref_dict})"
+            ref_dict is None
+        ), f"Must provide exactly one of ref_wav or ref_dict (got {ref_wav} and {ref_dict})"
 
         if ref_dict is None:
             log_message("[FORWARD] Computing reference embedding...")
@@ -367,29 +375,36 @@ class S3Token2Wav(S3Token2Mel):
         n_trim = S3GEN_SR // 50  # 20ms = half of a frame
         trim_fade = torch.zeros(2 * n_trim)
         trim_fade[n_trim:] = (torch.cos(torch.linspace(torch.pi, 0, n_trim)) + 1) / 2
-        self.register_buffer("trim_fade", trim_fade, persistent=False)  # (buffers get automatic device casting)
+        self.register_buffer(
+            "trim_fade", trim_fade, persistent=False
+        )  # (buffers get automatic device casting)
         log_tensor_info(self.trim_fade, "trim_fade_buffer")
 
         log_memory("end_s3token2wav_init")
         log_message("[INIT] S3Token2Wav initialization complete")
 
     def forward(
-            self,
-            speech_tokens,
-            # locally-computed ref embedding (mutex with ref_dict)
-            ref_wav: Optional[torch.Tensor],
-            ref_sr: Optional[int],
-            # pre-computed ref embedding (prod API)
-            ref_dict: Optional[dict] = None,
-            finalize: bool = False
+        self,
+        speech_tokens,
+        # locally-computed ref embedding (mutex with ref_dict)
+        ref_wav: Optional[torch.Tensor],
+        ref_sr: Optional[int],
+        # pre-computed ref embedding (prod API)
+        ref_dict: Optional[dict] = None,
+        finalize: bool = False,
     ):
         log_message(f"[FORWARD] Starting S3Token2Wav forward pass, finalize={finalize}")
         log_memory("start_s3token2wav_forward")
 
         log_message("[FORWARD] Getting mel spectrograms...")
         log_memory("before_parent_forward")
-        output_mels = super().forward(speech_tokens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict,
-                                      finalize=finalize)
+        output_mels = super().forward(
+            speech_tokens,
+            ref_wav=ref_wav,
+            ref_sr=ref_sr,
+            ref_dict=ref_dict,
+            finalize=finalize,
+        )
         log_memory("after_parent_forward")
 
         log_message("[FORWARD] Converting mels to waveform...")
@@ -398,7 +413,9 @@ class S3Token2Wav(S3Token2Mel):
         hift_cache_source = torch.zeros(1, 1, 0).to(self.device)
         log_tensor_info(hift_cache_source, "hift_cache_source")
 
-        output_wavs, *_ = self.mel2wav.inference(speech_feat=output_mels, cache_source=hift_cache_source)
+        output_wavs, *_ = self.mel2wav.inference(
+            speech_feat=output_mels, cache_source=hift_cache_source
+        )
         log_tensor_info(output_wavs, "output_wavs")
         log_memory("after_mel2wav")
 
@@ -406,7 +423,7 @@ class S3Token2Wav(S3Token2Mel):
             log_message("[FORWARD] Applying trim fade...")
             log_memory("before_trim_fade")
             # NOTE: ad-hoc method to reduce "spillover" from the reference clip.
-            output_wavs[:, :len(self.trim_fade)] *= self.trim_fade
+            output_wavs[:, : len(self.trim_fade)] *= self.trim_fade
             log_memory("after_trim_fade")
 
         # Clean up intermediate tensors
@@ -420,20 +437,26 @@ class S3Token2Wav(S3Token2Mel):
 
     @torch.inference_mode()
     def flow_inference(
-            self,
-            speech_tokens,
-            # locally-computed ref embedding (mutex with ref_dict)
-            ref_wav: Optional[torch.Tensor] = None,
-            ref_sr: Optional[int] = None,
-            # pre-computed ref embedding (prod API)
-            ref_dict: Optional[dict] = None,
-            finalize: bool = False,
+        self,
+        speech_tokens,
+        # locally-computed ref embedding (mutex with ref_dict)
+        ref_wav: Optional[torch.Tensor] = None,
+        ref_sr: Optional[int] = None,
+        # pre-computed ref embedding (prod API)
+        ref_dict: Optional[dict] = None,
+        finalize: bool = False,
     ):
         log_message(f"[FLOW_INFERENCE] Starting flow inference, finalize={finalize}")
         log_memory("start_flow_inference")
         log_tensor_info(speech_tokens, "flow_input_speech_tokens")
 
-        result = super().forward(speech_tokens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
+        result = super().forward(
+            speech_tokens,
+            ref_wav=ref_wav,
+            ref_sr=ref_sr,
+            ref_dict=ref_dict,
+            finalize=finalize,
+        )
 
         log_memory("end_flow_inference")
         log_tensor_info(result, "flow_output_mels")
@@ -454,12 +477,14 @@ class S3Token2Wav(S3Token2Mel):
 
         # CRITICAL: Force cleanup before HiFiGAN inference
         gc.collect()
-        if hasattr(torch, 'mps') and torch.backends.mps.is_available():
+        if hasattr(torch, "mps") and torch.backends.mps.is_available():
             torch.mps.empty_cache()
         elif torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        result = self.mel2wav.inference(speech_feat=speech_feat, cache_source=local_cache_source)
+        result = self.mel2wav.inference(
+            speech_feat=speech_feat, cache_source=local_cache_source
+        )
         log_memory("after_mel2wav_inference")
 
         output_wavs, output_sources = result
@@ -472,17 +497,17 @@ class S3Token2Wav(S3Token2Mel):
         del local_cache_source
 
         # Try to clear any potential HiFiGAN internal caches
-        if hasattr(self.mel2wav, 'clear_cache'):
+        if hasattr(self.mel2wav, "clear_cache"):
             self.mel2wav.clear_cache()
 
         # Clear any computational graph references
-        if hasattr(output_wavs, 'detach'):
+        if hasattr(output_wavs, "detach"):
             output_wavs = output_wavs.detach()
-        if hasattr(output_sources, 'detach'):
+        if hasattr(output_sources, "detach"):
             output_sources = output_sources.detach()
 
         gc.collect()
-        if hasattr(torch, 'mps') and torch.backends.mps.is_available():
+        if hasattr(torch, "mps") and torch.backends.mps.is_available():
             torch.mps.empty_cache()
         elif torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -493,24 +518,26 @@ class S3Token2Wav(S3Token2Mel):
 
     @torch.inference_mode()
     def inference(
-            self,
-            speech_tokens,
-            # locally-computed ref embedding (mutex with ref_dict)
-            ref_wav: Optional[torch.Tensor] = None,
-            ref_sr: Optional[int] = None,
-            # pre-computed ref embedding (prod API)
-            ref_dict: Optional[dict] = None,
-            cache_source: torch.Tensor = None,  # NOTE: this arg is for streaming, it can probably be removed here
-            finalize: bool = True,
+        self,
+        speech_tokens,
+        # locally-computed ref embedding (mutex with ref_dict)
+        ref_wav: Optional[torch.Tensor] = None,
+        ref_sr: Optional[int] = None,
+        # pre-computed ref embedding (prod API)
+        ref_dict: Optional[dict] = None,
+        cache_source: torch.Tensor = None,  # NOTE: this arg is for streaming, it can probably be removed here
+        finalize: bool = True,
     ):
-        log_message(f"[INFERENCE] Starting full inference pipeline, finalize={finalize}")
+        log_message(
+            f"[INFERENCE] Starting full inference pipeline, finalize={finalize}"
+        )
         log_memory("start_full_inference")
         log_tensor_info(speech_tokens, "inference_input_speech_tokens")
 
         # Force aggressive garbage collection before starting
         log_message("[INFERENCE] Pre-inference cleanup...")
         gc.collect()
-        if hasattr(torch, 'mps') and torch.backends.mps.is_available():
+        if hasattr(torch, "mps") and torch.backends.mps.is_available():
             torch.mps.empty_cache()
         elif torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -520,8 +547,13 @@ class S3Token2Wav(S3Token2Mel):
         log_message(f"before_flow_inference: {before_flow_inference:.1f}MB", "debug")
 
         log_message("[INFERENCE] Running flow inference...")
-        output_mels = self.flow_inference(speech_tokens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict,
-                                          finalize=finalize)
+        output_mels = self.flow_inference(
+            speech_tokens,
+            ref_wav=ref_wav,
+            ref_sr=ref_sr,
+            ref_dict=ref_dict,
+            finalize=finalize,
+        )
 
         after_flow_inference = get_memory_mb()
         log_message(f"after_flow_inference: {after_flow_inference:.1f}MB", "debug")
@@ -530,7 +562,7 @@ class S3Token2Wav(S3Token2Mel):
         # Clean up immediately after flow inference
         log_message("[INFERENCE] Mid-inference cleanup...")
         gc.collect()
-        if hasattr(torch, 'mps') and torch.backends.mps.is_available():
+        if hasattr(torch, "mps") and torch.backends.mps.is_available():
             torch.mps.empty_cache()
         elif torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -544,7 +576,7 @@ class S3Token2Wav(S3Token2Mel):
         log_message("[INFERENCE] Applying final trim fade...")
         log_memory("before_final_trim_fade")
         # NOTE: ad-hoc method to reduce "spillover" from the reference clip.
-        output_wavs[:, :len(self.trim_fade)] *= self.trim_fade
+        output_wavs[:, : len(self.trim_fade)] *= self.trim_fade
         log_memory("after_final_trim_fade")
 
         log_message("[INFERENCE] Final aggressive cleanup...")
@@ -560,7 +592,7 @@ class S3Token2Wav(S3Token2Mel):
             gc.collect()
 
         # Clear device cache multiple times
-        if hasattr(torch, 'mps') and torch.backends.mps.is_available():
+        if hasattr(torch, "mps") and torch.backends.mps.is_available():
             torch.mps.empty_cache()
             torch.mps.synchronize()  # Ensure all operations complete
         elif torch.cuda.is_available():
@@ -570,6 +602,9 @@ class S3Token2Wav(S3Token2Mel):
         log_memory("after_final_cleanup")
 
         final_memory = get_memory_mb()
-        log_message(f"[INFERENCE] Full inference complete. Final memory: {final_memory:.1f}MB", "info")
+        log_message(
+            f"[INFERENCE] Full inference complete. Final memory: {final_memory:.1f}MB",
+            "info",
+        )
 
         return output_wavs, output_sources

@@ -20,7 +20,14 @@ from chatterbox.models.utils import ensure_contiguous
 
 
 class ConditionalCFM(BASECFM):
-    def __init__(self, in_channels, cfm_params, n_spks=1, spk_emb_dim=64, estimator: torch.nn.Module = None):
+    def __init__(
+        self,
+        in_channels,
+        cfm_params,
+        n_spks=1,
+        spk_emb_dim=64,
+        estimator: torch.nn.Module = None,
+    ):
         super().__init__(
             n_feats=in_channels,
             cfm_params=cfm_params,
@@ -36,7 +43,17 @@ class ConditionalCFM(BASECFM):
         self.lock = threading.Lock()
 
     @torch.inference_mode()
-    def forward(self, mu, mask, n_timesteps, temperature=1.0, spks=None, cond=None, prompt_len=0, flow_cache=torch.zeros(1, 80, 0, 2)):
+    def forward(
+        self,
+        mu,
+        mask,
+        n_timesteps,
+        temperature=1.0,
+        spks=None,
+        cond=None,
+        prompt_len=0,
+        flow_cache=torch.zeros(1, 80, 0, 2),
+    ):
         """Forward diffusion
 
         Args:
@@ -66,9 +83,14 @@ class ConditionalCFM(BASECFM):
         flow_cache = torch.stack([z_cache, mu_cache], dim=-1)
 
         t_span = torch.linspace(0, 1, n_timesteps + 1, device=mu.device, dtype=mu.dtype)
-        if self.t_scheduler == 'cosine':
+        if self.t_scheduler == "cosine":
             t_span = 1 - torch.cos(t_span * 0.5 * torch.pi)
-        return self.solve_midpoint(z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond), flow_cache
+        return (
+            self.solve_midpoint(
+                z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond
+            ),
+            flow_cache,
+        )
 
     # Deprecated: Euler solver retained for reference
     def solve_euler(self, x, t_span, mu, mask, spks, cond):
@@ -118,16 +140,15 @@ class ConditionalCFM(BASECFM):
             spks_in[0] = spks
             cond_in[0] = cond
             dphi_dt = self.forward_estimator(
-                x_in, mask_in,
-                mu_in, t_in,
-                spks_in,
-                cond_in
+                x_in, mask_in, mu_in, t_in, spks_in, cond_in
             )
             # torch.split may return views - ensure contiguity for MPS in-place ops
             dphi_dt, cfg_dphi_dt = torch.split(dphi_dt, [x.size(0), x.size(0)], dim=0)
             dphi_dt = ensure_contiguous(dphi_dt)
             cfg_dphi_dt = ensure_contiguous(cfg_dphi_dt)
-            dphi_dt = ((1.0 + self.inference_cfg_rate) * dphi_dt - self.inference_cfg_rate * cfg_dphi_dt)
+            dphi_dt = (
+                1.0 + self.inference_cfg_rate
+            ) * dphi_dt - self.inference_cfg_rate * cfg_dphi_dt
             x = x + dt * dphi_dt
             t = t + dt
             if step < len(t_span) - 1:
@@ -184,18 +205,13 @@ class ConditionalCFM(BASECFM):
             spks_in[0] = spks
             cond_in[0] = cond
 
-            k1 = self.forward_estimator(
-                x_in, mask_in,
-                mu_in, t_in,
-                spks_in,
-                cond_in
-            )
+            k1 = self.forward_estimator(x_in, mask_in, mu_in, t_in, spks_in, cond_in)
 
             # Apply CFG to k1
             k1, cfg_k1 = torch.split(k1, [x.size(0), x.size(0)], dim=0)
             k1 = ensure_contiguous(k1)
             cfg_k1 = ensure_contiguous(cfg_k1)
-            k1 = ((1.0 + self.inference_cfg_rate) * k1 - self.inference_cfg_rate * cfg_k1)
+            k1 = (1.0 + self.inference_cfg_rate) * k1 - self.inference_cfg_rate * cfg_k1
 
             # Compute midpoint
             x_mid = x + (dt / 2) * k1
@@ -209,18 +225,13 @@ class ConditionalCFM(BASECFM):
             spks_in[0] = spks
             cond_in[0] = cond
 
-            k2 = self.forward_estimator(
-                x_in, mask_in,
-                mu_in, t_in,
-                spks_in,
-                cond_in
-            )
+            k2 = self.forward_estimator(x_in, mask_in, mu_in, t_in, spks_in, cond_in)
 
             # Apply CFG to k2
             k2, cfg_k2 = torch.split(k2, [x.size(0), x.size(0)], dim=0)
             k2 = ensure_contiguous(k2)
             cfg_k2 = ensure_contiguous(cfg_k2)
-            k2 = ((1.0 + self.inference_cfg_rate) * k2 - self.inference_cfg_rate * cfg_k2)
+            k2 = (1.0 + self.inference_cfg_rate) * k2 - self.inference_cfg_rate * cfg_k2
 
             # Update x using midpoint derivative
             x = x + dt * k2
@@ -239,20 +250,24 @@ class ConditionalCFM(BASECFM):
             return self.estimator.forward(x, mask, mu, t, spks, cond)
         else:
             with self.lock:
-                self.estimator.set_input_shape('x', (2, 80, x.size(2)))
-                self.estimator.set_input_shape('mask', (2, 1, x.size(2)))
-                self.estimator.set_input_shape('mu', (2, 80, x.size(2)))
-                self.estimator.set_input_shape('t', (2,))
-                self.estimator.set_input_shape('spks', (2, 80))
-                self.estimator.set_input_shape('cond', (2, 80, x.size(2)))
+                self.estimator.set_input_shape("x", (2, 80, x.size(2)))
+                self.estimator.set_input_shape("mask", (2, 1, x.size(2)))
+                self.estimator.set_input_shape("mu", (2, 80, x.size(2)))
+                self.estimator.set_input_shape("t", (2,))
+                self.estimator.set_input_shape("spks", (2, 80))
+                self.estimator.set_input_shape("cond", (2, 80, x.size(2)))
                 # run trt engine
-                self.estimator.execute_v2([x.contiguous().data_ptr(),
-                                           mask.contiguous().data_ptr(),
-                                           mu.contiguous().data_ptr(),
-                                           t.contiguous().data_ptr(),
-                                           spks.contiguous().data_ptr(),
-                                           cond.contiguous().data_ptr(),
-                                           x.data_ptr()])
+                self.estimator.execute_v2(
+                    [
+                        x.contiguous().data_ptr(),
+                        mask.contiguous().data_ptr(),
+                        mu.contiguous().data_ptr(),
+                        t.contiguous().data_ptr(),
+                        spks.contiguous().data_ptr(),
+                        cond.contiguous().data_ptr(),
+                        x.data_ptr(),
+                    ]
+                )
             return x
 
     def compute_loss(self, x1, mask, mu, spks=None, cond=None):
@@ -277,7 +292,7 @@ class ConditionalCFM(BASECFM):
 
         # random timestep
         t = torch.rand([b, 1, 1], device=mu.device, dtype=mu.dtype)
-        if self.t_scheduler == 'cosine':
+        if self.t_scheduler == "cosine":
             t = 1 - torch.cos(t * 0.5 * torch.pi)
         # sample noise p(x_0)
         z = torch.randn_like(x1)
@@ -293,18 +308,27 @@ class ConditionalCFM(BASECFM):
             cond = cond * cfg_mask.view(-1, 1, 1)
 
         pred = self.estimator(y, mask, mu, t.squeeze(), spks, cond)
-        loss = F.mse_loss(pred * mask, u * mask, reduction="sum") / (torch.sum(mask) * u.shape[1])
+        loss = F.mse_loss(pred * mask, u * mask, reduction="sum") / (
+            torch.sum(mask) * u.shape[1]
+        )
         return loss, y
 
 
 class CausalConditionalCFM(ConditionalCFM):
-    def __init__(self, in_channels=240, cfm_params=CFM_PARAMS, n_spks=1, spk_emb_dim=80, estimator=None):
+    def __init__(
+        self,
+        in_channels=240,
+        cfm_params=CFM_PARAMS,
+        n_spks=1,
+        spk_emb_dim=80,
+        estimator=None,
+    ):
         super().__init__(in_channels, cfm_params, n_spks, spk_emb_dim, estimator)
         self._rand_noise = None  # Lazy allocation - saves ~5MB at init
 
     def _get_rand_noise(self, size: int, device, dtype):
         """Lazily allocate and cache random noise tensor.
-        
+
         Memory Impact: Saves ~5MB during model loading
         Quality Impact: None (maintains deterministic noise values)
         """
@@ -337,6 +361,11 @@ class CausalConditionalCFM(ConditionalCFM):
         z = self._get_rand_noise(mu.size(2), mu.device, mu.dtype) * temperature
         # fix prompt and overlap part mu and z
         t_span = torch.linspace(0, 1, n_timesteps + 1, device=mu.device, dtype=mu.dtype)
-        if self.t_scheduler == 'cosine':
+        if self.t_scheduler == "cosine":
             t_span = 1 - torch.cos(t_span * 0.5 * torch.pi)
-        return self.solve_midpoint(z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond), None
+        return (
+            self.solve_midpoint(
+                z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond
+            ),
+            None,
+        )

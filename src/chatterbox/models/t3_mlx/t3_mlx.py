@@ -8,7 +8,7 @@ Converted from PyTorch version in t3.py
 
 import logging
 import os
-from typing import Optional, Dict, Union, List
+from typing import Optional, Dict, List
 import mlx.core as mx
 import mlx.nn as nn
 from tqdm import tqdm
@@ -17,7 +17,6 @@ from .modules.llama_mlx import LlamaModelMLX, LlamaConfigMLX
 from .modules.learned_pos_emb_mlx import LearnedPositionEmbeddingsMLX
 from .modules.cond_enc_mlx import T3CondEncMLX, T3CondMLX
 from .inference.t3_mlx_backend import T3MLXBackend
-from .inference.kv_cache_mlx import KVCacheMLX
 from ..t3.llama_configs import LLAMA_CONFIGS
 from ..t3.modules.t3_config import T3Config
 from ..utils import get_memory_info, is_debug
@@ -31,10 +30,11 @@ def _log_t3_memory(label: str):
         return
     info = get_memory_info()
     parts = [f"[T3_MLX] {label}:", f"Sys={info['sys_used_gb']:.2f}GB"]
-    if 'mps_allocated_mb' in info:
+    if "mps_allocated_mb" in info:
         parts.append(f"MPS={info['mps_allocated_mb']:.0f}MB")
     mx.eval(mx.array([0]))  # Force MLX sync
     print(" | ".join(parts))
+
 
 def _ensure_BOT_EOT(text_tokens: mx.array, hp: T3Config):
     """Validate that text tokens contain required start/stop tokens."""
@@ -86,11 +86,17 @@ class T3MLX(nn.Module):
             self.text_pos_emb = LearnedPositionEmbeddingsMLX(max_text_seq_len, self.dim)
 
             max_mel_seq_len = hp.max_speech_tokens + 4
-            self.speech_pos_emb = LearnedPositionEmbeddingsMLX(max_mel_seq_len, self.dim)
+            self.speech_pos_emb = LearnedPositionEmbeddingsMLX(
+                max_mel_seq_len, self.dim
+            )
 
         # Logit projection heads
-        self.text_head = nn.Linear(self.cfg.hidden_size, hp.text_tokens_dict_size, bias=False)
-        self.speech_head = nn.Linear(self.cfg.hidden_size, hp.speech_tokens_dict_size, bias=False)
+        self.text_head = nn.Linear(
+            self.cfg.hidden_size, hp.text_tokens_dict_size, bias=False
+        )
+        self.speech_head = nn.Linear(
+            self.cfg.hidden_size, hp.speech_tokens_dict_size, bias=False
+        )
 
         # Backend for generation
         self.patched_model = None
@@ -106,7 +112,10 @@ class T3MLX(nn.Module):
             Conditioning embeddings of shape (B, len_cond, dim)
         """
         # Embed speech prompt tokens if provided
-        if t3_cond.cond_prompt_speech_tokens is not None and t3_cond.cond_prompt_speech_emb is None:
+        if (
+            t3_cond.cond_prompt_speech_tokens is not None
+            and t3_cond.cond_prompt_speech_emb is None
+        ):
             speech_tokens_emb = self.speech_emb(t3_cond.cond_prompt_speech_tokens)
             speech_pos_emb = self.speech_pos_emb(t3_cond.cond_prompt_speech_tokens)
             t3_cond.cond_prompt_speech_emb = speech_tokens_emb + speech_pos_emb
@@ -138,7 +147,7 @@ class T3MLX(nn.Module):
 
         # Text embeddings
         text_emb = self.text_emb(text_tokens)  # (B, len_text, dim)
-        
+
         # CFG: zero out text embedding for unconditional branch BEFORE adding position embeddings
         # This matches PyTorch behavior where text_emb[1].zero_() is called before pos_emb addition
         # Note: text_tokens already has batch size 2 when CFG is enabled
@@ -147,7 +156,7 @@ class T3MLX(nn.Module):
             text_emb_cond = text_emb[0:1]
             text_emb_uncond = mx.zeros_like(text_emb[1:2])
             text_emb = mx.concatenate([text_emb_cond, text_emb_uncond], axis=0)
-        
+
         # Add text position embeddings AFTER zeroing out unconditional text
         if self.hp.input_pos_emb == "learned":
             text_emb = text_emb + self.text_pos_emb(text_tokens)
@@ -161,19 +170,17 @@ class T3MLX(nn.Module):
 
         # Broadcast embeddings to match batch sizes
         batch_size = text_emb.shape[0]
-        
+
         # Expand conditioning if needed
         if cond_emb.shape[0] != batch_size:
             cond_emb = mx.broadcast_to(
-                cond_emb,
-                (batch_size, cond_emb.shape[1], cond_emb.shape[2])
+                cond_emb, (batch_size, cond_emb.shape[1], cond_emb.shape[2])
             )
-        
+
         # Expand speech embeddings if needed
         if speech_emb.shape[0] != batch_size:
             speech_emb = mx.broadcast_to(
-                speech_emb,
-                (batch_size, speech_emb.shape[1], speech_emb.shape[2])
+                speech_emb, (batch_size, speech_emb.shape[1], speech_emb.shape[2])
             )
 
         len_cond = cond_emb.shape[1]
@@ -222,25 +229,27 @@ class T3MLX(nn.Module):
             cache=None,  # No cache during training
             output_hidden_states=True,
         )
-        hidden_states = tfmr_out['hidden_states'][-1]  # (B, seq, dim)
+        hidden_states = tfmr_out["hidden_states"][-1]  # (B, seq, dim)
 
         # Extract text and speech latents
         len_text = text_tokens.shape[1]
         len_speech = speech_tokens.shape[1]
 
-        text_latents = hidden_states[:, len_cond:len_cond + len_text, :]
-        speech_latents = hidden_states[:, len_cond + len_text:len_cond + len_text + len_speech, :]
+        text_latents = hidden_states[:, len_cond : len_cond + len_text, :]
+        speech_latents = hidden_states[
+            :, len_cond + len_text : len_cond + len_text + len_speech, :
+        ]
 
         # Project to logits
         text_logits = self.text_head(text_latents)
         speech_logits = self.speech_head(speech_latents)
 
         return {
-            'text_logits': text_logits,
-            'text_latents': text_latents,
-            'speech_logits': speech_logits,
-            'speech_latents': speech_latents,
-            'hidden_states': hidden_states,
+            "text_logits": text_logits,
+            "text_latents": text_latents,
+            "speech_logits": speech_logits,
+            "speech_latents": speech_latents,
+            "hidden_states": hidden_states,
         }
 
     def loss_fn(
@@ -265,8 +274,8 @@ class T3MLX(nn.Module):
         Returns:
             Tuple of (text_loss, speech_loss)
         """
-        len_text = text_tokens.shape[1]
-        len_speech = speech_tokens.shape[1]
+        text_tokens.shape[1]
+        speech_tokens.shape[1]
 
         # Forward pass
         out = self(
@@ -290,15 +299,15 @@ class T3MLX(nn.Module):
             log_probs = mx.log(mx.softmax(logits, axis=-1) + 1e-10)
 
             # Gather target log probs
-            B_idx = mx.arange(B)[:, None, None]  # (B, 1, 1)
-            L_idx = mx.arange(L)[None, :, None]  # (1, L, 1)
-            T_idx = mx.expand_dims(targets, -1)  # (B, L, 1)
+            mx.arange(B)[:, None, None]  # (B, 1, 1)
+            mx.arange(L)[None, :, None]  # (1, L, 1)
+            mx.expand_dims(targets, -1)  # (B, L, 1)
 
             # Manual indexing since MLX doesn't have torch.gather
             target_log_probs = mx.zeros((B, L))
             for b in range(B):
-                for l in range(L):
-                    target_log_probs[b, l] = log_probs[b, l, targets[b, l]]
+                for pos in range(L):
+                    target_log_probs[b, pos] = log_probs[b, pos, targets[b, pos]]
 
             # Apply mask and compute mean
             masked_log_probs = mx.where(mask, target_log_probs, 0.0)
@@ -306,8 +315,12 @@ class T3MLX(nn.Module):
 
             return loss
 
-        loss_text = masked_cross_entropy(out['text_logits'], text_tokens, text_token_lens)
-        loss_speech = masked_cross_entropy(out['speech_logits'], speech_tokens, speech_token_lens)
+        loss_text = masked_cross_entropy(
+            out["text_logits"], text_tokens, text_token_lens
+        )
+        loss_speech = masked_cross_entropy(
+            out["speech_logits"], speech_tokens, speech_token_lens
+        )
 
         return loss_text, loss_speech
 
@@ -343,7 +356,10 @@ class T3MLX(nn.Module):
             Generated speech token IDs
         """
         # Import AlignmentStreamAnalyzerMLX
-        from .inference.alignment_stream_analyzer_mlx import AlignmentStreamAnalyzerMLX, LLAMA_ALIGNED_HEADS
+        from .inference.alignment_stream_analyzer_mlx import (
+            AlignmentStreamAnalyzerMLX,
+            LLAMA_ALIGNED_HEADS,
+        )
 
         # Validate text tokens
         if text_tokens.ndim == 1:
@@ -421,16 +437,16 @@ class T3MLX(nn.Module):
             output_attentions=output_attentions,
         )
 
-        cache = output['cache']
+        cache = output["cache"]
 
         # Update alignment analyzer with initial attention weights
-        if alignment_analyzer is not None and 'attentions' in output:
+        if alignment_analyzer is not None and "attentions" in output:
             for idx, (layer_idx, head_idx) in enumerate(LLAMA_ALIGNED_HEADS):
                 alignment_analyzer.update_attention(
-                    output['attentions'],
+                    output["attentions"],
                     buffer_idx=idx,
                     layer_idx=layer_idx,
-                    head_idx=head_idx
+                    head_idx=head_idx,
                 )
 
         # Force immediate evaluation of initial forward pass to prevent lazy graph buildup
@@ -444,14 +460,18 @@ class T3MLX(nn.Module):
         generated_tokens: List[mx.array] = []  # For final result
 
         # Import sampling utilities
-        from .inference.sampling_utils_mlx import apply_repetition_penalty, apply_top_p, apply_min_p
+        from .inference.sampling_utils_mlx import (
+            apply_repetition_penalty,
+            apply_top_p,
+            apply_min_p,
+        )
 
         # Generation loop
         token_iterator = range(max_new_tokens)
         if show_progress:
             token_iterator = tqdm(token_iterator, desc="Generating", dynamic_ncols=True)
         for i in token_iterator:
-            logits_step = output['logits'][:, -1, :]  # (B, vocab)
+            logits_step = output["logits"][:, -1, :]  # (B, vocab)
 
             # CFG: combine conditional and unconditional predictions
             if cfg_weight > 0.0:
@@ -465,11 +485,15 @@ class T3MLX(nn.Module):
             # This allows the analyzer to force/suppress EOS based on alignment
             if alignment_analyzer is not None:
                 # Pass the last generated token for repetition tracking
-                last_token = generated_token_ids[-1] if len(generated_token_ids) > 0 else None
+                last_token = (
+                    generated_token_ids[-1] if len(generated_token_ids) > 0 else None
+                )
                 logits = alignment_analyzer.step(logits, next_token=last_token)
 
             # Apply repetition penalty (uses Python ints, no MLX array concatenation)
-            logits = apply_repetition_penalty(logits, generated_token_ids, repetition_penalty)
+            logits = apply_repetition_penalty(
+                logits, generated_token_ids, repetition_penalty
+            )
 
             # Apply temperature
             if temperature != 1.0:
@@ -515,16 +539,16 @@ class T3MLX(nn.Module):
                 output_attentions=output_attentions,
             )
 
-            cache = output['cache']
+            cache = output["cache"]
 
             # Update alignment analyzer with new attention weights
-            if alignment_analyzer is not None and 'attentions' in output:
+            if alignment_analyzer is not None and "attentions" in output:
                 for idx, (layer_idx, head_idx) in enumerate(LLAMA_ALIGNED_HEADS):
                     alignment_analyzer.update_attention(
-                        output['attentions'],
+                        output["attentions"],
                         buffer_idx=idx,
                         layer_idx=layer_idx,
-                        head_idx=head_idx
+                        head_idx=head_idx,
                     )
 
             # More aggressive memory management to prevent spikes
@@ -556,6 +580,7 @@ class T3MLX(nn.Module):
         mx.clear_cache()
 
         import gc
+
         gc.collect()
 
         return result

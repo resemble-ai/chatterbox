@@ -1,1 +1,1 @@
-from .tokenizer import EnTokenizer, MTLTokenizer
+from .tokenizer import EnTokenizer as EnTokenizer, MTLTokenizer as MTLTokenizer

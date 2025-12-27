@@ -11,7 +11,7 @@ from .encoder_layer_mlx import TransformerEncoderLayerMLX, ConformerEncoderLayer
 from .feed_forward_mlx import PositionwiseFeedForwardMLX
 from .embedding_mlx import (
     PositionalEncodingMLX,
-    RelPositionalEncodingMLX, 
+    RelPositionalEncodingMLX,
     EspnetRelPositionalEncodingMLX,
     NoPositionalEncodingMLX,
 )
@@ -37,7 +37,7 @@ __all__ = [
     # Embeddings
     "PositionalEncodingMLX",
     "RelPositionalEncodingMLX",
-    "EspnetRelPositionalEncodingMLX", 
+    "EspnetRelPositionalEncodingMLX",
     "NoPositionalEncodingMLX",
     # Subsampling
     "LinearNoSubsamplingMLX",

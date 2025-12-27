@@ -6,7 +6,7 @@ MLX implementation of Subsampling layers for Conformer.
 Port of PyTorch implementation from s3gen/transformer/subsampling.py
 """
 
-from typing import Tuple, Union
+from typing import Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -14,7 +14,7 @@ import mlx.nn as nn
 
 class BaseSubsamplingMLX(nn.Module):
     """Base class for subsampling layers."""
-    
+
     def __init__(self):
         super().__init__()
         self.right_context = 0
@@ -73,12 +73,12 @@ class LinearNoSubsamplingMLX(BaseSubsamplingMLX):
         """
         x = self.linear(x)
         x = self.norm(x)
-        
+
         if self.pos_enc is not None:
             x, pos_emb = self.pos_enc(x, offset)
         else:
             pos_emb = mx.zeros((1, x.shape[1], x.shape[2]))
-            
+
         return x, pos_emb, x_mask
 
 
@@ -123,18 +123,18 @@ class EmbeddingNoSubsamplingMLX(BaseSubsamplingMLX):
             Output mask.
         """
         x = self.embed(x)
-        
+
         if self.pos_enc is not None:
             x, pos_emb = self.pos_enc(x, offset)
         else:
             pos_emb = mx.zeros((1, x.shape[1], x.shape[2]))
-            
+
         return x, pos_emb, x_mask
 
 
 class Conv1dSubsampling2MLX(BaseSubsamplingMLX):
     """Convolutional 1D subsampling (to 1/2 length) for MLX.
-    
+
     Designed for Whisper-style subsampling.
 
     Args:
@@ -153,12 +153,12 @@ class Conv1dSubsampling2MLX(BaseSubsamplingMLX):
     ):
         """Construct a Conv1dSubsampling2MLX object."""
         super().__init__()
-        
+
         # Note: MLX Conv1d expects (batch, seq, channels) by default
         # but we'll transpose to match PyTorch convention
         self.conv1 = nn.Conv1d(idim, odim, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(odim, odim, kernel_size=3, stride=2, padding=1)
-        
+
         self.pos_enc = pos_enc_class
         self.subsampling_rate = 2
         self.right_context = 4  # (3-1)*1 + (3-1)*1
@@ -183,19 +183,19 @@ class Conv1dSubsampling2MLX(BaseSubsamplingMLX):
         """
         # Transpose for conv: (batch, time, channels) -> (batch, channels, time)
         x = mx.transpose(x, (0, 2, 1))
-        
+
         x = nn.gelu(self.conv1(x))
         x = nn.gelu(self.conv2(x))
-        
+
         # Transpose back: (batch, channels, time) -> (batch, time, channels)
         x = mx.transpose(x, (0, 2, 1))
-        
+
         if self.pos_enc is not None:
             x, pos_emb = self.pos_enc(x, offset)
         else:
             pos_emb = mx.zeros((1, x.shape[1], x.shape[2]))
-        
+
         # Update mask for subsampling
         x_mask = x_mask[:, :, ::2]
-        
+
         return x, pos_emb, x_mask

@@ -47,7 +47,9 @@ class BASECFM(torch.nn.Module, ABC):
         """
         z = torch.randn_like(mu) * temperature
         t_span = torch.linspace(0, 1, n_timesteps + 1, device=mu.device)
-        return self.solve_euler(z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond)
+        return self.solve_euler(
+            z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond
+        )
 
     def solve_euler(self, x, t_span, mu, mask, spks, cond):
         """
@@ -109,14 +111,22 @@ class BASECFM(torch.nn.Module, ABC):
         y = (1 - (1 - self.sigma_min) * t) * z + t * x1
         u = x1 - (1 - self.sigma_min) * z
 
-        loss = F.mse_loss(self.estimator(y, mask, mu, t.squeeze(), spks), u, reduction="sum") / (
-            torch.sum(mask) * u.shape[1]
-        )
+        loss = F.mse_loss(
+            self.estimator(y, mask, mu, t.squeeze(), spks), u, reduction="sum"
+        ) / (torch.sum(mask) * u.shape[1])
         return loss, y
 
 
 class CFM(BASECFM):
-    def __init__(self, in_channels, out_channel, cfm_params, decoder_params, n_spks=1, spk_emb_dim=64):
+    def __init__(
+        self,
+        in_channels,
+        out_channel,
+        cfm_params,
+        decoder_params,
+        n_spks=1,
+        spk_emb_dim=64,
+    ):
         super().__init__(
             n_feats=in_channels,
             cfm_params=cfm_params,
@@ -126,4 +136,6 @@ class CFM(BASECFM):
 
         in_channels = in_channels + (spk_emb_dim if n_spks > 1 else 0)
         # Just change the architecture of the estimator here
-        self.estimator = Decoder(in_channels=in_channels, out_channels=out_channel, **decoder_params)
+        self.estimator = Decoder(
+            in_channels=in_channels, out_channels=out_channel, **decoder_params
+        )

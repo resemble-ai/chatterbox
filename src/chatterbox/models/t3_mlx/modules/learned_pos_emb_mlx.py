@@ -31,9 +31,7 @@ class LearnedPositionEmbeddingsMLX(nn.Module):
         # Initialize weights with normal distribution
         # MLX initializes embeddings with uniform by default, so we override
         self.emb.weight = mx.random.normal(
-            shape=(seq_len, model_dim),
-            loc=0.0,
-            scale=init
+            shape=(seq_len, model_dim), loc=0.0, scale=init
         )
 
     def __call__(self, x: mx.array) -> mx.array:

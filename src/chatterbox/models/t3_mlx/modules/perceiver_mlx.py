@@ -11,15 +11,23 @@ class AttentionQKVMLX(nn.Module):
     MLX implementation of multi-head attention with separate Q, K, V projections.
     """
 
-    def __init__(self, n_heads: int, head_dim: int, dropout_rate: float = 0.1, scale: float = None):
+    def __init__(
+        self,
+        n_heads: int,
+        head_dim: int,
+        dropout_rate: float = 0.1,
+        scale: float = None,
+    ):
         super().__init__()
         self.n_heads = n_heads
         self.head_dim = head_dim
-        self.scale = scale if scale is not None else head_dim ** -0.5
+        self.scale = scale if scale is not None else head_dim**-0.5
         self.dropout_rate = dropout_rate
         self.dropout = nn.Dropout(dropout_rate)
 
-    def __call__(self, q: mx.array, k: mx.array, v: mx.array, mask: mx.array = None) -> mx.array:
+    def __call__(
+        self, q: mx.array, k: mx.array, v: mx.array, mask: mx.array = None
+    ) -> mx.array:
         """
         Forward pass for attention.
 
@@ -34,7 +42,9 @@ class AttentionQKVMLX(nn.Module):
         out = self.scaled_dot_product_attention(q, k, v, mask=mask)
         return self.combine_heads(out)
 
-    def scaled_dot_product_attention(self, q: mx.array, k: mx.array, v: mx.array, mask: mx.array = None) -> mx.array:
+    def scaled_dot_product_attention(
+        self, q: mx.array, k: mx.array, v: mx.array, mask: mx.array = None
+    ) -> mx.array:
         """
         Compute scaled dot-product attention.
 
@@ -100,7 +110,7 @@ class AttentionBlock2MLX(nn.Module):
         num_heads: int = 1,
         num_head_channels: int = -1,
         dropout_rate: float = 0.2,
-        scale: float = None
+        scale: float = None,
     ):
         super().__init__()
         self.channels = channels
@@ -108,8 +118,9 @@ class AttentionBlock2MLX(nn.Module):
         if num_head_channels == -1:
             self.num_heads = num_heads
         else:
-            assert channels % num_head_channels == 0, \
-                f"channels {channels} is not divisible by num_head_channels {num_head_channels}"
+            assert (
+                channels % num_head_channels == 0
+            ), f"channels {channels} is not divisible by num_head_channels {num_head_channels}"
             self.num_heads = channels // num_head_channels
 
         self.norm = nn.LayerNorm(channels)
@@ -123,7 +134,7 @@ class AttentionBlock2MLX(nn.Module):
             self.num_heads,
             channels // self.num_heads,
             dropout_rate=dropout_rate,
-            scale=scale
+            scale=scale,
         )
 
         self.proj_out = nn.Linear(channels, channels)
@@ -171,7 +182,7 @@ class PerceiverMLX(nn.Module):
         pre_attention_query_token: int = 32,
         pre_attention_query_size: int = 1024,
         embedding_dim: int = 1024,
-        num_attn_heads: int = 4
+        num_attn_heads: int = 4,
     ):
         """
         Initialize the Perceiver module.
@@ -185,14 +196,16 @@ class PerceiverMLX(nn.Module):
         super().__init__()
 
         # Calculate variance for uniform initialization
-        query_variance = math.sqrt(3.0) * math.sqrt(2.0 / (pre_attention_query_token + pre_attention_query_token))
+        query_variance = math.sqrt(3.0) * math.sqrt(
+            2.0 / (pre_attention_query_token + pre_attention_query_token)
+        )
 
         # Initialize learnable query tokens as a proper parameter
         # Store directly on self so MLX load_weights can find it
         self.pre_attention_query = mx.random.uniform(
             low=-query_variance,
             high=query_variance,
-            shape=(1, pre_attention_query_token, pre_attention_query_size)
+            shape=(1, pre_attention_query_token, pre_attention_query_size),
         )
 
         # Attention block
@@ -213,7 +226,11 @@ class PerceiverMLX(nn.Module):
         # Expand query to match batch size
         query_ = mx.broadcast_to(
             self.pre_attention_query,
-            (batch_size, self.pre_attention_query.shape[1], self.pre_attention_query.shape[2])
+            (
+                batch_size,
+                self.pre_attention_query.shape[1],
+                self.pre_attention_query.shape[2],
+            ),
         )
 
         # Cross-attention: query attends to input

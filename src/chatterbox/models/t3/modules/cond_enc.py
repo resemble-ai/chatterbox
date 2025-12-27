@@ -63,11 +63,16 @@ class T3CondEnc(nn.Module):
 
     def forward(self, cond: T3Cond):
         # Validate
-        assert (cond.cond_prompt_speech_tokens is None) == (cond.cond_prompt_speech_emb is None), \
-            "no embeddings for cond_prompt_speech_tokens"
+        assert (cond.cond_prompt_speech_tokens is None) == (
+            cond.cond_prompt_speech_emb is None
+        ), "no embeddings for cond_prompt_speech_tokens"
 
         # Speaker embedding projection
-        cond_spkr = self.spkr_enc(cond.speaker_emb.view(-1, self.hp.speaker_embed_size))[:, None]  # (B, 1, dim)
+        cond_spkr = self.spkr_enc(
+            cond.speaker_emb.view(-1, self.hp.speaker_embed_size)
+        )[
+            :, None
+        ]  # (B, 1, dim)
         empty = torch.zeros_like(cond_spkr[:, :0])  # (B, 0, dim)
 
         # TODO CLAP
@@ -88,10 +93,13 @@ class T3CondEnc(nn.Module):
             cond_emotion_adv = self.emotion_adv_fc(cond.emotion_adv.view(-1, 1, 1))
 
         # Concat and return
-        cond_embeds = torch.cat((
-            cond_spkr,
-            cond_clap,
-            cond_prompt_speech_emb,
-            cond_emotion_adv,
-        ), dim=1)
+        cond_embeds = torch.cat(
+            (
+                cond_spkr,
+                cond_clap,
+                cond_prompt_speech_emb,
+                cond_emotion_adv,
+            ),
+            dim=1,
+        )
         return cond_embeds

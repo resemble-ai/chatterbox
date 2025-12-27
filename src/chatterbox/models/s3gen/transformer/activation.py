@@ -32,7 +32,7 @@ class Swish(torch.nn.Module):
 # Implementation adapted from https://github.com/EdwardDixon/snake under the MIT license.
 #   LICENSE is in incl_licenses directory.
 class Snake(nn.Module):
-    '''
+    """
     Implementation of a sine-based periodic activation function
     Shape:
         - Input: (B, C, T)
@@ -46,16 +46,19 @@ class Snake(nn.Module):
         >>> a1 = snake(256)
         >>> x = torch.randn(256)
         >>> x = a1(x)
-    '''
-    def __init__(self, in_features, alpha=1.0, alpha_trainable=True, alpha_logscale=False):
-        '''
+    """
+
+    def __init__(
+        self, in_features, alpha=1.0, alpha_trainable=True, alpha_logscale=False
+    ):
+        """
         Initialization.
         INPUT:
             - in_features: shape of the input
             - alpha: trainable parameter
             alpha is initialized to 1 by default, higher values = higher-frequency.
             alpha will be trained along with the rest of your model.
-        '''
+        """
         super(Snake, self).__init__()
         self.in_features = in_features
 
@@ -71,11 +74,11 @@ class Snake(nn.Module):
         self.no_div_by_zero = 0.000000001
 
     def forward(self, x):
-        '''
+        """
         Forward pass of the function.
         Applies the function to the input elementwise.
         Snake ∶= x + 1/a * sin^2 (xa)
-        '''
+        """
         alpha = self.alpha.unsqueeze(0).unsqueeze(-1)  # line up with x to [B, C, T]
         if self.alpha_logscale:
             alpha = torch.exp(alpha)

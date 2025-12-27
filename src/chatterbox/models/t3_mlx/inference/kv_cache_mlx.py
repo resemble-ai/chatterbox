@@ -22,7 +22,7 @@ class KVCacheMLX:
     - Pre-allocated buffers to avoid repeated concatenation (major memory optimization)
     - Memory-efficient storage with configurable dtype
     - Compatible with T3MLX generation pipeline
-    
+
     Memory Optimization:
     - Without pre-allocation: Each step creates new arrays via concatenation,
       keeping old arrays alive until GC runs. For 500 steps, this means
@@ -32,8 +32,8 @@ class KVCacheMLX:
     """
 
     def __init__(
-        self, 
-        num_layers: int = 0, 
+        self,
+        num_layers: int = 0,
         dtype: mx.Dtype = mx.float16,
         max_seq_len: int = 0,
         batch_size: int = 0,
@@ -54,36 +54,38 @@ class KVCacheMLX:
         self.dtype = dtype
         self.num_layers = num_layers
         self.cache: List[Optional[Tuple[mx.array, mx.array]]] = [None] * num_layers
-        
+
         # Pre-allocation settings
         self.max_seq_len = max_seq_len
         self.batch_size = batch_size
         self.num_kv_heads = num_kv_heads
         self.head_dim = head_dim
-        self.use_preallocated = max_seq_len > 0 and batch_size > 0 and num_kv_heads > 0 and head_dim > 0
-        
+        self.use_preallocated = (
+            max_seq_len > 0 and batch_size > 0 and num_kv_heads > 0 and head_dim > 0
+        )
+
         # Track current position in pre-allocated buffer
         self.current_pos: List[int] = [0] * num_layers
-        
+
         # Pre-allocate buffers if dimensions provided
         if self.use_preallocated:
             self._preallocate_buffers()
-    
+
     def _preallocate_buffers(self):
         """Pre-allocate KV cache buffers for all layers."""
         for i in range(self.num_layers):
             # Shape: (batch_size, seq_len, num_kv_heads, head_dim)
             key_buffer = mx.zeros(
                 (self.batch_size, self.max_seq_len, self.num_kv_heads, self.head_dim),
-                dtype=self.dtype
+                dtype=self.dtype,
             )
             value_buffer = mx.zeros(
                 (self.batch_size, self.max_seq_len, self.num_kv_heads, self.head_dim),
-                dtype=self.dtype
+                dtype=self.dtype,
             )
             self.cache[i] = (key_buffer, value_buffer)
             self.current_pos[i] = 0
-        
+
         # Force evaluation to actually allocate the memory
         mx.eval([self.cache[i][0] for i in range(self.num_layers)])
 
@@ -104,18 +106,18 @@ class KVCacheMLX:
         # Convert to specified dtype for memory optimization
         key = key.astype(self.dtype)
         value = value.astype(self.dtype)
-        
+
         seq_len = key.shape[1]
 
         if self.use_preallocated and self.cache[layer_idx] is not None:
             # Use pre-allocated buffer with slice update
             pos = self.current_pos[layer_idx]
             end_pos = pos + seq_len
-            
+
             if end_pos <= self.max_seq_len:
                 # Update in place using slice assignment
                 cached_key, cached_value = self.cache[layer_idx]
-                
+
                 # MLX doesn't support true in-place slice assignment like NumPy,
                 # but we can use mx.where or concatenate with existing parts
                 # For now, use the view-based approach
@@ -127,7 +129,7 @@ class KVCacheMLX:
                     cached_key, cached_value = self.cache[layer_idx]
                     self.cache[layer_idx] = (
                         mx.concatenate([cached_key, key], axis=1),
-                        mx.concatenate([cached_value, value], axis=1)
+                        mx.concatenate([cached_value, value], axis=1),
                     )
                 self.current_pos[layer_idx] = end_pos
             else:
@@ -138,7 +140,7 @@ class KVCacheMLX:
                     cached_key, cached_value = self.cache[layer_idx]
                     self.cache[layer_idx] = (
                         mx.concatenate([cached_key, key], axis=1),
-                        mx.concatenate([cached_value, value], axis=1)
+                        mx.concatenate([cached_value, value], axis=1),
                     )
                 self.current_pos[layer_idx] = self.cache[layer_idx][0].shape[1]
         else:
@@ -152,7 +154,7 @@ class KVCacheMLX:
                 cached_key, cached_value = self.cache[layer_idx]
                 self.cache[layer_idx] = (
                     mx.concatenate([cached_key, key], axis=1),
-                    mx.concatenate([cached_value, value], axis=1)
+                    mx.concatenate([cached_value, value], axis=1),
                 )
                 self.current_pos[layer_idx] = self.cache[layer_idx][0].shape[1]
 
@@ -182,7 +184,7 @@ class KVCacheMLX:
     def clear(self):
         """
         Clear all cached values.
-        
+
         This explicitly deletes cache arrays to help with memory pressure.
         """
         # Explicitly delete old arrays before resetting
@@ -190,14 +192,18 @@ class KVCacheMLX:
             if self.cache[i] is not None:
                 self.cache[i] = None
         self.cache = [None] * len(self.cache)
-        self.current_pos = [0] * len(self.current_pos) if hasattr(self, 'current_pos') else [0] * len(self.cache)
-    
+        self.current_pos = (
+            [0] * len(self.current_pos)
+            if hasattr(self, "current_pos")
+            else [0] * len(self.cache)
+        )
+
     def trim_to_length(self, max_length: int):
         """
         Trim cache to a maximum sequence length.
-        
+
         Useful for managing memory when cache grows too large.
-        
+
         Args:
             max_length: Maximum sequence length to keep (keeps most recent tokens)
         """
@@ -208,7 +214,7 @@ class KVCacheMLX:
                     # Keep most recent tokens
                     self.cache[i] = (
                         key[:, -max_length:, :, :],
-                        value[:, -max_length:, :, :]
+                        value[:, -max_length:, :, :],
                     )
                     self.current_pos[i] = max_length
 

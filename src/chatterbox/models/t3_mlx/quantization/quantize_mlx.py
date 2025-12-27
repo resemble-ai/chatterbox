@@ -14,7 +14,6 @@ This module uses MLX's built-in quantization which provides:
 
 import logging
 from typing import Optional
-import mlx.core as mx
 import mlx.nn as nn
 from mlx.nn.layers.quantized import quantize as mlx_quantize
 
@@ -52,7 +51,7 @@ def quantize_model(
 
     # Add incompatible layers to exclusion list
     # emotion_adv_fc has shape (1024, 1) which isn't divisible by 64
-    exclude_layers = list(exclude_layers) + ['emotion_adv_fc']
+    exclude_layers = list(exclude_layers) + ["emotion_adv_fc"]
 
     logger.info(f"Quantizing model to {bits}-bit with group_size={group_size}")
 
@@ -66,17 +65,14 @@ def quantize_model(
                 return False
 
         # Only quantize modules that have the to_quantized method (Linear, Embedding)
-        if not hasattr(module, 'to_quantized'):
+        if not hasattr(module, "to_quantized"):
             return False
 
         return True
 
     # Use MLX's native quantization with optimized kernels
     mlx_quantize(
-        model,
-        group_size=group_size,
-        bits=bits,
-        class_predicate=should_quantize
+        model, group_size=group_size, bits=bits, class_predicate=should_quantize
     )
 
     logger.info("Model quantization complete")
@@ -121,18 +117,15 @@ class QuantizedT3MLX:
         # Exclude embedding and output layers from quantization
         # These are sensitive and better kept in full precision for quality
         exclude_layers = [
-            'text_emb',      # Text token embeddings
-            'speech_emb',    # Speech token embeddings
-            'text_head',     # Text output projection
-            'speech_head',   # Speech output projection
+            "text_emb",  # Text token embeddings
+            "speech_emb",  # Speech token embeddings
+            "text_head",  # Text output projection
+            "speech_head",  # Speech output projection
         ]
 
         # Quantize in-place using MLX's native quantization
         self.model = quantize_model(
-            model,
-            bits=bits,
-            group_size=group_size,
-            exclude_layers=exclude_layers
+            model, bits=bits, group_size=group_size, exclude_layers=exclude_layers
         )
 
     def __call__(self, *args, **kwargs):
@@ -196,6 +189,7 @@ def benchmark_quantization(model, bits_list=[4, 8]) -> dict:
 
         # Create a copy for quantization
         import copy
+
         model_copy = copy.deepcopy(model)
 
         # Quantize
@@ -207,8 +201,8 @@ def benchmark_quantization(model, bits_list=[4, 8]) -> dict:
         size_reduction = (1 - bits / 32) * 100
 
         results[f"{bits}-bit"] = {
-            'quantization_time': quant_time,
-            'size_reduction': size_reduction,
+            "quantization_time": quant_time,
+            "size_reduction": size_reduction,
         }
 
         logger.info(f"  Quantization time: {quant_time:.2f}s")

@@ -8,33 +8,6 @@
 
 ---
 
-## 🙏 Acknowledgements
-
-This project is built on top of the excellent **[Chatterbox TTS](https://github.com/resemble-ai/chatterbox)** by [Resemble AI](https://resemble.ai). I'm deeply grateful for their work in creating and open-sourcing a production-grade, multilingual text-to-speech system under the MIT license.
-
-**This fork focuses specifically on MLX optimizations for Apple Silicon.** If you're looking for the original project with CUDA support and the full feature set, please visit the [official Resemble AI repository](https://github.com/resemble-ai/chatterbox).
-
----
-
-## What's Different in This Fork?
-
-This package provides **native MLX acceleration** for Apple Silicon Macs, achieving significant performance improvements:
-
-| Text Length       | CPU Baseline | MLX Optimized | Speedup         |
-| ----------------- | ------------ | ------------- | --------------- |
-| Short (5 words)   | 8.91s        | 3.70s         | **2.4x faster** |
-| Medium (31 words) | 57.51s       | 24.40s        | **2.4x faster** |
-| Long (94 words)   | 137.92s      | 62.66s        | **2.2x faster** |
-
-### Key Optimizations
-
-- ⚡ **MLX-Native T3 Model**: The 520M parameter Llama 3 backbone runs entirely on MLX
-- 🧠 **Float16 KV Cache**: Up to 5.8 GB memory savings with 32% faster generation
-- 🔄 **Hybrid Architecture**: Combines MLX speed with PyTorch quality controls
-- 📚 **Long-Form Generation**: Intelligent chunking with crossfade for extended audio
-
----
-
 ## Installation
 
 ```bash
@@ -46,6 +19,41 @@ pip install chatterbox-mlx
 - macOS with Apple Silicon (M1/M2/M3/M4)
 - Python 3.11+
 - ~4GB disk space for model weights
+
+---
+
+## CLI Usage
+
+Generate speech directly from the terminal:
+
+```bash
+    # Generate English speech (auto-generated filename):
+    chatterbox "Artificial intelligence has made remarkable strides in recent years, particularly in the field of natural language processing."
+
+    # Generate Spanish speech:
+    chatterbox "La inteligencia artificial ha logrado avances notables en los últimos años." --lang es
+
+    # Use the --voice flag to provide a reference audio file for voice cloning:
+    chatterbox "Artificial intelligence has made remarkable strides in recent years, particularly in the field of natural language processing." --voice speaker.wav
+
+    # Run multilingual benchmark (saves to benchmark_output/)
+    chatterbox --benchmark --languages en es
+```
+
+### CLI Options
+
+| Option            | Description                                  | Default           |
+| ----------------- | -------------------------------------------- | ----------------- |
+| `-o, --output`    | Output WAV file path                         | Auto-generated    |
+| `-l, --lang`      | Language code (en, es, fr, de, ja, zh, etc.) | `en`              |
+| `-v, --voice`     | Reference audio for voice cloning            | None              |
+| `--exaggeration`  | Emotion intensity (0.0-1.0)                  | `0.5`             |
+| `--cfg`           | Classifier-free guidance weight              | `0.5`             |
+| `--backend`       | Backend: hybrid-mlx, mlx, pytorch            | `hybrid-mlx`      |
+| `--benchmark`     | Run multilingual benchmark                   | False             |
+| `--languages`     | Languages to benchmark                       | en es fr de ja zh |
+| `--no-save-audio` | Don't save benchmark audio files             | False (saves)     |
+| `-q, --quiet`     | Suppress progress messages                   | False             |
 
 ---
 
@@ -91,6 +99,31 @@ wav = model.generate_long(
 )
 ta.save("long_output.wav", wav, model.sr)
 ```
+
+## 🙏 Acknowledgements
+
+This project is built on top of the excellent **[Chatterbox TTS](https://github.com/resemble-ai/chatterbox)** by [Resemble AI](https://resemble.ai). I'm deeply grateful for their work in creating and open-sourcing a production-grade, multilingual text-to-speech system under the MIT license.
+
+**This fork focuses specifically on MLX optimizations for Apple Silicon.** If you're looking for the original project with CUDA support and the full feature set, please visit the [official Resemble AI repository](https://github.com/resemble-ai/chatterbox).
+
+---
+
+## What's Different in This Fork?
+
+This package provides **native MLX acceleration** for Apple Silicon Macs, achieving significant performance improvements:
+
+| Text Length       | CPU Baseline | MLX Optimized | Speedup         |
+| ----------------- | ------------ | ------------- | --------------- |
+| Short (5 words)   | 8.91s        | 3.70s         | **2.4x faster** |
+| Medium (31 words) | 57.51s       | 24.40s        | **2.4x faster** |
+| Long (94 words)   | 137.92s      | 62.66s        | **2.2x faster** |
+
+### Key Optimizations
+
+- **MLX-Native T3 Model**: The 520M parameter Llama 3 backbone runs entirely on MLX
+- **Float16 KV Cache**: Up to 5.8 GB memory savings with 32% faster generation
+- **Hybrid Architecture**: Combines MLX speed with PyTorch quality controls
+- **Long-Form Generation**: Intelligent chunking with crossfade for extended audio
 
 ---
 

@@ -15,7 +15,7 @@ def make_pad_mask(lengths: mx.array, max_len: int = 0) -> mx.array:
     Args:
         lengths (mx.array): Batch of lengths (B,).
         max_len (int): Maximum length. If 0, use max of lengths.
-        
+
     Returns:
         mx.array: Mask tensor (B, max_len) where True indicates padding.
 
@@ -37,10 +37,10 @@ def make_pad_mask(lengths: mx.array, max_len: int = 0) -> mx.array:
 
 def subsequent_mask(size: int) -> mx.array:
     """Create a causal (lower triangular) mask.
-    
+
     Args:
         size: Size of the square mask.
-        
+
     Returns:
         Lower triangular mask of shape (size, size) where True means attend.
     """
@@ -56,7 +56,7 @@ def subsequent_chunk_mask(
     num_left_chunks: int = -1,
 ) -> mx.array:
     """Create mask for subsequent steps (size, size) with chunk size.
-    
+
     This is for streaming encoder.
 
     Args:
@@ -122,32 +122,34 @@ def add_optional_chunk_mask(
             # For inference we use full context
             chunk_size = max_len
             num_left_chunks = -1
-            
+
         chunk_masks = subsequent_chunk_mask(xs.shape[1], chunk_size, num_left_chunks)
         chunk_masks = mx.expand_dims(chunk_masks, axis=0)  # (1, L, L)
         chunk_masks = masks & chunk_masks  # (B, L, L)
     elif static_chunk_size > 0:
         num_left_chunks = num_decoding_left_chunks
-        chunk_masks = subsequent_chunk_mask(xs.shape[1], static_chunk_size, num_left_chunks)
+        chunk_masks = subsequent_chunk_mask(
+            xs.shape[1], static_chunk_size, num_left_chunks
+        )
         chunk_masks = mx.expand_dims(chunk_masks, axis=0)  # (1, L, L)
         chunk_masks = masks & chunk_masks  # (B, L, L)
     else:
         chunk_masks = masks
-        
+
     return chunk_masks
 
 
 def mask_to_bias(mask: mx.array, dtype: mx.Dtype) -> mx.array:
     """Convert boolean mask to attention bias.
-    
+
     Args:
         mask: Boolean mask where True means valid (attend)
         dtype: Output dtype
-        
+
     Returns:
         Attention bias where invalid positions have large negative values
     """
     mask = mask.astype(dtype)
     # attention mask bias: 0 for valid, large negative for invalid
-    mask = (1.0 - mask) * -1.0e+10
+    mask = (1.0 - mask) * -1.0e10
     return mask

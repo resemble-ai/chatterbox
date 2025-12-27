@@ -90,7 +90,9 @@ class TransformerEncoderLayer(nn.Module):
         residual = x
         if self.normalize_before:
             x = self.norm1(x)
-        x_att, new_att_cache = self.self_attn(x, x, x, mask, pos_emb=pos_emb, cache=att_cache)
+        x_att, new_att_cache = self.self_attn(
+            x, x, x, mask, pos_emb=pos_emb, cache=att_cache
+        )
         x = residual + self.dropout(x_att)
         if not self.normalize_before:
             x = self.norm1(x)
@@ -152,7 +154,8 @@ class ConformerEncoderLayer(nn.Module):
         if self.conv_module is not None:
             self.norm_conv = nn.LayerNorm(size, eps=1e-12)  # for the CNN module
             self.norm_final = nn.LayerNorm(
-                size, eps=1e-12)  # for the final output of the block
+                size, eps=1e-12
+            )  # for the final output of the block
         self.dropout = nn.Dropout(dropout_rate)
         self.size = size
         self.normalize_before = normalize_before
@@ -193,8 +196,7 @@ class ConformerEncoderLayer(nn.Module):
             residual = x
             if self.normalize_before:
                 x = self.norm_ff_macaron(x)
-            x = residual + self.ff_scale * self.dropout(
-                self.feed_forward_macaron(x))
+            x = residual + self.ff_scale * self.dropout(self.feed_forward_macaron(x))
             if not self.normalize_before:
                 x = self.norm_ff_macaron(x)
 
@@ -202,8 +204,7 @@ class ConformerEncoderLayer(nn.Module):
         residual = x
         if self.normalize_before:
             x = self.norm_mha(x)
-        x_att, new_att_cache = self.self_attn(x, x, x, mask, pos_emb,
-                                              att_cache)
+        x_att, new_att_cache = self.self_attn(x, x, x, mask, pos_emb, att_cache)
         x = residual + self.dropout(x_att)
         if not self.normalize_before:
             x = self.norm_mha(x)

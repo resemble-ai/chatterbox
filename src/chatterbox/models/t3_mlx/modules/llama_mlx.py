@@ -10,12 +10,12 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Dict
 import mlx.core as mx
 import mlx.nn as nn
-import math
 
 
 @dataclass
 class LlamaConfigMLX:
     """MLX version of Llama configuration."""
+
     vocab_size: int = 8
     hidden_size: int = 1024
     intermediate_size: int = 4096
@@ -35,10 +35,19 @@ class LlamaConfigMLX:
         """Create config from dictionary."""
         # Extract only the fields we need
         relevant_fields = {
-            'vocab_size', 'hidden_size', 'intermediate_size', 'num_hidden_layers',
-            'num_attention_heads', 'num_key_value_heads', 'head_dim',
-            'max_position_embeddings', 'rms_norm_eps', 'rope_theta',
-            'attention_bias', 'mlp_bias', 'rope_scaling'
+            "vocab_size",
+            "hidden_size",
+            "intermediate_size",
+            "num_hidden_layers",
+            "num_attention_heads",
+            "num_key_value_heads",
+            "head_dim",
+            "max_position_embeddings",
+            "rms_norm_eps",
+            "rope_theta",
+            "attention_bias",
+            "mlp_bias",
+            "rope_scaling",
         }
         filtered = {k: v for k, v in config_dict.items() if k in relevant_fields}
         return cls(**filtered)
@@ -59,8 +68,13 @@ class RMSNorm(nn.Module):
 class RoPE(nn.Module):
     """Rotary Position Embedding with Llama3-style scaling support."""
 
-    def __init__(self, dims: int, max_position_embeddings: int = 131072, base: float = 500000.0,
-                 rope_scaling: Optional[Dict] = None):
+    def __init__(
+        self,
+        dims: int,
+        max_position_embeddings: int = 131072,
+        base: float = 500000.0,
+        rope_scaling: Optional[Dict] = None,
+    ):
         super().__init__()
         self.dims = dims
         self.max_position_embeddings = max_position_embeddings
@@ -69,17 +83,17 @@ class RoPE(nn.Module):
 
         # Compute base inverse frequencies
         inv_freq = 1.0 / (base ** (mx.arange(0, dims, 2, dtype=mx.float32) / dims))
-        
+
         # Apply Llama3-style scaling if configured
-        if rope_scaling is not None and rope_scaling.get('rope_type') == 'llama3':
-            factor = rope_scaling.get('factor', 8.0)
-            low_freq_factor = rope_scaling.get('low_freq_factor', 1.0)
-            high_freq_factor = rope_scaling.get('high_freq_factor', 4.0)
-            old_context_len = rope_scaling.get('original_max_position_embeddings', 8192)
-            
+        if rope_scaling is not None and rope_scaling.get("rope_type") == "llama3":
+            factor = rope_scaling.get("factor", 8.0)
+            low_freq_factor = rope_scaling.get("low_freq_factor", 1.0)
+            high_freq_factor = rope_scaling.get("high_freq_factor", 4.0)
+            old_context_len = rope_scaling.get("original_max_position_embeddings", 8192)
+
             low_freq_wavelen = old_context_len / low_freq_factor
             high_freq_wavelen = old_context_len / high_freq_factor
-            
+
             # Apply frequency-dependent scaling to get scaled inv_freq
             inv_freq_np = inv_freq.tolist()
             new_inv_freqs = []
@@ -93,19 +107,25 @@ class RoPE(nn.Module):
                     new_inv_freqs.append(freq / factor)
                 else:
                     # Mid frequency: linear interpolation
-                    smooth = (old_context_len / wavelen - low_freq_factor) / (high_freq_factor - low_freq_factor)
+                    smooth = (old_context_len / wavelen - low_freq_factor) / (
+                        high_freq_factor - low_freq_factor
+                    )
                     new_inv_freqs.append((1 - smooth) * freq / factor + smooth * freq)
-            
+
             # CRITICAL: mx.fast.rope 'freqs' param expects 1/inv_freq (regular frequencies),
             # not inv_freq (inverse frequencies). It internally computes inv_freq = 1/freqs.
             scaled_inv_freq = mx.array(new_inv_freqs, dtype=mx.float32)
-            self._freqs = 1.0 / scaled_inv_freq  # Convert inv_freq to freqs for mx.fast.rope
+            self._freqs = (
+                1.0 / scaled_inv_freq
+            )  # Convert inv_freq to freqs for mx.fast.rope
             self._use_custom_freqs = True
         else:
             self._freqs = None
             self._use_custom_freqs = False
 
-    def __call__(self, q: mx.array, k: mx.array, offset: int = 0) -> Tuple[mx.array, mx.array]:
+    def __call__(
+        self, q: mx.array, k: mx.array, offset: int = 0
+    ) -> Tuple[mx.array, mx.array]:
         """
         Apply rotary position embeddings.
 
@@ -120,14 +140,44 @@ class RoPE(nn.Module):
         if self._use_custom_freqs:
             # Use precomputed Llama3-scaled frequencies
             return (
-                mx.fast.rope(q, self.dims, traditional=False, base=None, scale=1.0, offset=offset, freqs=self._freqs),
-                mx.fast.rope(k, self.dims, traditional=False, base=None, scale=1.0, offset=offset, freqs=self._freqs)
+                mx.fast.rope(
+                    q,
+                    self.dims,
+                    traditional=False,
+                    base=None,
+                    scale=1.0,
+                    offset=offset,
+                    freqs=self._freqs,
+                ),
+                mx.fast.rope(
+                    k,
+                    self.dims,
+                    traditional=False,
+                    base=None,
+                    scale=1.0,
+                    offset=offset,
+                    freqs=self._freqs,
+                ),
             )
         else:
             # Standard RoPE
             return (
-                mx.fast.rope(q, self.dims, traditional=False, base=self.base, scale=1.0, offset=offset),
-                mx.fast.rope(k, self.dims, traditional=False, base=self.base, scale=1.0, offset=offset)
+                mx.fast.rope(
+                    q,
+                    self.dims,
+                    traditional=False,
+                    base=self.base,
+                    scale=1.0,
+                    offset=offset,
+                ),
+                mx.fast.rope(
+                    k,
+                    self.dims,
+                    traditional=False,
+                    base=self.base,
+                    scale=1.0,
+                    offset=offset,
+                ),
             )
 
 
@@ -140,19 +190,31 @@ class Attention(nn.Module):
         self.num_heads = config.num_attention_heads
         self.num_kv_heads = config.num_key_value_heads
         self.head_dim = config.head_dim
-        self.scale = self.head_dim ** -0.5
+        self.scale = self.head_dim**-0.5
 
         # QKV projections
-        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias)
-        self.k_proj = nn.Linear(self.hidden_size, self.num_kv_heads * self.head_dim, bias=config.attention_bias)
-        self.v_proj = nn.Linear(self.hidden_size, self.num_kv_heads * self.head_dim, bias=config.attention_bias)
-        self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias)
+        self.q_proj = nn.Linear(
+            self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias
+        )
+        self.k_proj = nn.Linear(
+            self.hidden_size,
+            self.num_kv_heads * self.head_dim,
+            bias=config.attention_bias,
+        )
+        self.v_proj = nn.Linear(
+            self.hidden_size,
+            self.num_kv_heads * self.head_dim,
+            bias=config.attention_bias,
+        )
+        self.o_proj = nn.Linear(
+            self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias
+        )
 
         self.rope = RoPE(
             self.head_dim,
             max_position_embeddings=config.max_position_embeddings,
             base=config.rope_theta,
-            rope_scaling=config.rope_scaling
+            rope_scaling=config.rope_scaling,
         )
 
     def __call__(
@@ -203,7 +265,9 @@ class Attention(nn.Module):
         # Handle KV cache (cache is already in transposed format)
         if cache is not None:
             k_cache, v_cache = cache
-            k = mx.concatenate([k_cache, k], axis=2)  # Concatenate on sequence dim (axis=2)
+            k = mx.concatenate(
+                [k_cache, k], axis=2
+            )  # Concatenate on sequence dim (axis=2)
             v = mx.concatenate([v_cache, v], axis=2)
 
         # Grouped-query attention: repeat K, V if needed
@@ -252,9 +316,15 @@ class MLP(nn.Module):
 
     def __init__(self, config: LlamaConfigMLX):
         super().__init__()
-        self.gate_proj = nn.Linear(config.hidden_size, config.intermediate_size, bias=config.mlp_bias)
-        self.up_proj = nn.Linear(config.hidden_size, config.intermediate_size, bias=config.mlp_bias)
-        self.down_proj = nn.Linear(config.intermediate_size, config.hidden_size, bias=config.mlp_bias)
+        self.gate_proj = nn.Linear(
+            config.hidden_size, config.intermediate_size, bias=config.mlp_bias
+        )
+        self.up_proj = nn.Linear(
+            config.hidden_size, config.intermediate_size, bias=config.mlp_bias
+        )
+        self.down_proj = nn.Linear(
+            config.intermediate_size, config.hidden_size, bias=config.mlp_bias
+        )
 
     def __call__(self, x: mx.array) -> mx.array:
         # SwiGLU activation
@@ -269,7 +339,9 @@ class TransformerBlock(nn.Module):
         self.self_attn = Attention(config)
         self.mlp = MLP(config)
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
 
     def __call__(
         self,
@@ -295,7 +367,7 @@ class TransformerBlock(nn.Module):
             self.input_layernorm(x),
             mask=mask,
             cache=cache,
-            output_attentions=output_attentions
+            output_attentions=output_attentions,
         )
         h = x + r
 
@@ -314,7 +386,9 @@ class LlamaModelMLX(nn.Module):
         self.config = config
 
         # Transformer layers
-        self.layers = [TransformerBlock(config) for _ in range(config.num_hidden_layers)]
+        self.layers = [
+            TransformerBlock(config) for _ in range(config.num_hidden_layers)
+        ]
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def __call__(
@@ -354,10 +428,7 @@ class LlamaModelMLX(nn.Module):
                 all_hidden_states.append(h)
 
             h, layer_cache, attn_weights = layer(
-                h,
-                mask=mask,
-                cache=cache[i],
-                output_attentions=output_attentions
+                h, mask=mask, cache=cache[i], output_attentions=output_attentions
             )
             new_cache.append(layer_cache)
 
@@ -371,12 +442,12 @@ class LlamaModelMLX(nn.Module):
             all_hidden_states.append(h)
 
         result = {
-            'hidden_states': all_hidden_states if output_hidden_states else [h],
-            'cache': new_cache,
-            'last_hidden_state': h,
+            "hidden_states": all_hidden_states if output_hidden_states else [h],
+            "cache": new_cache,
+            "last_hidden_state": h,
         }
 
         if output_attentions:
-            result['attentions'] = all_attentions
+            result["attentions"] = all_attentions
 
         return result

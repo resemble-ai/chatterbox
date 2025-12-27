@@ -1,10 +1,9 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 import os
-import re
-import tempfile
 import numpy as np
+import logging as _mtl_logging
 
 import librosa
 import torch
@@ -37,50 +36,51 @@ from .generation_utils import (
     print_crossfading,
 )
 
+
 def get_memory_mb():
     return psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+
 
 REPO_ID = "ResembleAI/chatterbox"
 
 # Supported languages for the multilingual model
 SUPPORTED_LANGUAGES = {
-  "ar": "Arabic",
-  "da": "Danish",
-  "de": "German",
-  "el": "Greek",
-  "en": "English",
-  "es": "Spanish",
-  "fi": "Finnish",
-  "fr": "French",
-  "he": "Hebrew",
-  "hi": "Hindi",
-  "it": "Italian",
-  "ja": "Japanese",
-  "ko": "Korean",
-  "ms": "Malay",
-  "nl": "Dutch",
-  "no": "Norwegian",
-  "pl": "Polish",
-  "pt": "Portuguese",
-  "ru": "Russian",
-  "sv": "Swedish",
-  "sw": "Swahili",
-  "tr": "Turkish",
-  "zh": "Chinese",
+    "ar": "Arabic",
+    "da": "Danish",
+    "de": "German",
+    "el": "Greek",
+    "en": "English",
+    "es": "Spanish",
+    "fi": "Finnish",
+    "fr": "French",
+    "he": "Hebrew",
+    "hi": "Hindi",
+    "it": "Italian",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "ms": "Malay",
+    "nl": "Dutch",
+    "no": "Norwegian",
+    "pl": "Polish",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "sv": "Swedish",
+    "sw": "Swahili",
+    "tr": "Turkish",
+    "zh": "Chinese",
 }
 
 # Module-level logger for debugging
-import logging as _mtl_logging
 _mtl_logger = _mtl_logging.getLogger(__name__)
 
 
 def punc_norm(text: str, debug: bool = True) -> str:
     """
-        Quick cleanup func for punctuation from LLMs or
-        containing chars not seen often in the dataset
+    Quick cleanup func for punctuation from LLMs or
+    containing chars not seen often in the dataset
     """
     original_text = text
-    
+
     if len(text) == 0:
         return "You need to add some text for me to talk."
 
@@ -101,8 +101,8 @@ def punc_norm(text: str, debug: bool = True) -> str:
         ("—", "-"),
         ("–", "-"),
         (" ,", ","),
-        ("“", "\""),
-        ("”", "\""),
+        ("“", '"'),
+        ("”", '"'),
         ("‘", "'"),
         ("’", "'"),
     ]
@@ -111,7 +111,7 @@ def punc_norm(text: str, debug: bool = True) -> str:
 
     # Add full stop if no ending punc
     text = text.rstrip(" ")
-    sentence_enders = {".", "!", "?", "-", ",","、","，","。","？","！"}
+    sentence_enders = {".", "!", "?", "-", ",", "、", "，", "。", "？", "！"}
     if not any(text.endswith(p) for p in sentence_enders):
         text += "."
 
@@ -140,6 +140,7 @@ class Conditionals:
         - prompt_feat_len
         - embedding
     """
+
     t3: T3Cond
     gen: dict
 
@@ -151,16 +152,13 @@ class Conditionals:
         return self
 
     def save(self, fpath: Path):
-        arg_dict = dict(
-            t3=self.t3.__dict__,
-            gen=self.gen
-        )
+        arg_dict = dict(t3=self.t3.__dict__, gen=self.gen)
         torch.save(arg_dict, fpath)
 
     @classmethod
     def load(cls, fpath, map_location="cpu"):
         kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
-        return cls(T3Cond(**kwargs['t3']), kwargs['gen'])
+        return cls(T3Cond(**kwargs["t3"]), kwargs["gen"])
 
 
 class ChatterboxMultilingualTTS:
@@ -191,12 +189,14 @@ class ChatterboxMultilingualTTS:
         return SUPPORTED_LANGUAGES.copy()
 
     @classmethod
-    def from_local(cls, ckpt_dir, device, t3_config=None) -> 'ChatterboxMultilingualTTS':
+    def from_local(
+        cls, ckpt_dir, device, t3_config=None
+    ) -> "ChatterboxMultilingualTTS":
         ckpt_dir = Path(ckpt_dir)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
         if device in ["cpu", "mps"]:
-            map_location = torch.device('cpu')
+            map_location = torch.device("cpu")
         else:
             map_location = None
 
@@ -224,43 +224,56 @@ class ChatterboxMultilingualTTS:
         print(f"before_s3_gen: {before_s3_gen:.1f}")
         s3gen = S3Gen()
         s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", weights_only=True, map_location=map_location)
+            torch.load(
+                ckpt_dir / "s3gen.pt", weights_only=True, map_location=map_location
+            )
         )
         s3gen.to(device).eval()
         before_tokenizer = get_memory_mb()
         print(f"before_tokenizer: {before_tokenizer:.1f}")
-        tokenizer = MTLTokenizer(
-            str(ckpt_dir / "grapheme_mtl_merged_expanded_v1.json")
-        )
+        tokenizer = MTLTokenizer(str(ckpt_dir / "grapheme_mtl_merged_expanded_v1.json"))
 
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
+            conds = Conditionals.load(builtin_voice, map_location=map_location).to(
+                device
+            )
         after_from_local_load = get_memory_mb()
         print(f"after_from_local_load: {after_from_local_load:.1f}")
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device: torch.device, t3_config=None) -> 'ChatterboxMultilingualTTS':
+    def from_pretrained(
+        cls, device: torch.device, t3_config=None
+    ) -> "ChatterboxMultilingualTTS":
         ckpt_dir = Path(
             snapshot_download(
                 repo_id=REPO_ID,
                 repo_type="model",
                 revision="main",
-                allow_patterns=["ve.pt", "t3_mtl23ls_v2.safetensors", "s3gen.pt", "grapheme_mtl_merged_expanded_v1.json", "conds.pt", "Cangjie5_TC.json"],
+                allow_patterns=[
+                    "ve.pt",
+                    "t3_mtl23ls_v2.safetensors",
+                    "s3gen.pt",
+                    "grapheme_mtl_merged_expanded_v1.json",
+                    "conds.pt",
+                    "Cangjie5_TC.json",
+                ],
                 token=os.getenv("HF_TOKEN"),
             )
         )
         return cls.from_local(ckpt_dir, device, t3_config=t3_config)
-    
+
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
         ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
 
-        s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
-        s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
+        s3gen_ref_wav = s3gen_ref_wav[: self.DEC_COND_LEN]
+        s3gen_ref_dict = self.s3gen.embed_ref(
+            s3gen_ref_wav, S3GEN_SR, device=self.device
+        )
 
         # Speech cond prompt tokens
         t3_cond_prompt_tokens = None
@@ -272,19 +285,24 @@ class ChatterboxMultilingualTTS:
             limited_audio = ref_16k_wav[:safe_audio_len]
 
             # Add memory cleanup before tokenization
-            import gc
             clear_device_memory()
 
             # Use smaller max_len to be extra safe
             safe_max_len = min(plen, 150)  # 150 tokens for better quality
-            t3_cond_prompt_tokens, _ = s3_tokzr.forward([limited_audio], max_len=safe_max_len)
-            t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward(
+                [limited_audio], max_len=safe_max_len
+            )
+            t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(
+                self.device
+            )
 
             # More memory cleanup after tokenization
             clear_device_memory()
 
         # Voice-encoder speaker embedding
-        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR))
+        ve_embed = torch.from_numpy(
+            self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR)
+        )
         ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
 
         t3_cond = T3Cond(
@@ -351,7 +369,7 @@ class ChatterboxMultilingualTTS:
             >>> torchaudio.save("output.wav", wav, model.sr)
         """
         import time as _time
-        
+
         # Validate language_id
         if language_id and language_id.lower() not in SUPPORTED_LANGUAGES:
             supported_langs = ", ".join(SUPPORTED_LANGUAGES.keys())
@@ -359,11 +377,13 @@ class ChatterboxMultilingualTTS:
                 f"Unsupported language_id '{language_id}'. "
                 f"Supported languages: {supported_langs}"
             )
-        
+
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
-            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+            assert (
+                self.conds is not None
+            ), "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
         # Update exaggeration if needed
         if float(exaggeration) != float(self.conds.t3.emotion_adv[0, 0, 0].item()):
@@ -376,26 +396,37 @@ class ChatterboxMultilingualTTS:
 
         # Norm text
         text = punc_norm(text)
-        
+
         # Split text into sentences for optimal generation
         if SPACY_AVAILABLE:
-            sentences = split_into_sentences(text, lang=language_id.lower() if language_id else "en")
+            sentences = split_into_sentences(
+                text, lang=language_id.lower() if language_id else "en"
+            )
         else:
             sentences = [text]
-        
+
         total_words = len(text.split())
         num_chunks = len(sentences)
-        lang_name = SUPPORTED_LANGUAGES.get(language_id.lower(), language_id) if language_id else "Unknown"
-        
+        lang_name = (
+            SUPPORTED_LANGUAGES.get(language_id.lower(), language_id)
+            if language_id
+            else "Unknown"
+        )
+
         # Print generation plan
-        print_generation_plan(total_words, sentences, "per-sentence", prefix=f"[Multilingual - {lang_name}] ")
-        
+        print_generation_plan(
+            total_words,
+            sentences,
+            "per-sentence",
+            prefix=f"[Multilingual - {lang_name}] ",
+        )
+
         # Generate audio for each sentence
         if len(sentences) == 1:
             # Single sentence - generate directly
             print_chunk_generating(0, 1, sentences[0])
             gen_start = _time.time()
-            
+
             result = self._generate_single(
                 sentences[0],
                 language_id=language_id,
@@ -406,26 +437,32 @@ class ChatterboxMultilingualTTS:
                 top_p=top_p,
                 show_progress=show_progress,  # Use caller's preference
             )
-            
+
             gen_time = _time.time() - gen_start
-            audio_duration = result.shape[-1] / self.sr if hasattr(result, 'shape') else len(result) / self.sr
+            audio_duration = (
+                result.shape[-1] / self.sr
+                if hasattr(result, "shape")
+                else len(result) / self.sr
+            )
             print_chunk_completed(0, 1, gen_time, audio_duration)
-            print_generation_complete(gen_time, audio_duration, 1, prefix=f"[Multilingual] ")
-            
+            print_generation_complete(
+                gen_time, audio_duration, 1, prefix="[Multilingual] "
+            )
+
             # Force memory cleanup after generation
             clear_device_memory()
-            
+
             return result
-        
+
         # Multiple sentences - generate each and crossfade
         audio_chunks = []
         total_start = _time.time()
-        
+
         for i, sentence in enumerate(sentences):
-            chunk_words = len(sentence.split())
+            len(sentence.split())
             print_chunk_generating(i, num_chunks, sentence)
             chunk_start = _time.time()
-            
+
             chunk_audio = self._generate_single(
                 sentence,
                 language_id=language_id,
@@ -436,28 +473,38 @@ class ChatterboxMultilingualTTS:
                 top_p=top_p,
                 show_progress=True,  # Show tqdm progress for each chunk
             )
-            
+
             chunk_time = _time.time() - chunk_start
-            chunk_duration = chunk_audio.shape[-1] / self.sr if hasattr(chunk_audio, 'shape') else len(chunk_audio) / self.sr
+            chunk_duration = (
+                chunk_audio.shape[-1] / self.sr
+                if hasattr(chunk_audio, "shape")
+                else len(chunk_audio) / self.sr
+            )
             print_chunk_completed(i, num_chunks, chunk_time, chunk_duration)
-            
+
             audio_chunks.append(chunk_audio)
-        
+
         total_time = _time.time() - total_start
-        
+
         # Crossfade chunks together
         print_crossfading(num_chunks)
         result = crossfade_chunks(audio_chunks, self.sr, 0.05)
-        
+
         # Final summary
         result_np = result.numpy() if isinstance(result, torch.Tensor) else result
         total_audio_duration = len(result_np) / self.sr
-        print_generation_complete(total_time, total_audio_duration, num_chunks, prefix=f"[Multilingual] ")
-        
+        print_generation_complete(
+            total_time, total_audio_duration, num_chunks, prefix="[Multilingual] "
+        )
+
         # Force memory cleanup after generation
         clear_device_memory()
 
-        return torch.from_numpy(result_np).unsqueeze(0) if isinstance(result_np, np.ndarray) else result.unsqueeze(0)
+        return (
+            torch.from_numpy(result_np).unsqueeze(0)
+            if isinstance(result_np, np.ndarray)
+            else result.unsqueeze(0)
+        )
 
     def _generate_single(
         self,
@@ -473,7 +520,7 @@ class ChatterboxMultilingualTTS:
     ) -> torch.Tensor:
         """
         Generate speech for a single sentence/chunk (internal method).
-        
+
         Args:
             text: Input text (single sentence/chunk)
             language_id: Language code
@@ -484,14 +531,16 @@ class ChatterboxMultilingualTTS:
             min_p: Minimum probability threshold
             top_p: Nucleus sampling threshold
             show_progress: Whether to show token-level progress bar
-        
+
         Returns:
             Generated audio waveform as torch tensor
         """
         # Normalize and tokenize
         text = punc_norm(text)
-        text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id.lower() if language_id else None).to(self.device)
-        
+        text_tokens = self.tokenizer.text_to_tokens(
+            text, language_id=language_id.lower() if language_id else None
+        ).to(self.device)
+
         # Estimate max_new_tokens if not provided
         if max_new_tokens is None:
             max_new_tokens = estimate_max_tokens(text, self.t3.hp.max_speech_tokens)
@@ -507,13 +556,15 @@ class ChatterboxMultilingualTTS:
         with torch.inference_mode():
             # Determine device type and autocast settings
             if torch.cuda.is_available():
-                device_type = 'cuda'
+                device_type = "cuda"
                 autocast_enabled = True
             else:
-                device_type = 'cpu'
+                device_type = "cpu"
                 autocast_enabled = False
-            
-            with torch.autocast(device_type=device_type, dtype=torch.float16, enabled=autocast_enabled):
+
+            with torch.autocast(
+                device_type=device_type, dtype=torch.float16, enabled=autocast_enabled
+            ):
                 speech_tokens = self.t3.inference(
                     t3_cond=self.conds.t3,
                     text_tokens=text_tokens,
@@ -536,7 +587,7 @@ class ChatterboxMultilingualTTS:
                 if sources is not None:
                     del sources
                 wav = wav.squeeze(0).detach().cpu().numpy()
-        
+
         return torch.from_numpy(wav).unsqueeze(0)
 
     def _split_text_intelligently(self, text, language_id, target_words_per_chunk=50):
@@ -544,7 +595,11 @@ class ChatterboxMultilingualTTS:
         Split text at sentence/phrase boundaries for chunked generation.
         Uses shared utility with spacy support.
         """
-        return split_text_intelligently(text, target_words_per_chunk, lang=language_id.lower() if language_id else "en")
+        return split_text_intelligently(
+            text,
+            target_words_per_chunk,
+            lang=language_id.lower() if language_id else "en",
+        )
 
     def _save_last_n_seconds(self, audio_tensor, output_path, duration=3.0):
         """
@@ -572,6 +627,7 @@ class ChatterboxMultilingualTTS:
 
         # Save using librosa
         import soundfile as sf
+
         sf.write(output_path, audio_np, self.sr)
 
     def _crossfade_chunks(self, chunks, overlap_duration=0.1):
@@ -600,7 +656,7 @@ class ChatterboxMultilingualTTS:
     ):
         """
         Generate long-form speech with adaptive chunking strategy.
-        
+
         Automatically chooses the best chunking strategy based on text length:
         - Short texts (< 50 words): Individual sentence processing
         - Long texts (>= 50 words): Grouped sentence processing (reduces overhead)
@@ -623,7 +679,7 @@ class ChatterboxMultilingualTTS:
             torch.Tensor: Generated audio waveform with shape (1, num_samples)
         """
         import time as _time
-        
+
         # Validate language_id
         if language_id and language_id.lower() not in SUPPORTED_LANGUAGES:
             supported_langs = ", ".join(SUPPORTED_LANGUAGES.keys())
@@ -635,10 +691,14 @@ class ChatterboxMultilingualTTS:
         # Prepare initial conditioning
         if audio_prompt_path:
             if progress_callback:
-                progress_callback(stage="preparing_conditionals", audio_path=audio_prompt_path)
+                progress_callback(
+                    stage="preparing_conditionals", audio_path=audio_prompt_path
+                )
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
-            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+            assert (
+                self.conds is not None
+            ), "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
         # Update exaggeration if needed
         if float(exaggeration) != float(self.conds.t3.emotion_adv[0, 0, 0].item()):
@@ -652,10 +712,10 @@ class ChatterboxMultilingualTTS:
         # Get adaptive chunks based on text length
         lang = language_id.lower() if language_id else "en"
         chunks_to_generate, chunking_strategy = get_adaptive_chunks(text, lang=lang)
-        
+
         if not chunks_to_generate:
             chunks_to_generate = [text]
-        
+
         total_words = len(text.split())
         num_chunks = len(chunks_to_generate)
         lang_name = SUPPORTED_LANGUAGES.get(lang, language_id)
@@ -664,11 +724,20 @@ class ChatterboxMultilingualTTS:
             progress_callback(
                 stage="text_split",
                 total_chunks=num_chunks,
-                chunk_previews=[(i+1, len(chunk.split()), chunk[:50]) for i, chunk in enumerate(chunks_to_generate)]
+                chunk_previews=[
+                    (i + 1, len(chunk.split()), chunk[:50])
+                    for i, chunk in enumerate(chunks_to_generate)
+                ],
             )
 
         # Print generation plan
-        print_generation_plan(total_words, chunks_to_generate, chunking_strategy, prefix=f"[Multilingual - {lang_name}] ", is_long_form=True)
+        print_generation_plan(
+            total_words,
+            chunks_to_generate,
+            chunking_strategy,
+            prefix=f"[Multilingual - {lang_name}] ",
+            is_long_form=True,
+        )
 
         # Generate each chunk with status updates
         audio_chunks = []
@@ -676,15 +745,15 @@ class ChatterboxMultilingualTTS:
 
         for i, chunk_text in enumerate(chunks_to_generate):
             chunk_words = len(chunk_text.split())
-            
+
             if progress_callback:
                 progress_callback(
                     stage="chunk_start",
                     chunk_index=i,
-                    chunk_number=i+1,
+                    chunk_number=i + 1,
                     total_chunks=num_chunks,
                     text_preview=chunk_text[:50],
-                    word_count=chunk_words
+                    word_count=chunk_words,
                 )
 
             print_chunk_generating(i, num_chunks, chunk_text)
@@ -704,14 +773,18 @@ class ChatterboxMultilingualTTS:
             )
 
             chunk_time = _time.time() - chunk_start
-            chunk_duration = chunk_audio.shape[-1] / self.sr if hasattr(chunk_audio, 'shape') else len(chunk_audio) / self.sr
+            chunk_duration = (
+                chunk_audio.shape[-1] / self.sr
+                if hasattr(chunk_audio, "shape")
+                else len(chunk_audio) / self.sr
+            )
             print_chunk_completed(i, num_chunks, chunk_time, chunk_duration)
 
             # MEMORY OPTIMIZATION: Move to CPU immediately
             if isinstance(chunk_audio, torch.Tensor):
                 chunk_audio = chunk_audio.detach().cpu()
             audio_chunks.append(chunk_audio)
-            
+
             # Aggressive memory cleanup after each chunk
             clear_device_memory()
 
@@ -719,9 +792,13 @@ class ChatterboxMultilingualTTS:
                 progress_callback(
                     stage="chunk_complete",
                     chunk_index=i,
-                    chunk_number=i+1,
+                    chunk_number=i + 1,
                     total_chunks=num_chunks,
-                    audio_shape=chunk_audio.shape if hasattr(chunk_audio, 'shape') else (len(chunk_audio),)
+                    audio_shape=(
+                        chunk_audio.shape
+                        if hasattr(chunk_audio, "shape")
+                        else (len(chunk_audio),)
+                    ),
                 )
 
         total_time = _time.time() - total_start
@@ -731,7 +808,7 @@ class ChatterboxMultilingualTTS:
             progress_callback(
                 stage="crossfading",
                 total_chunks=len(audio_chunks),
-                overlap_duration=overlap_duration
+                overlap_duration=overlap_duration,
             )
 
         print_crossfading(num_chunks)
@@ -740,13 +817,19 @@ class ChatterboxMultilingualTTS:
         # Final summary
         result_np = result.numpy() if isinstance(result, torch.Tensor) else result
         total_audio_duration = len(result_np) / self.sr
-        print_generation_complete(total_time, total_audio_duration, num_chunks, prefix=f"[Multilingual] ")
+        print_generation_complete(
+            total_time, total_audio_duration, num_chunks, prefix="[Multilingual] "
+        )
 
         if progress_callback:
             progress_callback(
                 stage="complete",
                 total_chunks=len(audio_chunks),
-                final_audio_shape=(1, len(result_np))
+                final_audio_shape=(1, len(result_np)),
             )
 
-        return torch.from_numpy(result_np).unsqueeze(0) if isinstance(result_np, np.ndarray) else result.unsqueeze(0)
+        return (
+            torch.from_numpy(result_np).unsqueeze(0)
+            if isinstance(result_np, np.ndarray)
+            else result.unsqueeze(0)
+        )

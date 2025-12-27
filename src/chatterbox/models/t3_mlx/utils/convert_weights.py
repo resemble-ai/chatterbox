@@ -16,7 +16,9 @@ import mlx.nn as nn
 logger = logging.getLogger(__name__)
 
 
-def convert_t3_weights_to_mlx(pytorch_ckpt_path: Union[str, Path], mlx_ckpt_path: Union[str, Path]):
+def convert_t3_weights_to_mlx(
+    pytorch_ckpt_path: Union[str, Path], mlx_ckpt_path: Union[str, Path]
+):
     """
     Convert T3 weights from PyTorch safetensors format to MLX-compatible format.
 
@@ -38,7 +40,7 @@ def convert_t3_weights_to_mlx(pytorch_ckpt_path: Union[str, Path], mlx_ckpt_path
     total_params = 0
 
     for key, value in state_dict.items():
-        if hasattr(value, 'cpu'):
+        if hasattr(value, "cpu"):
             # PyTorch tensor
             numpy_array = value.cpu().numpy()
             mlx_state_dict[key] = numpy_array
@@ -46,7 +48,7 @@ def convert_t3_weights_to_mlx(pytorch_ckpt_path: Union[str, Path], mlx_ckpt_path
         else:
             # Already numpy or other format
             mlx_state_dict[key] = value
-            if hasattr(value, 'size'):
+            if hasattr(value, "size"):
                 total_params += value.size
 
     # Save in NumPy .npz format (MLX can load this directly)
@@ -59,7 +61,9 @@ def convert_t3_weights_to_mlx(pytorch_ckpt_path: Union[str, Path], mlx_ckpt_path
     return mlx_state_dict
 
 
-def load_mlx_weights(model: nn.Module, ckpt_path: Union[str, Path], strict: bool = True) -> nn.Module:
+def load_mlx_weights(
+    model: nn.Module, ckpt_path: Union[str, Path], strict: bool = True
+) -> nn.Module:
     """
     Load MLX weights into a model.
 
@@ -101,8 +105,10 @@ def load_mlx_weights(model: nn.Module, ckpt_path: Union[str, Path], strict: bool
                     setattr(model, name, mlx_weights[name])
                     matched += 1
                 else:
-                    logger.warning(f"Shape mismatch for {name}: "
-                                 f"model={param.shape}, checkpoint={mlx_weights[name].shape}")
+                    logger.warning(
+                        f"Shape mismatch for {name}: "
+                        f"model={param.shape}, checkpoint={mlx_weights[name].shape}"
+                    )
                     if strict:
                         raise ValueError(f"Shape mismatch for parameter {name}")
             else:
@@ -114,12 +120,18 @@ def load_mlx_weights(model: nn.Module, ckpt_path: Union[str, Path], strict: bool
 
         logger.info(f"Loaded {matched} parameters")
         if missing:
-            logger.warning(f"Missing keys in checkpoint: {missing[:10]}{'...' if len(missing) > 10 else ''}")
+            logger.warning(
+                f"Missing keys in checkpoint: {missing[:10]}{'...' if len(missing) > 10 else ''}"
+            )
         if unexpected:
-            logger.warning(f"Unexpected keys in checkpoint: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}")
+            logger.warning(
+                f"Unexpected keys in checkpoint: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}"
+            )
 
         if strict and (missing or unexpected):
-            raise ValueError(f"Strict mode: {len(missing)} missing, {len(unexpected)} unexpected keys")
+            raise ValueError(
+                f"Strict mode: {len(missing)} missing, {len(unexpected)} unexpected keys"
+            )
 
     except Exception as e:
         logger.error(f"Error loading weights: {e}")
@@ -153,7 +165,9 @@ def save_mlx_weights(model: nn.Module, ckpt_path: Union[str, Path]):
     np.savez(ckpt_path, **state_dict_np)
 
     total_params = sum(p.size for p in state_dict_np.values())
-    logger.info(f"Saved {len(state_dict_np)} parameters ({total_params:,} total) to {ckpt_path}")
+    logger.info(
+        f"Saved {len(state_dict_np)} parameters ({total_params:,} total) to {ckpt_path}"
+    )
 
 
 def pytorch_to_mlx_tensor(tensor) -> mx.array:
@@ -166,7 +180,7 @@ def pytorch_to_mlx_tensor(tensor) -> mx.array:
     Returns:
         MLX array
     """
-    if hasattr(tensor, 'cpu'):
+    if hasattr(tensor, "cpu"):
         return mx.array(tensor.cpu().numpy())
     elif isinstance(tensor, np.ndarray):
         return mx.array(tensor)
@@ -187,6 +201,7 @@ def mlx_to_pytorch_tensor(array: mx.array):
         PyTorch tensor
     """
     import torch
+
     return torch.from_numpy(np.array(array))
 
 

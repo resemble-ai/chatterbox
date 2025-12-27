@@ -1,0 +1,55 @@
+# Include essential files
+include README.md
+include LICENSE
+include pyproject.toml
+
+# Include source code (already handled by setuptools, but explicit is good)
+recursive-include src *.py
+
+# Exclude development and documentation files
+exclude .env
+exclude .gitignore
+exclude Makefile
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * .DS_Store
+
+# Exclude all markdown files except README
+exclude *.md
+include README.md
+
+# Exclude test files
+recursive-exclude tests *
+exclude test_*.py
+exclude *_test.py
+
+# Exclude example files
+exclude example_*.py
+
+# Exclude benchmark files
+exclude benchmark_*.py
+exclude benchmark_*.json
+recursive-exclude benchmark_output *
+
+# Exclude audio files
+exclude *.wav
+exclude *.mp3
+exclude *.flac
+
+# Exclude notebook files
+exclude *.ipynb
+
+# Exclude build artifacts
+recursive-exclude dist *
+recursive-exclude build *
+recursive-exclude *.egg-info *
+
+# Exclude IDE and editor files
+recursive-exclude .vscode *
+recursive-exclude .idea *
+exclude .python-version
+
+# Exclude cache directories
+recursive-exclude .pytest_cache *
+recursive-exclude __pycache__ *
+recursive-exclude audiobook_cache *

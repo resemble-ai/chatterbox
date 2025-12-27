@@ -10,7 +10,9 @@ from typing import List
 import mlx.core as mx
 
 
-def apply_repetition_penalty(logits: mx.array, generated_ids: List[mx.array], penalty: float) -> mx.array:
+def apply_repetition_penalty(
+    logits: mx.array, generated_ids: List[mx.array], penalty: float
+) -> mx.array:
     """
     Apply repetition penalty to logits (VECTORIZED).
 
@@ -40,28 +42,28 @@ def apply_repetition_penalty(logits: mx.array, generated_ids: List[mx.array], pe
 
     # Get unique token IDs using a set
     unique_ids = list(set(int_ids))
-    
+
     if len(unique_ids) == 0:
         return logits
-    
+
     # Create index array for scatter operation
     indices = mx.array(unique_ids, dtype=mx.int32)
-    
+
     # Extract logits for penalized tokens: shape (B, num_unique)
     B, V = logits.shape
     penalized_logits = logits[:, indices]
-    
+
     # Apply penalty based on sign (vectorized)
     penalized_values = mx.where(
         penalized_logits < 0,
         penalized_logits * penalty,  # Make negative more negative
-        penalized_logits / penalty   # Make positive smaller
+        penalized_logits / penalty,  # Make positive smaller
     )
-    
+
     # Create output by copying and updating in place using scatter
     # MLX supports at-indexing for vectorized updates
     result = logits.at[:, indices].add(penalized_values - penalized_logits)
-    
+
     return result
 
 
@@ -92,23 +94,25 @@ def apply_top_p(logits: mx.array, top_p: float) -> mx.array:
     cumsum_probs = mx.cumsum(sorted_probs, axis=-1)
 
     # Shift cumsum right by 1 to include the token that crosses threshold
-    cumsum_shifted = mx.concatenate([mx.zeros((cumsum_probs.shape[0], 1)), cumsum_probs[:, :-1]], axis=1)
+    cumsum_shifted = mx.concatenate(
+        [mx.zeros((cumsum_probs.shape[0], 1)), cumsum_probs[:, :-1]], axis=1
+    )
 
     # Create mask: keep tokens where shifted cumsum <= top_p
     sorted_mask = cumsum_shifted <= top_p
 
     # Apply mask in sorted space
     sorted_logits = mx.take_along_axis(logits, sorted_indices, axis=-1)
-    sorted_logits_filtered = mx.where(sorted_mask, sorted_logits, -float('inf'))
+    sorted_logits_filtered = mx.where(sorted_mask, sorted_logits, -float("inf"))
 
     # Unsort back to original order
     # Create inverse permutation
     B, V = logits.shape
-    batch_indices = mx.broadcast_to(mx.arange(B)[:, None], (B, V))
-    
+    mx.broadcast_to(mx.arange(B)[:, None], (B, V))
+
     # Scatter back to original positions
-    result = mx.zeros_like(logits) - float('inf')  # Start with -inf
-    
+    result = mx.zeros_like(logits) - float("inf")  # Start with -inf
+
     # Use argsort of sorted_indices to get inverse permutation
     inverse_indices = mx.argsort(sorted_indices, axis=-1)
     result = mx.take_along_axis(sorted_logits_filtered, inverse_indices, axis=-1)
@@ -145,7 +149,7 @@ def apply_min_p(logits: mx.array, min_p: float) -> mx.array:
     mask = probs >= threshold
 
     # Apply mask
-    filtered_logits = mx.where(mask, logits, -float('inf'))
+    filtered_logits = mx.where(mask, logits, -float("inf"))
 
     return filtered_logits
 
@@ -174,7 +178,7 @@ def apply_top_k(logits: mx.array, top_k: int) -> mx.array:
 
     # Mask out values below threshold
     mask = logits >= threshold
-    filtered_logits = mx.where(mask, logits, -float('inf'))
+    filtered_logits = mx.where(mask, logits, -float("inf"))
 
     return filtered_logits
 

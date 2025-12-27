@@ -68,21 +68,21 @@ class TransformerEncoderLayerMLX(nn.Module):
         residual = x
         if self.normalize_before:
             x = self.norm1(x)
-        
+
         x_att, new_att_cache = self.self_attn(
             x, x, x, mask=mask, pos_emb=pos_emb, cache=att_cache
         )
         x = residual + x_att
-        
+
         if not self.normalize_before:
             x = self.norm1(x)
 
         residual = x
         if self.normalize_before:
             x = self.norm2(x)
-        
+
         x = residual + self.feed_forward(x)
-        
+
         if not self.normalize_before:
             x = self.norm2(x)
 
@@ -93,7 +93,7 @@ class TransformerEncoderLayerMLX(nn.Module):
 
 class ConformerEncoderLayerMLX(nn.Module):
     """Conformer encoder layer for MLX.
-    
+
     Structure: FFN (macaron) -> MHA -> Conv -> FFN -> LayerNorm
 
     Args:
@@ -122,20 +122,20 @@ class ConformerEncoderLayerMLX(nn.Module):
         self.feed_forward = feed_forward
         self.feed_forward_macaron = feed_forward_macaron
         self.conv_module = conv_module
-        
+
         self.norm_ff = nn.LayerNorm(size, eps=1e-12)
         self.norm_mha = nn.LayerNorm(size, eps=1e-12)
-        
+
         if feed_forward_macaron is not None:
             self.norm_ff_macaron = nn.LayerNorm(size, eps=1e-12)
             self.ff_scale = 0.5
         else:
             self.ff_scale = 1.0
-            
+
         if conv_module is not None:
             self.norm_conv = nn.LayerNorm(size, eps=1e-12)
             self.norm_final = nn.LayerNorm(size, eps=1e-12)
-            
+
         self.size = size
         self.normalize_before = normalize_before
 

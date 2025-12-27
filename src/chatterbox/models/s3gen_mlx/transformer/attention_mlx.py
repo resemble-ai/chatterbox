@@ -43,10 +43,10 @@ class MultiHeadedAttentionMLX(nn.Module):
 
     def _reshape_to_heads(self, x: mx.array) -> mx.array:
         """Reshape tensor for multi-head attention.
-        
+
         Args:
             x: (batch, time, n_feat)
-            
+
         Returns:
             (batch, n_head, time, d_k)
         """
@@ -56,10 +56,10 @@ class MultiHeadedAttentionMLX(nn.Module):
 
     def _reshape_from_heads(self, x: mx.array) -> mx.array:
         """Reshape tensor back from multi-head attention.
-        
+
         Args:
             x: (batch, n_head, time, d_k)
-            
+
         Returns:
             (batch, time, n_feat)
         """
@@ -113,17 +113,17 @@ class MultiHeadedAttentionMLX(nn.Module):
                 mask = mx.expand_dims(mask, axis=1)  # (batch, 1, *, time2)
                 # Adjust mask size if needed
                 if mask.shape[-1] > scores.shape[-1]:
-                    mask = mask[..., :scores.shape[-1]]
+                    mask = mask[..., : scores.shape[-1]]
                 # Convert boolean mask to attention bias
                 # True (valid) -> 0, False (masked) -> -inf
-                scores = mx.where(mask, scores, mx.array(float('-inf')))
+                scores = mx.where(mask, scores, mx.array(float("-inf")))
 
         # Compute softmax in FP32 for numerical stability
         attn = mx.softmax(scores.astype(mx.float32), axis=-1).astype(scores.dtype)
-        
+
         # Apply attention to values
         x = attn @ value  # (batch, head, time1, d_k)
-        
+
         # Reshape and project
         x = self._reshape_from_heads(x)
         return self.linear_out(x)
@@ -175,7 +175,7 @@ class MultiHeadedAttentionMLX(nn.Module):
 
 class RelPositionMultiHeadedAttentionMLX(MultiHeadedAttentionMLX):
     """Multi-Head Attention with relative position encoding for MLX.
-    
+
     Paper: https://arxiv.org/abs/1901.02860
     """
 
@@ -208,25 +208,27 @@ class RelPositionMultiHeadedAttentionMLX(MultiHeadedAttentionMLX):
             Output tensor (batch, head, time1, time1).
         """
         batch_size, n_head, time1, time_pos = x.shape
-        
+
         # Pad with zeros at the beginning
         zero_pad = mx.zeros((batch_size, n_head, time1, 1))
         x_padded = mx.concatenate([zero_pad, x], axis=-1)  # [B, H, T1, time_pos+1]
 
         # Reshape to shift positions
-        x_padded = mx.reshape(x_padded, (batch_size, n_head, -1, time1))  # [B, H, time_pos+1, T1]
-        
+        x_padded = mx.reshape(
+            x_padded, (batch_size, n_head, -1, time1)
+        )  # [B, H, time_pos+1, T1]
+
         # Slice to get the correct relative positions
         # We want time1 positions for each query position
-        x = x_padded[:, :, 1:time1+1, :]  # [B, H, T1, T1]
+        x = x_padded[:, :, 1 : time1 + 1, :]  # [B, H, T1, T1]
         x = mx.transpose(x, (0, 1, 3, 2))  # [B, H, T1, T1]
-        
+
         if zero_triu:
             # Create upper triangular mask and apply
             ones = mx.ones((time1, time1))
             mask = mx.triu(ones, k=1)
             x = x * (1 - mask)
-        
+
         return x
 
     def __call__(
@@ -253,7 +255,7 @@ class RelPositionMultiHeadedAttentionMLX(MultiHeadedAttentionMLX):
             Cache tensor.
         """
         q, k, v = self.forward_qkv(query, key, value)
-        
+
         # Transpose q for position attention: (batch, time1, head, d_k)
         q_transposed = mx.transpose(q, (0, 2, 1, 3))
 
@@ -283,7 +285,7 @@ class RelPositionMultiHeadedAttentionMLX(MultiHeadedAttentionMLX):
 
             # Compute matrix b and d (position-based attention)
             matrix_bd = q_with_bias_v @ mx.transpose(p, (0, 1, 3, 2))
-            
+
             # Always apply rel_shift to convert position attention scores
             # from [B, H, T1, 2*T1-1] to [B, H, T1, T1] format
             matrix_bd = self.rel_shift(matrix_bd)

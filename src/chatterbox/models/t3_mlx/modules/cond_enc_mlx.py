@@ -16,6 +16,7 @@ class T3CondMLX:
     MLX version of T3Cond dataclass for conditioning information.
     Uses mx.array instead of torch.Tensor.
     """
+
     speaker_emb: mx.array
     clap_emb: Optional[mx.array] = None
     cond_prompt_speech_tokens: Optional[mx.array] = None
@@ -40,7 +41,6 @@ class T3CondMLX:
         Returns:
             T3CondMLX object
         """
-        import numpy as np
 
         def to_mlx(tensor):
             if tensor is None:
@@ -50,11 +50,11 @@ class T3CondMLX:
 
         # Handle emotion_adv - extract scalar value from tensor if needed
         emotion_adv = t3_cond_pt.emotion_adv
-        if hasattr(emotion_adv, 'item'):
+        if hasattr(emotion_adv, "item"):
             emotion_adv = float(emotion_adv.view(-1)[0].item())
         elif not isinstance(emotion_adv, (int, float)):
             emotion_adv = float(emotion_adv)
-        
+
         return T3CondMLX(
             speaker_emb=to_mlx(t3_cond_pt.speaker_emb),
             clap_emb=to_mlx(t3_cond_pt.clap_emb),
@@ -108,8 +108,9 @@ class T3CondEncMLX(nn.Module):
             Conditioning embeddings of shape (B, len_cond, dim)
         """
         # Validate inputs
-        assert (cond.cond_prompt_speech_tokens is None) == (cond.cond_prompt_speech_emb is None), \
-            "no embeddings for cond_prompt_speech_tokens"
+        assert (cond.cond_prompt_speech_tokens is None) == (
+            cond.cond_prompt_speech_emb is None
+        ), "no embeddings for cond_prompt_speech_tokens"
 
         # Speaker embedding projection
         speaker_emb = mx.reshape(cond.speaker_emb, (-1, self.hp.speaker_embed_size))
@@ -136,20 +137,25 @@ class T3CondEncMLX(nn.Module):
 
             # Handle scalar or tensor emotion_adv
             if isinstance(cond.emotion_adv, (int, float)):
-                emotion_val = mx.array([[cond.emotion_adv]])
+                # Get batch size from speaker embeddings and broadcast scalar
+                batch_size = cond_spkr.shape[0]
+                emotion_val = mx.full((batch_size, 1, 1), cond.emotion_adv)
             else:
                 emotion_val = cond.emotion_adv
+                # Reshape to (B, 1, 1)
+                emotion_val = mx.reshape(emotion_val, (-1, 1, 1))
 
-            # Reshape to (B, 1, 1)
-            emotion_val = mx.reshape(emotion_val, (-1, 1, 1))
             cond_emotion_adv = self.emotion_adv_fc(emotion_val)
 
         # Concatenate all conditioning embeddings
-        cond_embeds = mx.concatenate([
-            cond_spkr,
-            cond_clap,
-            cond_prompt_speech_emb,
-            cond_emotion_adv,
-        ], axis=1)
+        cond_embeds = mx.concatenate(
+            [
+                cond_spkr,
+                cond_clap,
+                cond_prompt_speech_emb,
+                cond_emotion_adv,
+            ],
+            axis=1,
+        )
 
         return cond_embeds

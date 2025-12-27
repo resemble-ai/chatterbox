@@ -26,12 +26,13 @@ LLAMA_ALIGNED_HEADS = [(12, 15), (13, 11), (9, 2)]
 @dataclass
 class AlignmentAnalysisResult:
     """Results from alignment analysis at each generation step."""
-    false_start: bool        # Noisy beginning with potential hallucinations
-    long_tail: bool          # Generation continuing past text completion
-    repetition: bool         # Repeating existing text content
-    discontinuity: bool      # Alignment position jumped too far
-    complete: bool           # Reached end of text tokens
-    position: int            # Current position in text token sequence
+
+    false_start: bool  # Noisy beginning with potential hallucinations
+    long_tail: bool  # Generation continuing past text completion
+    repetition: bool  # Repeating existing text content
+    discontinuity: bool  # Alignment position jumped too far
+    complete: bool  # Reached end of text tokens
+    position: int  # Current position in text token sequence
 
 
 class AlignmentStreamAnalyzerMLX:
@@ -87,9 +88,13 @@ class AlignmentStreamAnalyzerMLX:
 
         # Buffer for attention weights from aligned heads
         # Will be populated by external code calling update_attention()
-        self.last_aligned_attns: List[Optional[mx.array]] = [None] * len(LLAMA_ALIGNED_HEADS)
+        self.last_aligned_attns: List[Optional[mx.array]] = [None] * len(
+            LLAMA_ALIGNED_HEADS
+        )
 
-    def update_attention(self, attentions: List[mx.array], buffer_idx: int, layer_idx: int, head_idx: int):
+    def update_attention(
+        self, attentions: List[mx.array], buffer_idx: int, layer_idx: int, head_idx: int
+    ):
         """
         Update attention buffer with weights from a specific layer/head.
 
@@ -167,8 +172,8 @@ class AlignmentStreamAnalyzerMLX:
         # and there are strong activations in first few tokens
         if T >= 2:
             false_start = (not self.started) and (
-                float(mx.max(A[-2:, -2:]).item()) > 0.1 or
-                float(mx.max(A[:, :4]).item()) < 0.5
+                float(mx.max(A[-2:, -2:]).item()) > 0.1
+                or float(mx.max(A[:, :4]).item()) < 0.5
             )
         else:
             false_start = not self.started
@@ -186,16 +191,18 @@ class AlignmentStreamAnalyzerMLX:
         long_tail = False
         if self.complete and T > self.completed_at:
             # Check if attention on final tokens continues for too long (>5 frames = 200ms)
-            tail_attention = A[self.completed_at:, -3:]
+            tail_attention = A[self.completed_at :, -3:]
             long_tail = float(mx.max(mx.sum(tail_attention, axis=0)).item()) >= 5
 
         # Detect alignment repetition (attention going back to earlier text)
         alignment_repetition = False
         if self.complete and T > self.completed_at:
             # Check if there are activations on earlier text tokens after completion
-            past_attention = A[self.completed_at:, :-5]
+            past_attention = A[self.completed_at :, :-5]
             if past_attention.shape[1] > 0:
-                alignment_repetition = float(mx.sum(mx.max(past_attention, axis=1)).item()) > 5
+                alignment_repetition = (
+                    float(mx.sum(mx.max(past_attention, axis=1)).item()) > 5
+                )
 
         # Track token repetition
         if next_token is not None:
@@ -206,23 +213,45 @@ class AlignmentStreamAnalyzerMLX:
 
         # Detect excessive token repetition
         # Use hybrid approach: stricter after completion, lenient during generation
+        # Check if a single token appears too many times in recent history
+        token_repetition = False
+        repeated_token = None
+
         if self.complete:
             # After completion: 2x repetition is suspicious (matches PyTorch)
-            token_repetition = (
-                len(self.generated_tokens) >= 3 and
-                len(set(self.generated_tokens[-2:])) == 1  # Last 2 tokens identical
-            )
+            # Check last 4 tokens for any token appearing >= 2 times
+            if len(self.generated_tokens) >= 4:
+                recent_tokens = self.generated_tokens[-4:]
+                token_counts = {}
+                for t in recent_tokens:
+                    token_counts[t] = token_counts.get(t, 0) + 1
+                max_count = max(token_counts.values())
+                if max_count >= 2:
+                    token_repetition = True
+                    # Find the most repeated token
+                    for t, count in token_counts.items():
+                        if count == max_count:
+                            repeated_token = t
+                            break
         else:
-            # During generation: 4x repetition is suspicious (avoid false positives)
-            token_repetition = (
-                len(self.generated_tokens) >= 4 and
-                len(set(self.generated_tokens[-4:])) == 1  # Last 4 tokens identical
-            )
+            # During generation: look for a token appearing 4+ times in last 8 tokens
+            # This catches patterns like "ya, ya, ya, ya" even with punctuation
+            if len(self.generated_tokens) >= 6:
+                recent_tokens = self.generated_tokens[-8:]
+                token_counts = {}
+                for t in recent_tokens:
+                    token_counts[t] = token_counts.get(t, 0) + 1
+                max_count = max(token_counts.values())
+                if max_count >= 4:
+                    token_repetition = True
+                    # Find the most repeated token
+                    for t, count in token_counts.items():
+                        if count == max_count:
+                            repeated_token = t
+                            break
 
-        if token_repetition:
-            repeated_token = self.generated_tokens[-1]
-            repeat_count = 4 if not self.complete else 2
-            logger.warning(f"🚨 Detected {repeat_count}x repetition of token {repeated_token}")
+        if token_repetition and repeated_token is not None:
+            logger.debug(f"🚨 Detected repetition of token {repeated_token}")
 
         # Suppress EOS before text completion (prevent premature termination)
         # Only suppress if text is reasonably long (> 5 tokens)
@@ -235,7 +264,7 @@ class AlignmentStreamAnalyzerMLX:
 
         # Force EOS if bad conditions detected
         if long_tail or alignment_repetition or token_repetition:
-            logger.warning(
+            logger.debug(
                 f"Forcing EOS token: {long_tail=}, {alignment_repetition=}, {token_repetition=}"
             )
             # Set all logits to large negative
@@ -277,8 +306,10 @@ class AlignmentStreamAnalyzerMLX:
 
         return AlignmentAnalysisResult(
             false_start=not self.started,
-            long_tail=self.complete and self.curr_frame_pos - (self.completed_at or 0) > 5,
-            repetition=len(self.generated_tokens) >= 2 and len(set(self.generated_tokens[-2:])) == 1,
+            long_tail=self.complete
+            and self.curr_frame_pos - (self.completed_at or 0) > 5,
+            repetition=len(self.generated_tokens) >= 2
+            and len(set(self.generated_tokens[-2:])) == 1,
             discontinuity=discontinuity,
             complete=self.complete,
             position=self.text_position,

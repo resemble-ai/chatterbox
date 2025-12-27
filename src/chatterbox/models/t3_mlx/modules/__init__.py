@@ -6,8 +6,8 @@ from .learned_pos_emb_mlx import LearnedPositionEmbeddingsMLX
 from .perceiver_mlx import PerceiverMLX
 
 __all__ = [
-    'T3CondEncMLX',
-    'T3CondMLX',
-    'LearnedPositionEmbeddingsMLX',
-    'PerceiverMLX',
+    "T3CondEncMLX",
+    "T3CondMLX",
+    "LearnedPositionEmbeddingsMLX",
+    "PerceiverMLX",
 ]

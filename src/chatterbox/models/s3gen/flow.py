@@ -15,12 +15,13 @@ import logging
 import random
 from typing import Dict, Optional
 
-logger = logging.getLogger(__name__)
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from .utils.mask import make_pad_mask
 from .configs import CFM_PARAMS
+
+logger = logging.getLogger(__name__)
 
 
 class MaskedDiffWithXvec(torch.nn.Module):
@@ -37,30 +38,30 @@ class MaskedDiffWithXvec(torch.nn.Module):
         length_regulator: torch.nn.Module = None,
         decoder: torch.nn.Module = None,
         decoder_conf: Dict = {
-            'in_channels': 240,
-            'out_channel': 80,
-            'spk_emb_dim': 80,
-            'n_spks': 1,
-            'cfm_params': CFM_PARAMS,
-            'decoder_params': {
-                'channels': [256, 256],
-                'dropout': 0.0,
-                'attention_head_dim': 64,
-                'n_blocks': 4,
-                'num_mid_blocks': 12,
-                'num_heads': 8,
-                'act_fn': 'gelu',
-            }
+            "in_channels": 240,
+            "out_channel": 80,
+            "spk_emb_dim": 80,
+            "n_spks": 1,
+            "cfm_params": CFM_PARAMS,
+            "decoder_params": {
+                "channels": [256, 256],
+                "dropout": 0.0,
+                "attention_head_dim": 64,
+                "n_blocks": 4,
+                "num_mid_blocks": 12,
+                "num_heads": 8,
+                "act_fn": "gelu",
+            },
         },
         mel_feat_conf: Dict = {
-            'n_fft': 1024,
-            'num_mels': 80,
-            'sampling_rate': 22050,
-            'hop_size': 256,
-            'win_size': 1024,
-            'fmin': 0,
-            'fmax': 8000
-        }
+            "n_fft": 1024,
+            "num_mels": 80,
+            "sampling_rate": 22050,
+            "hop_size": 256,
+            "win_size": 1024,
+            "fmin": 0,
+            "fmax": 8000,
+        },
     ):
         super().__init__()
         self.input_size = input_size
@@ -80,15 +81,15 @@ class MaskedDiffWithXvec(torch.nn.Module):
         self.only_mask_loss = only_mask_loss
 
     def forward(
-            self,
-            batch: dict,
-            device: torch.device,
+        self,
+        batch: dict,
+        device: torch.device,
     ) -> Dict[str, Optional[torch.Tensor]]:
-        token = batch['speech_token'].to(device)
-        token_len = batch['speech_token_len'].to(device)
-        feat = batch['speech_feat'].to(device)
-        feat_len = batch['speech_feat_len'].to(device)
-        embedding = batch['embedding'].to(device)
+        token = batch["speech_token"].to(device)
+        token_len = batch["speech_token_len"].to(device)
+        feat = batch["speech_feat"].to(device)
+        feat_len = batch["speech_feat_len"].to(device)
+        embedding = batch["embedding"].to(device)
 
         # xvec projection
         embedding = F.normalize(embedding, dim=1)
@@ -96,7 +97,12 @@ class MaskedDiffWithXvec(torch.nn.Module):
 
         # concat text and prompt_text
         mask = (~make_pad_mask(token_len)).float().unsqueeze(-1).to(device)
-        token = self.input_embedding(torch.clamp(token, min=0, max=self.input_embedding.num_embeddings-1)) * mask
+        token = (
+            self.input_embedding(
+                torch.clamp(token, min=0, max=self.input_embedding.num_embeddings - 1)
+            )
+            * mask
+        )
 
         # text encode
         h, h_lengths = self.encoder(token, token_len)
@@ -113,26 +119,30 @@ class MaskedDiffWithXvec(torch.nn.Module):
         conds = conds.transpose(1, 2)
 
         mask = (~make_pad_mask(feat_len)).to(h)
-        feat = F.interpolate(feat.unsqueeze(dim=1), size=h.shape[1:], mode="nearest").squeeze(dim=1)
+        feat = F.interpolate(
+            feat.unsqueeze(dim=1), size=h.shape[1:], mode="nearest"
+        ).squeeze(dim=1)
         loss, _ = self.decoder.compute_loss(
             feat.transpose(1, 2).contiguous(),
             mask.unsqueeze(1),
             h.transpose(1, 2).contiguous(),
             embedding,
-            cond=conds
+            cond=conds,
         )
-        return {'loss': loss}
+        return {"loss": loss}
 
     @torch.inference_mode()
-    def inference(self,
-                  token,
-                  token_len,
-                  prompt_token,
-                  prompt_token_len,
-                  prompt_feat,
-                  prompt_feat_len,
-                  embedding,
-                  flow_cache):
+    def inference(
+        self,
+        token,
+        token_len,
+        prompt_token,
+        prompt_token_len,
+        prompt_feat,
+        prompt_feat_len,
+        embedding,
+        flow_cache,
+    ):
         if self.fp16 is True:
             prompt_feat = prompt_feat.half()
             embedding = embedding.half()
@@ -144,24 +154,41 @@ class MaskedDiffWithXvec(torch.nn.Module):
 
         # concat text and prompt_text
         token_len1, token_len2 = prompt_token.shape[1], token.shape[1]
-        token, token_len = torch.concat([prompt_token, token], dim=1), prompt_token_len + token_len
+        token, token_len = (
+            torch.concat([prompt_token, token], dim=1),
+            prompt_token_len + token_len,
+        )
         mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
-        
+
         # Check for out-of-bounds token IDs
         vocab_size = self.input_embedding.num_embeddings
         if token.max() >= vocab_size or token.min() < 0:
-            logging.warning(f"S3Gen: Token IDs out of bounds: min={token.min().item()}, max={token.max().item()}, vocab_size={vocab_size}")
-        
-        token = self.input_embedding(torch.clamp(token, min=0, max=vocab_size-1)) * mask
+            logging.warning(
+                f"S3Gen: Token IDs out of bounds: min={token.min().item()}, max={token.max().item()}, vocab_size={vocab_size}"
+            )
+
+        token = (
+            self.input_embedding(torch.clamp(token, min=0, max=vocab_size - 1)) * mask
+        )
 
         # text encode
         h, h_lengths = self.encoder(token, token_len)
         h = self.encoder_proj(h)
-        mel_len1, mel_len2 = prompt_feat.shape[1], int(token_len2 / self.input_frame_rate * 22050 / 256)
-        h, h_lengths = self.length_regulator.inference(h[:, :token_len1], h[:, token_len1:], mel_len1, mel_len2, self.input_frame_rate)
+        mel_len1, mel_len2 = prompt_feat.shape[1], int(
+            token_len2 / self.input_frame_rate * 22050 / 256
+        )
+        h, h_lengths = self.length_regulator.inference(
+            h[:, :token_len1],
+            h[:, token_len1:],
+            mel_len1,
+            mel_len2,
+            self.input_frame_rate,
+        )
 
         # get conditions
-        conds = torch.zeros([1, mel_len1 + mel_len2, self.output_size], device=token.device).to(h.dtype)
+        conds = torch.zeros(
+            [1, mel_len1 + mel_len2, self.output_size], device=token.device
+        ).to(h.dtype)
         conds[:, :mel_len1] = prompt_feat
         conds = conds.transpose(1, 2)
 
@@ -173,7 +200,7 @@ class MaskedDiffWithXvec(torch.nn.Module):
             cond=conds,
             n_timesteps=5,  # Midpoint: 5 steps × 2 evals = 10 total (vs Euler 10 steps × 1 eval = 10)
             prompt_len=mel_len1,
-            flow_cache=flow_cache
+            flow_cache=flow_cache,
         )
         feat = feat[:, :, mel_len1:]
         assert feat.shape[2] == mel_len2
@@ -195,30 +222,30 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         encoder: torch.nn.Module = None,
         decoder: torch.nn.Module = None,
         decoder_conf: Dict = {
-            'in_channels': 240,
-            'out_channel': 80,
-            'spk_emb_dim': 80,
-            'n_spks': 1,
-            'cfm_params': CFM_PARAMS,
-            'decoder_params': {
-                'channels': [256, 256],
-                'dropout': 0.0,
-                'attention_head_dim': 64,
-                'n_blocks': 4,
-                'num_mid_blocks': 12,
-                'num_heads': 8,
-                'act_fn': 'gelu',
-            }
+            "in_channels": 240,
+            "out_channel": 80,
+            "spk_emb_dim": 80,
+            "n_spks": 1,
+            "cfm_params": CFM_PARAMS,
+            "decoder_params": {
+                "channels": [256, 256],
+                "dropout": 0.0,
+                "attention_head_dim": 64,
+                "n_blocks": 4,
+                "num_mid_blocks": 12,
+                "num_heads": 8,
+                "act_fn": "gelu",
+            },
         },
         mel_feat_conf: Dict = {
-            'n_fft': 1024,
-            'num_mels': 80,
-            'sampling_rate': 22050,
-            'hop_size': 256,
-            'win_size': 1024,
-            'fmin': 0,
-            'fmax': 8000
-        }
+            "n_fft": 1024,
+            "num_mels": 80,
+            "sampling_rate": 22050,
+            "hop_size": 256,
+            "win_size": 1024,
+            "fmin": 0,
+            "fmax": 8000,
+        },
     ):
         super().__init__()
         self.input_size = input_size
@@ -242,15 +269,17 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         self.fp16 = False
 
     @torch.inference_mode()
-    def inference(self,
-                  token,
-                  token_len,
-                  prompt_token,
-                  prompt_token_len,
-                  prompt_feat,
-                  prompt_feat_len,
-                  embedding,
-                  finalize):
+    def inference(
+        self,
+        token,
+        token_len,
+        prompt_token,
+        prompt_token_len,
+        prompt_feat,
+        prompt_feat_len,
+        embedding,
+        finalize,
+    ):
         if self.fp16 is True:
             prompt_feat = prompt_feat.half()
             embedding = embedding.half()
@@ -261,19 +290,29 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         embedding = self.spk_embed_affine_layer(embedding)
 
         # concat text and prompt_text
-        token, token_len = torch.concat([prompt_token, token], dim=1), prompt_token_len + token_len
+        token, token_len = (
+            torch.concat([prompt_token, token], dim=1),
+            prompt_token_len + token_len,
+        )
         mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
-        token = self.input_embedding(torch.clamp(token, min=0, max=self.input_embedding.num_embeddings-1)) * mask
+        token = (
+            self.input_embedding(
+                torch.clamp(token, min=0, max=self.input_embedding.num_embeddings - 1)
+            )
+            * mask
+        )
 
         # text encode
         h, h_lengths = self.encoder(token, token_len)
         if finalize is False:
-            h = h[:, :-self.pre_lookahead_len * self.token_mel_ratio]
+            h = h[:, : -self.pre_lookahead_len * self.token_mel_ratio]
         mel_len1, mel_len2 = prompt_feat.shape[1], h.shape[1] - prompt_feat.shape[1]
         h = self.encoder_proj(h)
 
         # get conditions
-        conds = torch.zeros([1, mel_len1 + mel_len2, self.output_size], device=token.device).to(h.dtype)
+        conds = torch.zeros(
+            [1, mel_len1 + mel_len2, self.output_size], device=token.device
+        ).to(h.dtype)
         conds[:, :mel_len1] = prompt_feat
         conds = conds.transpose(1, 2)
 
@@ -283,7 +322,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
             mask=mask.unsqueeze(1),
             spks=embedding,
             cond=conds,
-            n_timesteps=5  # Midpoint: 5 steps × 2 evals = 10 total (vs Euler 10 steps × 1 eval = 10)
+            n_timesteps=5,  # Midpoint: 5 steps × 2 evals = 10 total (vs Euler 10 steps × 1 eval = 10)
         )
         feat = feat[:, :, mel_len1:]
         assert feat.shape[2] == mel_len2

@@ -34,7 +34,7 @@ class PositionwiseFeedForwardMLX(nn.Module):
         super().__init__()
         self.w_1 = nn.Linear(idim, hidden_units)
         self.w_2 = nn.Linear(hidden_units, idim)
-        
+
         # Activation function
         if activation == "relu":
             self.activation = nn.ReLU()
@@ -50,7 +50,7 @@ class PositionwiseFeedForwardMLX(nn.Module):
 
         Args:
             xs: Input tensor (B, L, D)
-            
+
         Returns:
             Output tensor (B, L, D)
         """

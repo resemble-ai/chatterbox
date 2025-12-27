@@ -21,7 +21,7 @@ Combines encoder, flow matching decoder, and speaker conditioning.
 """
 
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 class MaskedDiffWithXvecMLX(nn.Module):
     """
     Masked Diffusion with XVector conditioning (non-causal version).
-    
+
     This module combines:
     - Input embedding for speech tokens
     - Conformer encoder for feature extraction
@@ -42,7 +42,7 @@ class MaskedDiffWithXvecMLX(nn.Module):
     - Speaker embedding conditioning via xvector
     - Optional length regulator for duration control
     """
-    
+
     def __init__(
         self,
         input_size: int = 512,
@@ -55,31 +55,31 @@ class MaskedDiffWithXvecMLX(nn.Module):
         decoder: nn.Module = None,
     ):
         super().__init__()
-        
+
         self.input_size = input_size
         self.output_size = output_size
         self.vocab_size = vocab_size
         self.input_frame_rate = input_frame_rate
-        
+
         # Token embedding
         self.input_embedding = nn.Embedding(vocab_size, input_size)
-        
+
         # Speaker embedding projection
         self.spk_embed_affine_layer = nn.Linear(spk_embed_dim, output_size)
-        
+
         # Encoder
         self.encoder = encoder
         if encoder is not None:
             self.encoder_proj = nn.Linear(encoder.output_size(), output_size)
         else:
             self.encoder_proj = None
-        
+
         # Decoder (CFM)
         self.decoder = decoder
-        
+
         # Length regulator (optional)
         self.length_regulator = length_regulator
-    
+
     def __call__(
         self,
         token: mx.array,
@@ -89,11 +89,11 @@ class MaskedDiffWithXvecMLX(nn.Module):
         prompt_feat: mx.array,
         prompt_feat_len: int,
         embedding: mx.array,
-        flow_cache: Optional[mx.array] = None
+        flow_cache: Optional[mx.array] = None,
     ) -> Tuple[mx.array, Optional[mx.array]]:
         """
         Inference forward pass.
-        
+
         Args:
             token: Speech tokens [B, T_tok]
             token_len: Token lengths [B]
@@ -103,55 +103,59 @@ class MaskedDiffWithXvecMLX(nn.Module):
             prompt_feat_len: Prompt mel length
             embedding: Speaker embedding [B, spk_dim]
             flow_cache: Optional cache for streaming
-        
+
         Returns:
             Generated mel spectrogram [B, C, T]
             Updated flow cache
         """
         assert token.shape[0] == 1, "Only batch size 1 supported"
-        
+
         # Normalize and project speaker embedding
-        embedding = embedding / (mx.linalg.norm(embedding, axis=1, keepdims=True) + 1e-8)
+        embedding = embedding / (
+            mx.linalg.norm(embedding, axis=1, keepdims=True) + 1e-8
+        )
         embedding = self.spk_embed_affine_layer(embedding)
-        
+
         # Concatenate prompt and target tokens
         token_len1, token_len2 = prompt_token.shape[1], token.shape[1]
         token = mx.concatenate([prompt_token, token], axis=1)
         token_len = prompt_token_len + token_len
-        
+
         # Create mask and embed tokens
         mask = ~make_pad_mask(token_len, max_len=token.shape[1])
         mask = mx.expand_dims(mask, axis=-1).astype(embedding.dtype)
-        
+
         # Clamp token IDs to valid range
         token = mx.clip(token, 0, self.vocab_size - 1)
         token_embedded = self.input_embedding(token) * mask
-        
+
         # Encode tokens
         h, h_lengths = self.encoder(token_embedded, token_len)
         h = self.encoder_proj(h)
-        
+
         # Length regulation
         mel_len1, mel_len2 = prompt_feat.shape[1], int(
             token_len2 / self.input_frame_rate * 22050 / 256
         )
         h, h_lengths = self.length_regulator.inference(
-            h[:, :token_len1], h[:, token_len1:],
-            mel_len1, mel_len2, self.input_frame_rate
+            h[:, :token_len1],
+            h[:, token_len1:],
+            mel_len1,
+            mel_len2,
+            self.input_frame_rate,
         )
-        
+
         # Prepare conditions - concatenate prompt_feat with zeros
         zeros_part = mx.zeros([1, mel_len2, self.output_size], dtype=h.dtype)
         conds = mx.concatenate([prompt_feat, zeros_part], axis=1)  # [B, T, C]
         conds = mx.transpose(conds, axes=(0, 2, 1))  # [B, C, T]
-        
+
         # Create mel mask
         mel_mask = ~make_pad_mask(
-            mx.array([mel_len1 + mel_len2]),
-            max_len=mel_len1 + mel_len2
+            mx.array([mel_len1 + mel_len2]), max_len=mel_len1 + mel_len2
         )
         mel_mask = mel_mask.astype(h.dtype)
-        
+
         # Run decoder
         feat, flow_cache = self.decoder(
             mu=mx.transpose(h, axes=(0, 2, 1)),  # [B, C, T]
@@ -160,23 +164,23 @@ class MaskedDiffWithXvecMLX(nn.Module):
             cond=conds,
             n_timesteps=5,
             prompt_len=mel_len1,
-            flow_cache=flow_cache
+            flow_cache=flow_cache,
         )
-        
+
         # Extract generated portion (after prompt)
         feat = feat[:, :, mel_len1:]
-        
+
         return feat.astype(mx.float32), flow_cache
 
 
 class CausalMaskedDiffWithXvecMLX(nn.Module):
     """
     Causal Masked Diffusion with XVector conditioning.
-    
+
     Similar to MaskedDiffWithXvecMLX but uses causal attention
     for streaming inference.
     """
-    
+
     def __init__(
         self,
         input_size: int = 512,
@@ -190,30 +194,30 @@ class CausalMaskedDiffWithXvecMLX(nn.Module):
         decoder: nn.Module = None,
     ):
         super().__init__()
-        
+
         self.input_size = input_size
         self.output_size = output_size
         self.vocab_size = vocab_size
         self.input_frame_rate = input_frame_rate
         self.token_mel_ratio = token_mel_ratio
         self.pre_lookahead_len = pre_lookahead_len
-        
+
         # Token embedding
         self.input_embedding = nn.Embedding(vocab_size, input_size)
-        
+
         # Speaker embedding projection
         self.spk_embed_affine_layer = nn.Linear(spk_embed_dim, output_size)
-        
+
         # Encoder
         self.encoder = encoder
         if encoder is not None:
             self.encoder_proj = nn.Linear(encoder.output_size(), output_size)
         else:
             self.encoder_proj = None
-        
+
         # Decoder (CFM)
         self.decoder = decoder
-    
+
     def __call__(
         self,
         token: mx.array,
@@ -223,11 +227,11 @@ class CausalMaskedDiffWithXvecMLX(nn.Module):
         prompt_feat: mx.array,
         prompt_feat_len: Optional[int],
         embedding: mx.array,
-        finalize: bool = False
+        finalize: bool = False,
     ) -> Tuple[mx.array, None]:
         """
         Inference forward pass for causal model.
-        
+
         Args:
             token: Speech tokens [B, T_tok]
             token_len: Token lengths [B]
@@ -237,99 +241,100 @@ class CausalMaskedDiffWithXvecMLX(nn.Module):
             prompt_feat_len: Prompt mel length (unused)
             embedding: Speaker embedding [B, spk_dim]
             finalize: Whether this is the final chunk
-        
+
         Returns:
             Generated mel spectrogram [B, C, T]
             None (no cache in causal mode)
         """
         assert token.shape[0] == 1, "Only batch size 1 supported"
-        
+
         # Normalize and project speaker embedding
-        embedding = embedding / (mx.linalg.norm(embedding, axis=1, keepdims=True) + 1e-8)
+        embedding = embedding / (
+            mx.linalg.norm(embedding, axis=1, keepdims=True) + 1e-8
+        )
         embedding = self.spk_embed_affine_layer(embedding)
-        
+
         # Concatenate prompt and target tokens
         token = mx.concatenate([prompt_token, token], axis=1)
         token_len = prompt_token_len + token_len
-        
+
         # Create mask and embed tokens
         mask = ~make_pad_mask(token_len, max_len=token.shape[1])
         mask = mx.expand_dims(mask, axis=-1).astype(embedding.dtype)
-        
+
         # Clamp token IDs to valid range
         token = mx.clip(token, 0, self.vocab_size - 1)
         token_embedded = self.input_embedding(token) * mask
-        
+
         # Encode tokens
         h, h_lengths = self.encoder(token_embedded, token_len)
-        
+
         # Handle lookahead for non-final chunks
         if not finalize:
-            h = h[:, :-self.pre_lookahead_len * self.token_mel_ratio]
-        
+            h = h[:, : -self.pre_lookahead_len * self.token_mel_ratio]
+
         mel_len1, mel_len2 = prompt_feat.shape[1], h.shape[1] - prompt_feat.shape[1]
         h = self.encoder_proj(h)
-        
+
         # Prepare conditions - concatenate prompt_feat with zeros
         zeros_part = mx.zeros([1, mel_len2, self.output_size], dtype=h.dtype)
         conds = mx.concatenate([prompt_feat, zeros_part], axis=1)  # [B, T, C]
         conds = mx.transpose(conds, axes=(0, 2, 1))  # [B, C, T]
-        
+
         # Create mel mask
         mel_mask = ~make_pad_mask(
-            mx.array([mel_len1 + mel_len2]),
-            max_len=mel_len1 + mel_len2
+            mx.array([mel_len1 + mel_len2]), max_len=mel_len1 + mel_len2
         )
         mel_mask = mel_mask.astype(h.dtype)
-        
+
         # Run decoder (5 midpoint steps = 10 function evaluations)
         feat, _ = self.decoder(
             mu=mx.transpose(h, axes=(0, 2, 1)),  # [B, C, T]
             mask=mx.expand_dims(mel_mask, axis=1),
             spks=embedding,
             cond=conds,
-            n_timesteps=5
+            n_timesteps=5,
         )
-        
+
         # Extract generated portion (after prompt)
         feat = feat[:, :, mel_len1:]
-        
+
         return feat.astype(mx.float32), None
 
 
 def convert_flow_weights(pytorch_state_dict: dict) -> dict:
     """
     Convert PyTorch flow module weights to MLX format.
-    
+
     Args:
         pytorch_state_dict: PyTorch state dict
-    
+
     Returns:
         Dictionary with MLX-compatible weights
     """
     mlx_weights = {}
-    
+
     for key, value in pytorch_state_dict.items():
-        numpy_val = value.numpy() if hasattr(value, 'numpy') else value
-        
+        numpy_val = value.numpy() if hasattr(value, "numpy") else value
+
         # Handle embedding
-        if 'input_embedding' in key:
+        if "input_embedding" in key:
             mlx_weights[key] = mx.array(numpy_val)
-        
+
         # Handle linear layers
-        elif 'spk_embed_affine_layer' in key or 'encoder_proj' in key:
-            if 'weight' in key:
+        elif "spk_embed_affine_layer" in key or "encoder_proj" in key:
+            if "weight" in key:
                 # Linear weight stays [out, in]
                 mlx_weights[key] = mx.array(numpy_val)
-            elif 'bias' in key:
+            elif "bias" in key:
                 mlx_weights[key] = mx.array(numpy_val)
-        
+
         # Encoder and decoder weights are handled separately
-        elif 'encoder.' in key or 'decoder.' in key:
+        elif "encoder." in key or "decoder." in key:
             # These will be converted by their respective converters
             mlx_weights[key] = mx.array(numpy_val)
-        
+
         else:
             mlx_weights[key] = mx.array(numpy_val)
-    
+
     return mlx_weights

@@ -3,4 +3,4 @@
 
 from .quantize_mlx import quantize_model, QuantizedT3MLX
 
-__all__ = ['quantize_model', 'QuantizedT3MLX']
+__all__ = ["quantize_model", "QuantizedT3MLX"]

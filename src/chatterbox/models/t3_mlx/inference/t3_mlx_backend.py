@@ -51,7 +51,7 @@ class T3MLXBackend(nn.Module):
         self._added_cond = False
         if self.alignment_stream_analyzer is not None:
             self.alignment_stream_analyzer.reset()
-        
+
         # Clear MLX cache to release GPU memory from previous generation
         mx.clear_cache()
 
@@ -84,7 +84,11 @@ class T3MLXBackend(nn.Module):
             if decoder_cond.shape[0] != inputs_embeds.shape[0]:
                 decoder_cond = mx.broadcast_to(
                     decoder_cond,
-                    (inputs_embeds.shape[0], decoder_cond.shape[1], decoder_cond.shape[2])
+                    (
+                        inputs_embeds.shape[0],
+                        decoder_cond.shape[1],
+                        decoder_cond.shape[2],
+                    ),
                 )
             inputs_embeds = mx.concatenate([decoder_cond, inputs_embeds], axis=1)
             self._added_cond = True
@@ -99,22 +103,24 @@ class T3MLXBackend(nn.Module):
 
         # Get final hidden states for logits projection
         # When output_hidden_states=False, hidden_states only contains final output
-        hidden_states = tfmr_out['hidden_states'][-1]  # (B, seq, dim)
+        hidden_states = tfmr_out["hidden_states"][-1]  # (B, seq, dim)
 
         # Project to speech logits
         logits = self.speech_head(hidden_states)
 
         result = {
-            'logits': logits,
-            'cache': tfmr_out.get('cache'),
+            "logits": logits,
+            "cache": tfmr_out.get("cache"),
             # Only include hidden_states if requested (saves memory during generation)
-            'hidden_states': tfmr_out.get('hidden_states') if output_hidden_states else None,
-            'last_hidden_state': hidden_states,
+            "hidden_states": (
+                tfmr_out.get("hidden_states") if output_hidden_states else None
+            ),
+            "last_hidden_state": hidden_states,
         }
 
         # Include attention weights if requested
-        if output_attentions and 'attentions' in tfmr_out:
-            result['attentions'] = tfmr_out['attentions']
+        if output_attentions and "attentions" in tfmr_out:
+            result["attentions"] = tfmr_out["attentions"]
 
         return result
 
@@ -143,12 +149,16 @@ class T3MLXBackend(nn.Module):
             if decoder_cond.shape[0] != inputs_embeds.shape[0]:
                 decoder_cond = mx.broadcast_to(
                     decoder_cond,
-                    (inputs_embeds.shape[0], decoder_cond.shape[1], decoder_cond.shape[2])
+                    (
+                        inputs_embeds.shape[0],
+                        decoder_cond.shape[1],
+                        decoder_cond.shape[2],
+                    ),
                 )
             inputs_embeds = mx.concatenate([decoder_cond, inputs_embeds], axis=1)
 
         return {
-            'inputs_embeds': inputs_embeds,
-            'cache': cache,
-            'use_cache': True,
+            "inputs_embeds": inputs_embeds,
+            "cache": cache,
+            "use_cache": True,
         }

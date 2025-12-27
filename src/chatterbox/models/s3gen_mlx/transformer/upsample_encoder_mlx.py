@@ -6,7 +6,7 @@ MLX implementation of Upsample Conformer Encoder.
 Port of PyTorch implementation from s3gen/transformer/upsample_encoder.py
 """
 
-from typing import Tuple, Optional
+from typing import Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -35,36 +35,40 @@ class Upsample1DMLX(nn.Module):
         self.out_channels = out_channels
         self.stride = stride
         # Conv after interpolation
-        self.conv = nn.Conv1d(channels, out_channels, kernel_size=stride * 2 + 1, stride=1, padding=0)
+        self.conv = nn.Conv1d(
+            channels, out_channels, kernel_size=stride * 2 + 1, stride=1, padding=0
+        )
 
-    def __call__(self, inputs: mx.array, input_lengths: mx.array) -> Tuple[mx.array, mx.array]:
+    def __call__(
+        self, inputs: mx.array, input_lengths: mx.array
+    ) -> Tuple[mx.array, mx.array]:
         """Upsample inputs.
-        
+
         Args:
             inputs: Input tensor (batch, time, channels) - MLX format.
             input_lengths: Input lengths (batch,).
-            
+
         Returns:
             Upsampled tensor (batch, time * stride, out_channels) - MLX format.
             Updated lengths (batch,).
         """
         batch, time, channels = inputs.shape
-        
+
         # Nearest neighbor interpolation on time axis
         outputs = mx.repeat(inputs, self.stride, axis=1)
-        
+
         # Pad for convolution on time axis
         outputs = mx.pad(outputs, [(0, 0), (self.stride * 2, 0), (0, 0)])
-        
+
         # Apply convolution
         outputs = self.conv(outputs)
-        
+
         return outputs, input_lengths * self.stride
 
 
 class PreLookaheadLayerMLX(nn.Module):
     """Pre-lookahead layer for MLX.
-    
+
     Args:
         channels (int): Number of channels.
         pre_lookahead_len (int): Lookahead length.
@@ -75,35 +79,40 @@ class PreLookaheadLayerMLX(nn.Module):
         self.channels = channels
         self.pre_lookahead_len = pre_lookahead_len
         self.conv1 = nn.Conv1d(
-            channels, channels,
+            channels,
+            channels,
             kernel_size=pre_lookahead_len + 1,
-            stride=1, padding=0,
+            stride=1,
+            padding=0,
         )
         self.conv2 = nn.Conv1d(
-            channels, channels,
-            kernel_size=3, stride=1, padding=0,
+            channels,
+            channels,
+            kernel_size=3,
+            stride=1,
+            padding=0,
         )
 
     def __call__(self, inputs: mx.array) -> mx.array:
         """Apply pre-lookahead.
-        
+
         Args:
             inputs: Input tensor (batch, time, channels).
-            
+
         Returns:
             Output tensor (batch, time, channels).
         """
         # MLX Conv1d expects (batch, time, channels) - no transpose needed
         outputs = inputs
-        
+
         # Look ahead padding on time dimension (axis 1)
         outputs = mx.pad(outputs, [(0, 0), (0, self.pre_lookahead_len), (0, 0)])
         outputs = nn.leaky_relu(self.conv1(outputs))
-        
+
         # Output conv - pad on time dimension
         outputs = mx.pad(outputs, [(0, 0), (2, 0), (0, 0)])
         outputs = self.conv2(outputs)
-        
+
         # Residual connection
         outputs = outputs + inputs
         return outputs
@@ -111,7 +120,7 @@ class PreLookaheadLayerMLX(nn.Module):
 
 class UpsampleConformerEncoderMLX(nn.Module):
     """Upsample Conformer Encoder for MLX.
-    
+
     This encoder processes semantic tokens through Conformer layers,
     then upsamples and processes through additional layers.
     """
@@ -150,14 +159,20 @@ class UpsampleConformerEncoderMLX(nn.Module):
 
         # Create positional encoding
         if pos_enc_layer_type == "rel_pos_espnet":
-            pos_enc = EspnetRelPositionalEncodingMLX(output_size, positional_dropout_rate)
+            pos_enc = EspnetRelPositionalEncodingMLX(
+                output_size, positional_dropout_rate
+            )
         elif pos_enc_layer_type == "rel_pos":
             pos_enc = RelPositionalEncodingMLX(output_size, positional_dropout_rate)
         else:
-            pos_enc = EspnetRelPositionalEncodingMLX(output_size, positional_dropout_rate)
+            pos_enc = EspnetRelPositionalEncodingMLX(
+                output_size, positional_dropout_rate
+            )
 
         # Input embedding layer
-        self.embed = LinearNoSubsamplingMLX(input_size, output_size, dropout_rate, pos_enc)
+        self.embed = LinearNoSubsamplingMLX(
+            input_size, output_size, dropout_rate, pos_enc
+        )
 
         # After norm
         self.after_norm = nn.LayerNorm(output_size, eps=1e-5)
@@ -187,7 +202,7 @@ class UpsampleConformerEncoderMLX(nn.Module):
             feed_forward = PositionwiseFeedForwardMLX(
                 output_size, linear_units, dropout_rate, activation
             )
-            
+
             # Macaron-style feed-forward
             feed_forward_macaron = None
             if macaron_style:
@@ -212,21 +227,27 @@ class UpsampleConformerEncoderMLX(nn.Module):
                 normalize_before,
             )
             # Use explicit attribute naming for MLX parameter tracking
-            setattr(self, f'encoders_{i}', layer)
+            setattr(self, f"encoders_{i}", layer)
 
         # Pre-lookahead layer
-        self.pre_lookahead_layer = PreLookaheadLayerMLX(channels=512, pre_lookahead_len=3)
+        self.pre_lookahead_layer = PreLookaheadLayerMLX(
+            channels=512, pre_lookahead_len=3
+        )
 
         # Upsampling layer
         self.up_layer = Upsample1DMLX(channels=512, out_channels=512, stride=2)
 
         # Create another positional encoding for upsampled sequence
         if pos_enc_layer_type == "rel_pos_espnet":
-            up_pos_enc = EspnetRelPositionalEncodingMLX(output_size, positional_dropout_rate)
+            up_pos_enc = EspnetRelPositionalEncodingMLX(
+                output_size, positional_dropout_rate
+            )
         else:
             up_pos_enc = RelPositionalEncodingMLX(output_size, positional_dropout_rate)
 
-        self.up_embed = LinearNoSubsamplingMLX(input_size, output_size, dropout_rate, up_pos_enc)
+        self.up_embed = LinearNoSubsamplingMLX(
+            input_size, output_size, dropout_rate, up_pos_enc
+        )
 
         # Build upsampled encoder layers (4 layers as in original)
         self.num_up_encoder_blocks = 4
@@ -243,7 +264,7 @@ class UpsampleConformerEncoderMLX(nn.Module):
             feed_forward = PositionwiseFeedForwardMLX(
                 output_size, linear_units, dropout_rate, activation
             )
-            
+
             feed_forward_macaron = None
             if macaron_style:
                 feed_forward_macaron = PositionwiseFeedForwardMLX(
@@ -266,7 +287,7 @@ class UpsampleConformerEncoderMLX(nn.Module):
                 normalize_before,
             )
             # Use explicit attribute naming for MLX parameter tracking
-            setattr(self, f'up_encoders_{i}', layer)
+            setattr(self, f"up_encoders_{i}", layer)
 
     def output_size(self) -> int:
         return self._output_size
@@ -291,7 +312,7 @@ class UpsampleConformerEncoderMLX(nn.Module):
             Output mask (batch, 1, time').
         """
         T = xs.shape[1]
-        
+
         # Create mask
         masks = ~make_pad_mask(xs_lens, T)
         masks = mx.expand_dims(masks, axis=1)  # (B, 1, T)
@@ -302,7 +323,8 @@ class UpsampleConformerEncoderMLX(nn.Module):
 
         # Create chunk masks
         chunk_masks = add_optional_chunk_mask(
-            xs, masks,
+            xs,
+            masks,
             self.use_dynamic_chunk,
             self.use_dynamic_left_chunk,
             decoding_chunk_size,
@@ -329,7 +351,8 @@ class UpsampleConformerEncoderMLX(nn.Module):
 
         # Create chunk masks for upsampled sequence
         chunk_masks = add_optional_chunk_mask(
-            xs, masks,
+            xs,
+            masks,
             self.use_dynamic_chunk,
             self.use_dynamic_left_chunk,
             decoding_chunk_size,
@@ -355,7 +378,7 @@ class UpsampleConformerEncoderMLX(nn.Module):
     ) -> mx.array:
         """Forward through encoder layers."""
         for i in range(self.num_encoder_blocks):
-            layer = getattr(self, f'encoders_{i}')
+            layer = getattr(self, f"encoders_{i}")
             xs, chunk_masks, _, _ = layer(xs, chunk_masks, pos_emb, mask_pad)
         return xs
 
@@ -368,6 +391,6 @@ class UpsampleConformerEncoderMLX(nn.Module):
     ) -> mx.array:
         """Forward through upsampled encoder layers."""
         for i in range(self.num_up_encoder_blocks):
-            layer = getattr(self, f'up_encoders_{i}')
+            layer = getattr(self, f"up_encoders_{i}")
             xs, chunk_masks, _, _ = layer(xs, chunk_masks, pos_emb, mask_pad)
         return xs

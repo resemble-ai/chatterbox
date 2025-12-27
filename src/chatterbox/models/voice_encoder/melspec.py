@@ -13,7 +13,8 @@ def mel_basis(hp):
         n_fft=hp.n_fft,
         n_mels=hp.num_mels,
         fmin=hp.fmin,
-        fmax=hp.fmax)  # -> (nmel, nfreq)
+        fmax=hp.fmax,
+    )  # -> (nmel, nfreq)
 
 
 def preemphasis(wav, hp):
@@ -47,8 +48,8 @@ def melspectrogram(wav, hp, pad=True):
     if hp.normalized_mels:
         mel = _normalize(mel, hp).astype(np.float32)
 
-    assert not pad or mel.shape[1] == 1 + len(wav) // hp.hop_size   # Sanity check
-    return mel   # (M, T)
+    assert not pad or mel.shape[1] == 1 + len(wav) // hp.hop_size  # Sanity check
+    return mel  # (M, T)
 
 
 def _stft(y, hp, pad=True):
