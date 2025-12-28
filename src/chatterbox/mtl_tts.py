@@ -1,12 +1,14 @@
 from dataclasses import dataclass
 from pathlib import Path
 import os
+import json
+import tempfile
 
 import librosa
 import torch
 import perth
 import torch.nn.functional as F
-from safetensors.torch import load_file as load_safetensors
+from safetensors.torch import load_file as load_safetensors, save_file as save_safetensors
 from huggingface_hub import snapshot_download
 
 from .models.t3 import T3
@@ -118,16 +120,87 @@ class Conditionals:
         return self
 
     def save(self, fpath: Path):
-        arg_dict = dict(
-            t3=self.t3.__dict__,
-            gen=self.gen
-        )
-        torch.save(arg_dict, fpath)
+        """Save conditionals using safe serialization (JSON + safetensors)."""
+        fpath = Path(fpath)
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Create a temporary directory for intermediate files
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            
+            # Save tensor data using safetensors (secure format)
+            tensors_to_save = {}
+            
+            # Extract tensors from t3 conditionals
+            for key, value in self.t3.__dict__.items():
+                if torch.is_tensor(value):
+                    tensors_to_save[f"t3_{key}"] = value
+            
+            # Extract tensors from gen dict
+            for key, value in self.gen.items():
+                if torch.is_tensor(value):
+                    tensors_to_save[f"gen_{key}"] = value
+            
+            # Save tensors using safetensors
+            save_safetensors(tensors_to_save, tmp_path / "tensors.safetensors")
+            
+            # Save metadata using JSON (no pickle)
+            metadata = {
+                "t3_keys": list(self.t3.__dict__.keys()),
+                "gen_keys": list(self.gen.keys()),
+            }
+            with open(tmp_path / "metadata.json", 'w') as f:
+                json.dump(metadata, f)
+            
+            # Create a single tar-like structure by combining into a safetensors file with metadata
+            # Since we need backward compatibility, we'll use a hybrid approach
+            combined_tensors = tensors_to_save.copy()
+            
+            # Store metadata as a string tensor for compatibility
+            import io
+            metadata_bytes = json.dumps(metadata).encode('utf-8')
+            # Pad to ensure it's decodable
+            combined_tensors["__metadata__"] = torch.frombuffer(
+                metadata_bytes + b'\x00' * (32 - len(metadata_bytes) % 32),
+                dtype=torch.uint8
+            ).clone()
+            
+            save_safetensors(combined_tensors, fpath)
 
     @classmethod
     def load(cls, fpath, map_location="cpu"):
-        kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
-        return cls(T3Cond(**kwargs['t3']), kwargs['gen'])
+        """Load conditionals using safe deserialization (safetensors format)."""
+        # Load using safetensors which is inherently secure against code injection
+        data = load_safetensors(str(fpath))
+        
+        # Extract metadata from the saved data
+        metadata_tensor = data.pop("__metadata__", None)
+        if metadata_tensor is not None:
+            # Decode metadata from tensor
+            metadata_str = metadata_tensor.numpy().tobytes().rstrip(b'\x00').decode('utf-8')
+            metadata = json.loads(metadata_str)
+            t3_keys = metadata.get("t3_keys", [])
+            gen_keys = metadata.get("gen_keys", [])
+        else:
+            # Fallback: infer keys from data
+            t3_keys = [k.replace("t3_", "") for k in data.keys() if k.startswith("t3_")]
+            gen_keys = [k.replace("gen_", "") for k in data.keys() if k.startswith("gen_")]
+        
+        # Reconstruct t3 kwargs
+        t3_kwargs = {}
+        for key in t3_keys:
+            tensor_key = f"t3_{key}"
+            if tensor_key in data:
+                t3_kwargs[key] = data[tensor_key].to(map_location)
+        
+        # Reconstruct gen dict
+        gen_dict = {}
+        for key in gen_keys:
+            tensor_key = f"gen_{key}"
+            if tensor_key in data:
+                gen_dict[key] = data[tensor_key].to(map_location)
+        
+        return cls(T3Cond(**t3_kwargs), gen_dict)
 
 
 class ChatterboxMultilingualTTS:
