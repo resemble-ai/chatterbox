@@ -183,7 +183,7 @@ class ChatterboxTurboTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTurboTTS':
+    def from_pretrained(cls, device, **kwargs) -> 'ChatterboxTurboTTS':
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -191,6 +191,12 @@ class ChatterboxTurboTTS:
             else:
                 print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
             device = "cpu"
+
+        # Check if model_snapshot_path is provided in kwargs
+        if 'model_snapshot_path' in kwargs:
+            model_snapshot_path = Path(kwargs['model_snapshot_path'])
+            if model_snapshot_path.exists():
+                return cls.from_local(ckpt_dir=model_snapshot_path, device=device)
 
         local_path = snapshot_download(
             repo_id=REPO_ID,

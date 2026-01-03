@@ -191,7 +191,13 @@ class ChatterboxMultilingualTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device: torch.device) -> 'ChatterboxMultilingualTTS':
+    def from_pretrained(cls, device: torch.device, **kwargs) -> 'ChatterboxMultilingualTTS':
+
+        # Check if model_snapshot_path is provided in kwargs
+        if 'model_snapshot_path' in kwargs:
+            model_snapshot_path = Path(kwargs['model_snapshot_path'])
+            if model_snapshot_path.exists():
+                return cls.from_local(ckpt_dir=model_snapshot_path, device=device)
         ckpt_dir = Path(
             snapshot_download(
                 repo_id=REPO_ID,

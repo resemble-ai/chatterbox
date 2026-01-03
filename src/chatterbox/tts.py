@@ -165,7 +165,7 @@ class ChatterboxTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTTS':
+    def from_pretrained(cls, device, **kwargs) -> 'ChatterboxTTS':
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -173,6 +173,11 @@ class ChatterboxTTS:
             else:
                 print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
             device = "cpu"
+                # Check if model_snapshot_path is provided in kwargs
+        if 'model_snapshot_path' in kwargs:
+            model_snapshot_path = Path(kwargs['model_snapshot_path'])
+            if model_snapshot_path.exists():
+                return cls.from_local(ckpt_dir=model_snapshot_path, device=device)
 
         for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
