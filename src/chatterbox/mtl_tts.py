@@ -163,12 +163,12 @@ class ChatterboxMultilingualTTS:
 
         ve = VoiceEncoder()
         ve.load_state_dict(
-            torch.load(ckpt_dir / "ve.pt", weights_only=True)
+            torch.load(ckpt_dir / "ve.pt", map_location=device, weights_only=True)
         )
         ve.to(device).eval()
 
         t3 = T3(T3Config.multilingual())
-        t3_state = load_safetensors(ckpt_dir / "t3_mtl23ls_v2.safetensors")
+        t3_state = load_safetensors(ckpt_dir / "t3_mtl23ls_v2.safetensors", device=device)
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
@@ -176,7 +176,7 @@ class ChatterboxMultilingualTTS:
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", weights_only=True)
+            torch.load(ckpt_dir / "s3gen.pt", map_location=device, weights_only=True)
         )
         s3gen.to(device).eval()
 
@@ -186,7 +186,7 @@ class ChatterboxMultilingualTTS:
 
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice).to(device)
+            conds = Conditionals.load(builtin_voice, map_location=device).to(device)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
