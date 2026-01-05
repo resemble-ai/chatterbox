@@ -20,14 +20,20 @@ dependencies = [
     "conformer==0.3.2",
     "safetensors==0.5.3",
     "spacy-pkuseg",
-    "pykakasi==2.3.0",
-    "gradio==5.44.1",
     "pyloudnorm",
 ]
 
 [project.urls]
 Homepage = "https://github.com/resemble-ai/chatterbox"
 Repository = "https://github.com/resemble-ai/chatterbox"
+
+[project.optional-dependencies]
+examples = [
+    "gradio==5.44.1",
+]
+jp = [
+    "pykakasi==2.3.0",
+]
 
 [build-system]
 requires = ["setuptools>=61.0"]
