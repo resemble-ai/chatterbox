@@ -21,8 +21,6 @@ import torch.nn as nn
 from torch.nn import functional as F
 from .utils.mask import make_pad_mask
 from .configs import CFM_PARAMS
-from omegaconf import DictConfig
-
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +38,18 @@ def _repeat_batch_dim(tnsr, B, ndim):
     return tnsr
 
 
+DEFAULT_DECODER_CONF = {
+    'in_channels': 240,
+    'out_channel': 80,
+    'spk_emb_dim': 80,
+    'n_spks': 1,
+    'cfm_params': {'sigma_min': 1e-06, 'solver': 'euler', 't_scheduler': 'cosine', 'training_cfg_rate': 0.2, 'inference_cfg_rate': 0.7, 'reg_loss_type': 'l1'},
+    'decoder_params': {'channels': [256, 256], 'dropout': 0.0, 'attention_head_dim': 64, 'n_blocks': 4, 'num_mid_blocks': 12, 'num_heads': 8, 'act_fn': 'gelu'},
+}
+
+DEFAULT_MEL_FEAT_CONF = {'n_fft': 1024, 'num_mels': 80, 'sampling_rate': 22050, 'hop_size': 256, 'win_size': 1024, 'fmin': 0, 'fmax': 8000}
+
+
 class CausalMaskedDiffWithXvec(torch.nn.Module):
     def __init__(self,
                  input_size: int = 512,
@@ -53,17 +63,8 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
                  pre_lookahead_len: int = 3,
                  encoder: torch.nn.Module = None,
                  decoder: torch.nn.Module = None,
-                 decoder_conf: Dict = {'in_channels': 240, 'out_channel': 80, 'spk_emb_dim': 80, 'n_spks': 1,
-                                       'cfm_params': DictConfig(
-                                           {'sigma_min': 1e-06, 'solver': 'euler', 't_scheduler': 'cosine',
-                                            'training_cfg_rate': 0.2, 'inference_cfg_rate': 0.7,
-                                            'reg_loss_type': 'l1'}),
-                                       'decoder_params': {'channels': [256, 256], 'dropout': 0.0,
-                                                          'attention_head_dim': 64,
-                                                          'n_blocks': 4, 'num_mid_blocks': 12, 'num_heads': 8,
-                                                          'act_fn': 'gelu'}},
-                 mel_feat_conf: Dict = {'n_fft': 1024, 'num_mels': 80, 'sampling_rate': 22050,
-                                        'hop_size': 256, 'win_size': 1024, 'fmin': 0, 'fmax': 8000}):
+                 decoder_conf: Dict = DEFAULT_DECODER_CONF,
+                 mel_feat_conf: Dict = DEFAULT_MEL_FEAT_CONF):
         super().__init__()
         self.input_size = input_size
         self.output_size = output_size
