@@ -24,6 +24,7 @@ dependencies = [
     "pyloudnorm",
     "omegaconf",
     "gradio>=4.0.0",
+    "torchcodec>=0.9.1",  # Added for torchaudio WAV saving
 ]
 
 [project.urls]
