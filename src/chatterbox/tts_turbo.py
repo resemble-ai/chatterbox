@@ -217,13 +217,13 @@ class ChatterboxTurboTTS:
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5, norm_loudness=True):
         ## Load and norm reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
-
+        s3gen_ref_wav = s3gen_ref_wav.astype(np.float32)
         assert len(s3gen_ref_wav) / _sr > 5.0, "Audio prompt must be longer than 5 seconds!"
 
         if norm_loudness:
             s3gen_ref_wav = self.norm_loudness(s3gen_ref_wav, _sr)
 
-        ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+        ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR).astype(np.float32)
 
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
