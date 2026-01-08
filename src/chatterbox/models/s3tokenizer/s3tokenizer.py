@@ -159,7 +159,7 @@ class S3Tokenizer(S3TokenizerV2):
             return_complex=True
         )
         magnitudes = stft[..., :-1].abs()**2
-
+        magnitudes = magnitudes.float()
         mel_spec = self._mel_filters.to(self.device) @ magnitudes
 
         log_spec = torch.clamp(mel_spec, min=1e-10).log10()
