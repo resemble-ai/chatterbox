@@ -159,8 +159,12 @@ class S3Tokenizer(S3TokenizerV2):
             return_complex=True
         )
         magnitudes = stft[..., :-1].abs()**2
-
-        mel_spec = self._mel_filters.to(self.device) @ magnitudes
+        magnitudes = magnitudes.float()
+        mel_filters = self._mel_filters.to(
+            device=self.device,
+            dtype=magnitudes.dtype
+        )
+        mel_spec = mel_filters @ magnitudes
 
         log_spec = torch.clamp(mel_spec, min=1e-10).log10()
         log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
