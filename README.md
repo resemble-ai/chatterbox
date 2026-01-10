@@ -83,7 +83,7 @@ wav = model.generate(text)
 ta.save("test-english.wav", wav, model.sr)
 
 # Multilingual examples
-multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device="cuda")
 
 french_text = "Bonjour, comment ça va? Ceci est le modèle de synthèse vocale multilingue Chatterbox, il prend en charge 23 langues."
 wav_french = multilingual_model.generate(spanish_text, language_id="fr")
