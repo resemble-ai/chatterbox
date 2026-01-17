@@ -1,4 +1,4 @@
-#!/Users/al0olo/Documents/chatterbox/tts-venv/bin/python3.11
+#!/home/al0olo/Documents/wonderful/chatterbox/tts-venv/bin/python3
 __author__ = 'jszheng'
 import optparse
 import sys

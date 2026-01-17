@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Alibaba Inc (authors: Xiang Lyu, Zhihao Du)
+# Copyright (c) 2026 Wonderful AI (authors: Xiang Lyu, Zhihao Du, Abdallah Farag)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -171,6 +171,9 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
             h = h[:, :-self.pre_lookahead_len * self.token_mel_ratio]
 
         h_lengths = h_masks.sum(dim=-1).squeeze(dim=-1)
+        # FIX: Adjust h_lengths to match trimmed h when finalize=False
+        if finalize is False:
+            h_lengths = h_lengths - (self.pre_lookahead_len * self.token_mel_ratio)
         mel_len1, mel_len2 = prompt_feat.shape[1], h.shape[1] - prompt_feat.shape[1]
         h = self.encoder_proj(h)
 

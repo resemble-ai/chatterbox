@@ -1,5 +1,5 @@
 # This file must be used with "source bin/activate" *from bash*
-# you cannot run it directly
+# You cannot run it directly
 
 deactivate () {
     # reset old environment variables
@@ -35,8 +35,15 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV=/Users/al0olo/Documents/chatterbox/tts-venv
-export VIRTUAL_ENV
+# on Windows, a path can contain colons and backslashes and has to be converted:
+if [ "${OSTYPE:-}" = "cygwin" ] || [ "${OSTYPE:-}" = "msys" ] ; then
+    # transform D:\path\to\venv to /d/path/to/venv on MSYS
+    # and to /cygdrive/d/path/to/venv on Cygwin
+    export VIRTUAL_ENV=$(cygpath /home/al0olo/Documents/wonderful/chatterbox/tts-venv)
+else
+    # use the path as-is
+    export VIRTUAL_ENV=/home/al0olo/Documents/wonderful/chatterbox/tts-venv
+fi
 
 _OLD_VIRTUAL_PATH="$PATH"
 PATH="$VIRTUAL_ENV/"bin":$PATH"

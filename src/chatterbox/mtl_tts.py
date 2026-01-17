@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Wonderful AI
+# MIT License
 from dataclasses import dataclass
 from pathlib import Path
 import os
@@ -307,3 +309,64 @@ class ChatterboxMultilingualTTS:
             wav = wav.squeeze(0).detach().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
         return torch.from_numpy(watermarked_wav).unsqueeze(0)
+
+    def generate_streaming(
+        self,
+        text,
+        language_id,
+        audio_prompt_path=None,
+        exaggeration=0.5,
+        cfg_weight=0.5,
+        temperature=0.8,
+        repetition_penalty=2.0,
+        min_p=0.05,
+        top_p=1.0,
+        chunk_tokens=5,
+        overlap_tokens=1,
+    ):
+        """
+        Generate audio in streaming chunks.
+        
+        This method yields AudioChunk objects as speech tokens are generated,
+        providing lower time-to-first-audio compared to the standard generate().
+        
+        Args:
+            text: Text to synthesize
+            language_id: Language code (e.g., "ar", "en")
+            audio_prompt_path: Path to reference audio for voice cloning
+            exaggeration: Emotion exaggeration factor (0.0-1.0)
+            cfg_weight: Classifier-free guidance weight
+            temperature: Sampling temperature
+            repetition_penalty: Penalty for token repetition
+            min_p: Minimum probability threshold
+            top_p: Top-p (nucleus) sampling threshold
+            chunk_tokens: Number of tokens per audio chunk (default: 5)
+            overlap_tokens: Tokens to overlap between chunks (default: 1)
+            
+        Yields:
+            AudioChunk objects containing audio samples and metadata
+            
+        Example:
+            model = ChatterboxMultilingualTTS.from_pretrained(device="cuda")
+            for chunk in model.generate_streaming("مرحباً", language_id="ar"):
+                play_audio(chunk.audio)
+        """
+        from .streaming import ChatterboxStreamer
+        
+        streamer = ChatterboxStreamer(
+            model=self,
+            chunk_tokens=chunk_tokens,
+            overlap_tokens=overlap_tokens,
+        )
+        
+        yield from streamer.generate(
+            text=text,
+            language_id=language_id,
+            audio_prompt_path=audio_prompt_path,
+            exaggeration=exaggeration,
+            cfg_weight=cfg_weight,
+            temperature=temperature,
+            repetition_penalty=repetition_penalty,
+            min_p=min_p,
+            top_p=top_p,
+        )
