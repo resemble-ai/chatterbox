@@ -1650,5 +1650,567 @@
       "ttfa_target_met": false,
       "ttfa_gap_ms": 376.0
     }
+  },
+  {
+    "timestamp": "2026-01-17T08:56:13.100561",
+    "mode": "streaming",
+    "device_info": {
+      "platform": "Linux",
+      "platform_version": "#91-Ubuntu SMP PREEMPT_DYNAMIC Tue Nov 18 14:14:30 UTC 2025",
+      "processor": "x86_64",
+      "python_version": "3.12.3",
+      "pytorch_version": "2.6.0+cu124",
+      "device": "cuda",
+      "gpu_name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+      "gpu_memory": "4.1 GB",
+      "cuda_version": "12.4"
+    },
+    "test_config": {
+      "text": "\u0645\u0631\u062d\u0628\u0627\u064b\u060c \u0643\u064a\u0641 \u062d\u0627\u0644\u0643 \u0627\u0644\u064a\u0648\u0645\u061f",
+      "language_id": "ar",
+      "num_trials": 3,
+      "chunk_tokens": 5
+    },
+    "trials": [
+      {
+        "trial": 1,
+        "ttfa_ms": 834.9,
+        "total_latency_ms": 25282.5,
+        "total_audio_ms": 4480.0,
+        "num_chunks": 23,
+        "total_tokens": 112,
+        "chunk_details": [
+          {
+            "chunk_idx": 0,
+            "latency_ms": 834.9,
+            "audio_duration_ms": 120.0,
+            "num_tokens": 6
+          },
+          {
+            "chunk_idx": 1,
+            "latency_ms": 1736.5,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 2,
+            "latency_ms": 2497.3,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 3,
+            "latency_ms": 3262.3,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 4,
+            "latency_ms": 4093.9,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 5,
+            "latency_ms": 5006.9,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 6,
+            "latency_ms": 6090.6,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 7,
+            "latency_ms": 7305.2,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 8,
+            "latency_ms": 8510.9,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 9,
+            "latency_ms": 9579.4,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 10,
+            "latency_ms": 10701.1,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 11,
+            "latency_ms": 11772.2,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 12,
+            "latency_ms": 12950.0,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 13,
+            "latency_ms": 14130.3,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 14,
+            "latency_ms": 15238.1,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 15,
+            "latency_ms": 16359.2,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 16,
+            "latency_ms": 17475.1,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 17,
+            "latency_ms": 18620.3,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 18,
+            "latency_ms": 19817.9,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 19,
+            "latency_ms": 20978.2,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 20,
+            "latency_ms": 22264.8,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 21,
+            "latency_ms": 23570.2,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 22,
+            "latency_ms": 25282.2,
+            "audio_duration_ms": 160.0,
+            "num_tokens": 1
+          }
+        ]
+      },
+      {
+        "trial": 2,
+        "ttfa_ms": 977.2,
+        "total_latency_ms": 17598.9,
+        "total_audio_ms": 3600.0,
+        "num_chunks": 18,
+        "total_tokens": 90,
+        "chunk_details": [
+          {
+            "chunk_idx": 0,
+            "latency_ms": 977.2,
+            "audio_duration_ms": 120.0,
+            "num_tokens": 6
+          },
+          {
+            "chunk_idx": 1,
+            "latency_ms": 1812.5,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 2,
+            "latency_ms": 2580.6,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 3,
+            "latency_ms": 3355.6,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 4,
+            "latency_ms": 4158.0,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 5,
+            "latency_ms": 4975.3,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 6,
+            "latency_ms": 5802.2,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 7,
+            "latency_ms": 6753.6,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 8,
+            "latency_ms": 7707.9,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 9,
+            "latency_ms": 8673.3,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 10,
+            "latency_ms": 9677.2,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 11,
+            "latency_ms": 10695.4,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 12,
+            "latency_ms": 11718.9,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 13,
+            "latency_ms": 12810.1,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 14,
+            "latency_ms": 13911.5,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 15,
+            "latency_ms": 15029.4,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 16,
+            "latency_ms": 16161.0,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 17,
+            "latency_ms": 17598.6,
+            "audio_duration_ms": 280.0,
+            "num_tokens": 4
+          }
+        ]
+      },
+      {
+        "trial": 3,
+        "ttfa_ms": 1081.3,
+        "total_latency_ms": 54378.8,
+        "total_audio_ms": 8320.0,
+        "num_chunks": 42,
+        "total_tokens": 208,
+        "chunk_details": [
+          {
+            "chunk_idx": 0,
+            "latency_ms": 1081.3,
+            "audio_duration_ms": 120.0,
+            "num_tokens": 6
+          },
+          {
+            "chunk_idx": 1,
+            "latency_ms": 1902.1,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 2,
+            "latency_ms": 2676.3,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 3,
+            "latency_ms": 3451.7,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 4,
+            "latency_ms": 4256.8,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 5,
+            "latency_ms": 5083.2,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 6,
+            "latency_ms": 5907.3,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 7,
+            "latency_ms": 6864.8,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 8,
+            "latency_ms": 7826.6,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 9,
+            "latency_ms": 8796.7,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 10,
+            "latency_ms": 9805.1,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 11,
+            "latency_ms": 10830.3,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 12,
+            "latency_ms": 11859.3,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 13,
+            "latency_ms": 12972.2,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 14,
+            "latency_ms": 14075.1,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 15,
+            "latency_ms": 15191.4,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 16,
+            "latency_ms": 16312.4,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 17,
+            "latency_ms": 17468.7,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 18,
+            "latency_ms": 18634.4,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 19,
+            "latency_ms": 19800.6,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 20,
+            "latency_ms": 21090.0,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 21,
+            "latency_ms": 22393.8,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 22,
+            "latency_ms": 23703.4,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 23,
+            "latency_ms": 25047.4,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 24,
+            "latency_ms": 26388.4,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 25,
+            "latency_ms": 27733.9,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 26,
+            "latency_ms": 29190.7,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 27,
+            "latency_ms": 30662.4,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 28,
+            "latency_ms": 32140.4,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 29,
+            "latency_ms": 33655.5,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 30,
+            "latency_ms": 35174.6,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 31,
+            "latency_ms": 36707.6,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 32,
+            "latency_ms": 38246.7,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 33,
+            "latency_ms": 39937.5,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 34,
+            "latency_ms": 41631.8,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 35,
+            "latency_ms": 43336.2,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 36,
+            "latency_ms": 45063.8,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 37,
+            "latency_ms": 46800.9,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 38,
+            "latency_ms": 48565.5,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 39,
+            "latency_ms": 50489.5,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 40,
+            "latency_ms": 52416.7,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 5
+          },
+          {
+            "chunk_idx": 41,
+            "latency_ms": 54378.8,
+            "audio_duration_ms": 200.0,
+            "num_tokens": 2
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "avg_ttfa_ms": 964.5,
+      "min_ttfa_ms": 834.9,
+      "max_ttfa_ms": 1081.3,
+      "avg_total_latency_ms": 32420.1,
+      "avg_audio_duration_ms": 5466.7,
+      "avg_num_chunks": 27.7,
+      "real_time_factor": 5.93,
+      "ttfa_target_met": false,
+      "ttfa_gap_ms": 764.5
+    }
   }
 ]

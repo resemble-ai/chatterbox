@@ -9,6 +9,7 @@ as speech tokens are generated, rather than waiting for the full generation to c
 Key features:
 - Configurable chunk size (default: 5 tokens = 200ms audio)
 - Uses existing S3Gen streaming infrastructure (finalize parameter, HiFiGAN cache)
+- Encoder output caching to avoid redundant computation during streaming
 - Tracks latency metrics (TTFA, chunk timing)
 - Integrates with AlignmentStreamAnalyzer for quality control
 
@@ -255,6 +256,7 @@ class ChatterboxStreamer:
         last_processed_count = 0  # Track how many tokens we've converted to audio
         last_audio_samples = 0  # Track how many audio samples we've yielded
         vocoder_cache = torch.zeros(1, 1, 0).to(self.device)
+        encoder_cache: Optional[dict] = None  # Encoder output cache for efficiency
         chunk_index = 0
         first_chunk_yielded = False
         
@@ -286,15 +288,18 @@ class ChatterboxStreamer:
                     chunk_start = time.perf_counter()
                     
                     # Process ALL tokens accumulated so far (S3Gen needs full sequence)
+                    # Encoder caching ensures we only encode NEW tokens, not the full sequence
                     all_tokens_tensor = torch.tensor(
                         all_tokens, dtype=torch.long, device=self.device
                     ).unsqueeze(0)
                     
                     # Generate audio - use finalize=False for intermediate chunks
                     # (holds back 3 tokens for lookahead, avoids boundary artifacts)
-                    full_audio, new_vocoder_cache = self._process_chunk(
+                    # Encoder cache is passed to avoid re-encoding already processed tokens
+                    full_audio, new_vocoder_cache, encoder_cache = self._process_chunk(
                         all_tokens_tensor,
                         vocoder_cache,
+                        encoder_cache=encoder_cache,
                         finalize=False,
                     )
                     
@@ -343,10 +348,11 @@ class ChatterboxStreamer:
                 all_tokens, dtype=torch.long, device=self.device
             ).unsqueeze(0)
             
-            # Final chunk with finalize=True
-            full_audio, _ = self._process_chunk(
+            # Final chunk with finalize=True (encoder cache will be cleared after this)
+            full_audio, _, _ = self._process_chunk(
                 all_tokens_tensor,
                 vocoder_cache,
+                encoder_cache=encoder_cache,
                 finalize=True,
             )
             
@@ -390,18 +396,20 @@ class ChatterboxStreamer:
         self,
         speech_tokens: torch.Tensor,
         vocoder_cache: torch.Tensor,
+        encoder_cache: Optional[dict] = None,
         finalize: bool = False,
     ) -> tuple:
         """
-        Convert speech tokens to audio using S3Gen.
+        Convert speech tokens to audio using S3Gen with encoder caching.
         
         Args:
             speech_tokens: Tensor of speech token IDs (1, num_tokens)
             vocoder_cache: HiFiGAN cache from previous chunk
+            encoder_cache: Optional encoder cache dict from previous chunk
             finalize: Whether this is the final chunk
             
         Returns:
-            Tuple of (audio_tensor, updated_vocoder_cache)
+            Tuple of (audio_tensor, updated_vocoder_cache, updated_encoder_cache)
         """
         # Clean tokens
         speech_tokens = drop_invalid_tokens(speech_tokens.squeeze())
@@ -409,22 +417,23 @@ class ChatterboxStreamer:
         
         if speech_tokens.numel() == 0:
             # Return silence if no valid tokens
-            return torch.zeros(1, 960).to(self.device), vocoder_cache
+            return torch.zeros(1, 960).to(self.device), vocoder_cache, encoder_cache
         
-        # Flow inference (tokens -> mel)
-        output_mels = self.s3gen.flow_inference(
+        # Flow inference (tokens -> mel) with encoder caching
+        output_mels, new_encoder_cache = self.s3gen.flow_inference(
             speech_tokens,
             ref_dict=self.model.conds.gen,
             finalize=finalize,
+            encoder_cache=encoder_cache,
         )
         
         # HiFiGAN inference (mel -> audio) with caching
-        output_wav, new_cache = self.s3gen.hift_inference(
+        output_wav, new_vocoder_cache = self.s3gen.hift_inference(
             output_mels,
             cache_source=vocoder_cache,
         )
         
-        return output_wav, new_cache
+        return output_wav, new_vocoder_cache, new_encoder_cache
     
     def clear_speaker_cache(self):
         """Clear the speaker embedding cache."""

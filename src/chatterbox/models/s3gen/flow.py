@@ -140,7 +140,22 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
                   finalize,
                   n_timesteps=10,
                   noised_mels=None,
-                  meanflow=False):
+                  meanflow=False,
+                  encoder_cache=None):
+        """
+        Inference with optional encoder output caching for streaming.
+        
+        Args:
+            encoder_cache: Optional dict with keys:
+                - 'h': Cached encoder output (B, cached_mel_len, hidden_dim)
+                - 'h_proj': Cached projected encoder output (B, cached_mel_len, output_size)
+                - 'num_tokens': Number of tokens (including prompt) that produced this cache
+                - 'prompt_len': Length of prompt tokens in the cached sequence
+            
+        Returns:
+            feat: Generated mel spectrogram features
+            new_cache: Updated encoder cache dict (None if finalize=True)
+        """
         # token: (B, n_toks)
         # token_len: (B,)
         B = token.size(0)
@@ -158,37 +173,91 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         embedding = _repeat_batch_dim(embedding, B, ndim=2)  # (B, emb_dim)
 
         # concat text and prompt_text
-        token, token_len = torch.concat([prompt_token, token], dim=1), prompt_token_len + token_len
-        mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
+        full_token, full_token_len = torch.concat([prompt_token, token], dim=1), prompt_token_len + token_len
+        mask = (~make_pad_mask(full_token_len)).unsqueeze(-1).to(embedding)
 
-        if (token >= self.vocab_size).any():
-            logger.error(f"{token.max()}>{self.vocab_size}\n out-of-range special tokens found in flow, fix inputs!")
-        token = self.input_embedding(token.long()) * mask
+        if (full_token >= self.vocab_size).any():
+            logger.error(f"{full_token.max()}>{self.vocab_size}\n out-of-range special tokens found in flow, fix inputs!")
+        embedded_token = self.input_embedding(full_token.long()) * mask
 
-        # text encode
-        h, h_masks = self.encoder(token, token_len)
+        # Encoder with caching support
+        current_num_tokens = full_token.size(1)
+        prompt_len = prompt_token.size(1)
+        
+        # Check if we can use cached encoder output
+        use_cache = (
+            encoder_cache is not None 
+            and encoder_cache.get('h') is not None
+            and encoder_cache.get('num_tokens', 0) > 0
+        )
+        
+        if use_cache:
+            cached_num_tokens = encoder_cache['num_tokens']
+            cached_h = encoder_cache['h']
+            cached_h_proj = encoder_cache['h_proj']
+            
+            if current_num_tokens == cached_num_tokens:
+                # Same number of tokens - reuse entire cache
+                h = cached_h
+                h_proj = cached_h_proj
+                logger.debug(f"Encoder cache HIT: reusing {cached_num_tokens} tokens")
+            elif current_num_tokens > cached_num_tokens:
+                # New tokens added - encode only the new tokens and concatenate
+                new_tokens_start = cached_num_tokens
+                new_embedded_tokens = embedded_token[:, new_tokens_start:]
+                new_token_len = full_token_len - cached_num_tokens
+                
+                # Encode only new tokens
+                new_h, new_h_masks = self.encoder(new_embedded_tokens, new_token_len)
+                
+                # Concatenate with cached encoder output
+                h = torch.cat([cached_h, new_h], dim=1)
+                
+                # Project new encoder output and concatenate
+                new_h_proj = self.encoder_proj(new_h)
+                h_proj = torch.cat([cached_h_proj, new_h_proj], dim=1)
+                
+                logger.debug(f"Encoder cache PARTIAL: cached {cached_num_tokens}, encoded {current_num_tokens - cached_num_tokens} new tokens")
+            else:
+                # Fewer tokens than cached (shouldn't happen in normal streaming) - re-encode all
+                h, h_masks = self.encoder(embedded_token, full_token_len)
+                h_proj = self.encoder_proj(h)
+                logger.debug(f"Encoder cache MISS: token count decreased, re-encoding all {current_num_tokens} tokens")
+        else:
+            # No cache - encode all tokens
+            h, h_masks = self.encoder(embedded_token, full_token_len)
+            h_proj = self.encoder_proj(h)
+            logger.debug(f"Encoder cache MISS: encoding all {current_num_tokens} tokens")
+        
+        # Store full (untrimmed) h for cache before any trimming
+        h_full = h
+        h_proj_full = h_proj
+        
+        # Apply lookahead trimming for non-final chunks
         if finalize is False:
-            h = h[:, :-self.pre_lookahead_len * self.token_mel_ratio]
+            trim_amount = self.pre_lookahead_len * self.token_mel_ratio
+            h_proj = h_proj[:, :-trim_amount]
+        
+        # Calculate lengths and mel dimensions
+        h_lengths = torch.tensor([h_proj.size(1)], device=h_proj.device)
+        if h_lengths.size(0) != B:
+            h_lengths = h_lengths.expand(B)
+        
+        mel_len1 = prompt_feat.shape[1]
+        mel_len2 = h_proj.shape[1] - mel_len1
 
-        h_lengths = h_masks.sum(dim=-1).squeeze(dim=-1)
-        # FIX: Adjust h_lengths to match trimmed h when finalize=False
-        if finalize is False:
-            h_lengths = h_lengths - (self.pre_lookahead_len * self.token_mel_ratio)
-        mel_len1, mel_len2 = prompt_feat.shape[1], h.shape[1] - prompt_feat.shape[1]
-        h = self.encoder_proj(h)
-
-        # # get conditions
-        conds = torch.zeros([B, mel_len1 + mel_len2, self.output_size], device=token.device).to(h.dtype)
+        # Get conditions
+        conds = torch.zeros([B, mel_len1 + mel_len2, self.output_size], device=embedded_token.device).to(h_proj.dtype)
         conds[:, :mel_len1] = prompt_feat
         conds = conds.transpose(1, 2)
 
-        mask = (~make_pad_mask(h_lengths)).unsqueeze(1).to(h)
+        mask = (~make_pad_mask(h_lengths)).unsqueeze(1).to(h_proj)
 
         if mask.shape[0] != B:
             mask = mask.repeat(B, 1, 1)
 
         feat, _ = self.decoder(
-            mu=h.transpose(1, 2).contiguous(),
+            mu=h_proj.transpose(1, 2).contiguous(),
             mask=mask,
             spks=embedding,
             cond=conds,
@@ -198,4 +267,15 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         )
         feat = feat[:, :, mel_len1:]
         assert feat.shape[2] == mel_len2
-        return feat, None  # NOTE jrm: why are they returning None here?
+        
+        # Build new cache (only if not finalizing)
+        new_cache = None
+        if not finalize:
+            new_cache = {
+                'h': h_full,
+                'h_proj': h_proj_full,
+                'num_tokens': current_num_tokens,
+                'prompt_len': prompt_len,
+            }
+        
+        return feat, new_cache

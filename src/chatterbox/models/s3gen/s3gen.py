@@ -182,6 +182,7 @@ class S3Token2Mel(torch.nn.Module):
         finalize: bool = False,
         speech_token_lens=None,
         noised_mels=None,
+        encoder_cache: Optional[dict] = None,
     ):
         """
         Generate waveforms from S3 speech tokens and a reference waveform, which the speaker timbre is inferred from.
@@ -198,6 +199,12 @@ class S3Token2Mel(torch.nn.Module):
         - `ref_wav`: reference waveform (`torch.Tensor` with shape=[B=1, T])
         - `ref_sr`: reference sample rate
         - `finalize`: whether streaming is finished or not. Note that if False, the last 3 tokens will be ignored.
+        - `encoder_cache`: Optional dict for encoder output caching during streaming.
+        
+        Returns
+        -------
+        - `output_mels`: Generated mel spectrograms
+        - `new_encoder_cache`: Updated encoder cache (None if finalize=True)
         """
         assert (ref_wav is None) ^ (ref_dict is None), f"Must provide exactly one of ref_wav or ref_dict (got {ref_wav} and {ref_dict})"
 
@@ -217,16 +224,17 @@ class S3Token2Mel(torch.nn.Module):
         if speech_token_lens is None:
             speech_token_lens = torch.LongTensor([st.size(-1) for st in speech_tokens]).to(self.device)
 
-        output_mels, _ = self.flow.inference(
+        output_mels, new_encoder_cache = self.flow.inference(
             token=speech_tokens,
             token_len=speech_token_lens,
             finalize=finalize,
             noised_mels=noised_mels,
             n_timesteps=n_cfm_timesteps,
             meanflow=self.meanflow,
+            encoder_cache=encoder_cache,
             **ref_dict,
         )
-        return output_mels
+        return output_mels, new_encoder_cache
 
 
 class S3Token2Wav(S3Token2Mel):
@@ -277,7 +285,7 @@ class S3Token2Wav(S3Token2Mel):
         Generate waveforms from S3 speech tokens and a reference waveform, which the speaker timbre is inferred from.
         NOTE: used for sync synthesis only. Please use `S3GenStreamer` for streaming synthesis.
         """
-        output_mels = super().forward(
+        output_mels, _ = super().forward(
             speech_tokens, speech_token_lens=speech_token_lens, ref_wav=ref_wav,
             ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize,
             n_cfm_timesteps=n_cfm_timesteps, noised_mels=noised_mels,
@@ -309,16 +317,34 @@ class S3Token2Wav(S3Token2Mel):
         n_cfm_timesteps = None,
         finalize: bool = False,
         speech_token_lens=None,
+        encoder_cache: Optional[dict] = None,
     ):
+        """
+        Flow inference with optional encoder caching for streaming.
+        
+        Args:
+            speech_tokens: Speech token IDs
+            ref_wav: Reference waveform (mutually exclusive with ref_dict)
+            ref_sr: Reference sample rate
+            ref_dict: Pre-computed reference embeddings
+            n_cfm_timesteps: Number of CFM denoising steps
+            finalize: Whether this is the final chunk
+            speech_token_lens: Token lengths
+            encoder_cache: Optional encoder cache dict for streaming
+            
+        Returns:
+            output_mels: Generated mel spectrograms
+            new_encoder_cache: Updated encoder cache (None if finalize=True)
+        """
         n_cfm_timesteps = n_cfm_timesteps or (2 if self.meanflow else 10)
         noise = None
         if self.meanflow:
             noise = torch.randn(1, 80, speech_tokens.size(-1) * 2, dtype=self.dtype, device=self.device)
-        output_mels = super().forward(
+        output_mels, new_encoder_cache = super().forward(
             speech_tokens, speech_token_lens=speech_token_lens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict,
-            n_cfm_timesteps=n_cfm_timesteps, finalize=finalize, noised_mels=noise,
+            n_cfm_timesteps=n_cfm_timesteps, finalize=finalize, noised_mels=noise, encoder_cache=encoder_cache,
         )
-        return output_mels
+        return output_mels, new_encoder_cache
 
     @torch.inference_mode()
     def hift_inference(self, speech_feat, cache_source: torch.Tensor = None):
@@ -344,7 +370,7 @@ class S3Token2Wav(S3Token2Mel):
         # if drop_invalid_tokens:
         #     speech_tokens, speech_token_lens = drop_invalid(speech_tokens, pad=S3_QUIET_PAD)
 
-        output_mels = self.flow_inference(
+        output_mels, _ = self.flow_inference(
             speech_tokens,
             speech_token_lens=speech_token_lens,
             ref_wav=ref_wav,
