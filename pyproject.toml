@@ -9,11 +9,12 @@ authors = [
     {name = "resemble-ai", email = "engineering@resemble.ai"}
 ]
 dependencies = [
-    "numpy>=1.24.0,<1.26.0",
+    "numpy>=1.24.0,<2.1.0",        # Expanded upper bound for compatibility
     "librosa==0.11.0",
     "s3tokenizer",
     "torch==2.6.0",
     "torchaudio==2.6.0",
+    "torchvision==0.21.0",         # Fixed: Matches Torch 2.6.0
     "transformers==4.46.3",
     "diffusers==0.29.0",
     "resemble-perth==1.0.1",
