@@ -174,6 +174,7 @@ class ChatterboxTurboTTS:
             tokenizer.pad_token = tokenizer.eos_token
         if len(tokenizer) != 50276:
             print(f"WARNING: Tokenizer len {len(tokenizer)} != 50276")
+            logger.warning(f"Tokenizer len {len(tokenizer)} != 50276")
 
         conds = None
         builtin_voice = ckpt_dir / "conds.pt"
@@ -194,7 +195,7 @@ class ChatterboxTurboTTS:
 
         local_path = snapshot_download(
             repo_id=REPO_ID,
-            token=os.getenv("HF_TOKEN") or True,
+            token=os.getenv("HF_TOKEN"),
             # Optional: Filter to download only what you need
             allow_patterns=["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"]
         )
@@ -211,6 +212,7 @@ class ChatterboxTurboTTS:
                 wav = wav * gain_linear
         except Exception as e:
             print(f"Warning: Error in norm_loudness, skipping: {e}")
+            logger.warning(f"Error in norm_loudness, skipping: {e}")
 
         return wav
 
