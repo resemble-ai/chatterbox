@@ -73,7 +73,7 @@ class ChatterboxVC:
             else:
                 print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
             device = "cpu"
-    for fpath in ["s3gen.safetensors", "conds.pt"]:
+        for fpath in ["s3gen.safetensors", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 
         return cls.from_local(Path(local_path).parent, device)
