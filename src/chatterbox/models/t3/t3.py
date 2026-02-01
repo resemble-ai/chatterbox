@@ -270,8 +270,6 @@ class T3(nn.Module):
         # In order to use the standard HF generate method, we need to extend some methods to inject our custom logic
         # Note the llama-specific logic. Other tfmr types can be added later.
 
-        self.compiled = False
-
         # TODO? synchronize the expensive compile function
         # with self.compile_lock:
         if not self.compiled:
@@ -296,6 +294,10 @@ class T3(nn.Module):
             )
             self.patched_model = patched_model
             self.compiled = True
+        else:
+            self.patched_model.alignment_stream_analyzer.reset(
+                text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
+            )
 
         # # Run normal generate method, which calls our custom extended methods
         # return self.patched_model.generate(
