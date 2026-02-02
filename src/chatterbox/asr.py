@@ -9,10 +9,10 @@ class SpeechRecognizer:
     def __init__(self, model_id="openai/whisper-tiny", device=None):
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
-        
+
         self.device = device
         logger.info(f"Loading speech recognizer ({model_id}) on {device}...")
-        
+
         try:
             self.pipe = pipeline(
                 "automatic-speech-recognition",
@@ -34,19 +34,17 @@ class SpeechRecognizer:
             return "Error: Speech recognition model not loaded."
 
         generate_kwargs = {}
-        
+
         # Handle specific language codes
         if language_id:
             # Speech Recognition logic updated for Malayalam (ml-IN) - By Ahmed Shajahan
             if language_id == "ml":
-                language_id = "ml-IN" 
-                # Note: Whisper uses 'malayalam' or 'ml', but if specific standard codes are needed
-                # we map them here. For Whisper specifically, 'ml' works, but we acknowledge the logic.
-                # If using other APIs, 'ml-IN' might be required.
+                language_id = "malayalam"
+                # Note: Whisper uses 'malayalam' or 'ml'. 'ml-IN' is not supported by the model directly.
                 logger.info(f"Processing Malayalam audio (code: {language_id})")
-            
+
             # Whisper pipeline mostly auto-detects, but we can force language if supported
-            generate_kwargs["language"] = language_id 
+            generate_kwargs["language"] = language_id
             pass
 
         try:

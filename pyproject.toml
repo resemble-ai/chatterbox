@@ -23,7 +23,9 @@ dependencies = [
     "pykakasi>=2.3.0", # Modified for Google Colab compatibility
     "gradio>=4.0.0", # Modified for Google Colab compatibility (Relaxed from ==5.44.1 to allow broader range)
     "pyloudnorm",
-    "omegaconf"
+    "omegaconf",
+    "gTTS",
+    "soundfile"
 ]
 
 [project.urls]

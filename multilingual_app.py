@@ -374,10 +374,10 @@ with gr.Blocks() as demo:
             return (
                 new_audio_prompt,           # ref_wav value
                 new_text,                   # text value
-                gr.update(label=loc["language"]), # language_id label
-                gr.update(label=loc["start"]),    # run_btn label
-                gr.update(label=loc["settings"]), # settings_acc label
-                gr.update(label=loc["microphone"]), # stt_input label
+                gr.update(label=loc.get("language", "Language")), # language_id label
+                gr.update(label=loc.get("start", "Generate")),    # run_btn label
+                gr.update(label=loc.get("settings", "Settings")), # settings_acc label
+                gr.update(label=loc.get("microphone", "Microphone")), # stt_input label
                 footer_msg                  # footer_text value
             )
 

@@ -183,7 +183,7 @@ class ChatterboxTurboTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTurboTTS':
+    def from_pretrained(cls, device, token=None) -> 'ChatterboxTurboTTS':
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -194,7 +194,7 @@ class ChatterboxTurboTTS:
 
         local_path = snapshot_download(
             repo_id=REPO_ID,
-            token=os.getenv("HF_TOKEN"),
+            token=token or os.getenv("HF_TOKEN"),
             # Optional: Filter to download only what you need
             allow_patterns=["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"]
         )

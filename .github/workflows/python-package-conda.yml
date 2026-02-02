@@ -32,3 +32,8 @@ jobs:
       run: |
         conda install pytest
         pytest
+
+    - name: Security Scan
+      run: |
+        pip install pip-audit
+        pip-audit
