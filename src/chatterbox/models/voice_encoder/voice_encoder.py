@@ -166,6 +166,7 @@ class VoiceEncoder(nn.Module):
         :param mels: (B, T, M) unscaled mels
         :return: (B, E) embeddings on CPU
         """
+        mels = mels.float()
         mel_lens = mel_lens.tolist() if torch.is_tensor(mel_lens) else mel_lens
 
         # Compute where to split the utterances into partials
@@ -239,6 +240,7 @@ class VoiceEncoder(nn.Module):
 
         # Embed them
         with torch.inference_mode():
+            mels = mels.to(self.device).float() 
             utt_embeds = self.inference(mels.to(self.device), mel_lens, batch_size=batch_size, **kwargs).numpy()
 
         return self.utt_to_spk_embed(utt_embeds) if as_spk else utt_embeds
