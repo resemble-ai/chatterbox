@@ -20,18 +20,6 @@ If you like the model but need to scale or tune it for higher accuracy, check ou
 
 <img width="1200" height="600" alt="Podonos Turbo Eval" src="https://storage.googleapis.com/chatterbox-demo-samples/turbo/podonos_turbo.png" />
 
-## Evaluation
-Chatterbox Turbo was evaluated using Podonos, a platform for reproducible subjective speech evaluation.
-
-We compared Chatterbox Turbo to competitive TTS systems using Podonos' standardized evaluation suite, focusing on overall preference, naturalness, and expressiveness.
-
-Evaluation reports:
-- [Chatterbox Turbo vs ElevenLabs Turbo v2.5](https://podonos.com/resembleai/chatterbox-turbo-vs-elevenlabs-turbo)
-- [Chatterbox Turbo vs Cartesia Sonic 3](https://podonos.com/resembleai/chatterbox-turbo-vs-cartesia-sonic3)
-- [Chatterbox Turbo vs VibeVoice 7B](https://podonos.com/resembleai/chatterbox-turbo-vs-vibevoice7b)
-
-These evaluations were conducted under identical conditions and are publicly accessible via Podonos.
-
 ### ⚡ Model Zoo
 
 Choose the right model for your application.
@@ -157,6 +145,18 @@ print(f"Extracted watermark: {watermark}")
 ## Official Discord
 
 👋 Join us on [Discord](https://discord.gg/rJq9cRJBJ6) and let's build something awesome together!
+
+## Evaluation
+Chatterbox Turbo was evaluated using Podonos, a platform for reproducible subjective speech evaluation.
+
+We compared Chatterbox Turbo to competitive TTS systems using Podonos' standardized evaluation suite, focusing on overall preference, naturalness, and expressiveness.
+
+Evaluation reports:
+- [Chatterbox Turbo vs ElevenLabs Turbo v2.5](https://podonos.com/resembleai/chatterbox-turbo-vs-elevenlabs-turbo)
+- [Chatterbox Turbo vs Cartesia Sonic 3](https://podonos.com/resembleai/chatterbox-turbo-vs-cartesia-sonic3)
+- [Chatterbox Turbo vs VibeVoice 7B](https://podonos.com/resembleai/chatterbox-turbo-vs-vibevoice7b)
+
+These evaluations were conducted under identical conditions and are publicly accessible via Podonos.
 
 ## Acknowledgements
 - [Podonos](https://podonos.com) — for supporting reproducible subjective speech evaluation
