@@ -9,7 +9,7 @@ authors = [
     {name = "resemble-ai", email = "engineering@resemble.ai"}
 ]
 dependencies = [
-    "numpy>=1.24.0,<1.26.0",
+    "numpy>=1.24.0,<2.4",
     "librosa==0.11.0",
     "s3tokenizer",
     "torch==2.6.0",
@@ -20,15 +20,20 @@ dependencies = [
     "conformer==0.3.2",
     "safetensors==0.5.3",
     "spacy-pkuseg",
-    "pykakasi==2.3.0",
-    "gradio==5.44.1",
     "pyloudnorm",
-    "omegaconf"
 ]
 
 [project.urls]
 Homepage = "https://github.com/resemble-ai/chatterbox"
 Repository = "https://github.com/resemble-ai/chatterbox"
+
+[project.optional-dependencies]
+examples = [
+    "gradio==5.44.1",
+]
+jp = [
+    "pykakasi==2.3.0",
+]
 
 [build-system]
 requires = ["setuptools>=61.0"]
