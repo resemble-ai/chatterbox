@@ -83,8 +83,7 @@ class S3Tokenizer(S3TokenizerV2):
                 wav = torch.from_numpy(wav)
             if wav.dim() == 1:
                 wav = wav.unsqueeze(0)
-
-            processed_wavs.append(wav)
+            processed_wavs.append(wav.float())
         return processed_wavs
 
     @torch.no_grad()
@@ -149,8 +148,7 @@ class S3Tokenizer(S3TokenizerV2):
         """
         if not torch.is_tensor(audio):
             audio = torch.from_numpy(audio)
-
-        audio = audio.to(self.device)
+        audio = audio.float().to(self.device)
         if padding > 0:
             audio = F.pad(audio, (0, padding))
         stft = torch.stft(
