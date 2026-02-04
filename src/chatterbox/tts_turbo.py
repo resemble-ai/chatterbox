@@ -127,6 +127,14 @@ class ChatterboxTurboTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
+
+        # Initialize watermarker with graceful error handling
+        if perth.PerthImplicitWatermarker is None:
+            raise ImportError(
+                "PerthImplicitWatermarker is not available. This is likely because 'setuptools' is missing.\n"
+                "Please install it with: pip install setuptools\n"
+                "If the issue persists, try reinstalling perth: pip install --force-reinstall resemble-perth"
+            )
         self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
