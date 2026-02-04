@@ -29,13 +29,7 @@ class T3Cond:
                 setattr(self, k, v.to(device=device, dtype=dtype if is_fp else None))
         return self
 
-    def save(self, fpath):
-        torch.save(self.__dict__, fpath)
 
-    @staticmethod
-    def load(fpath, map_location="cpu"):
-        kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
-        return T3Cond(**kwargs)
 
 
 class T3CondEnc(nn.Module):
