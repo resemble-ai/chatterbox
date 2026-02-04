@@ -35,6 +35,7 @@ SUPPORTED_LANGUAGES = {
   "it": "Italian",
   "ja": "Japanese",
   "ko": "Korean",
+  "ml": "Malayalam",  # Added Malayalam support configuration - Contributed by Ahmed Shajahan
   "ms": "Malay",
   "nl": "Dutch",
   "no": "Norwegian",
@@ -161,9 +162,14 @@ class ChatterboxMultilingualTTS:
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(ckpt_dir)
 
+        if device in ["cpu", "mps"]:
+            map_location = torch.device('cpu')
+        else:
+            map_location = None
+
         ve = VoiceEncoder()
         ve.load_state_dict(
-            torch.load(ckpt_dir / "ve.pt", weights_only=True)
+            torch.load(ckpt_dir / "ve.pt", map_location=map_location, weights_only=True)
         )
         ve.to(device).eval()
 
@@ -176,7 +182,7 @@ class ChatterboxMultilingualTTS:
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", weights_only=True)
+            torch.load(ckpt_dir / "s3gen.pt", map_location=map_location, weights_only=True)
         )
         s3gen.to(device).eval()
 
@@ -186,23 +192,23 @@ class ChatterboxMultilingualTTS:
 
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice).to(device)
+            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device: torch.device) -> 'ChatterboxMultilingualTTS':
+    def from_pretrained(cls, device: torch.device, token: str = None) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(
             snapshot_download(
                 repo_id=REPO_ID,
                 repo_type="model",
-                revision="main", 
+                revision="main",
                 allow_patterns=["ve.pt", "t3_mtl23ls_v2.safetensors", "s3gen.pt", "grapheme_mtl_merged_expanded_v1.json", "conds.pt", "Cangjie5_TC.json"],
-                token=os.getenv("HF_TOKEN"),
+                token=token or os.getenv("HF_TOKEN"),
             )
         )
         return cls.from_local(ckpt_dir, device)
-    
+
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
@@ -242,6 +248,28 @@ class ChatterboxMultilingualTTS:
         min_p=0.05,
         top_p=1.0,
     ):
+        """
+        Generate speech from text.
+
+        Args:
+            text (str): The text to synthesize.
+            language_id (str): The language code (e.g., 'en', 'fr', 'ml').
+            audio_prompt_path (str, optional): Path to reference audio for voice cloning.
+            exaggeration (float, optional): Controls speech expressiveness. Defaults to 0.5.
+            cfg_weight (float, optional): CFG guidance weight. Defaults to 0.5.
+            temperature (float, optional): Sampling temperature. Defaults to 0.8.
+            repetition_penalty (float, optional): Penalty for repetition. Defaults to 2.0.
+            min_p (float, optional): Minimum probability for sampling. Defaults to 0.05.
+            top_p (float, optional): Top-p sampling. Defaults to 1.0.
+
+        Returns:
+            torch.Tensor: Generated audio waveform tensor (1, N).
+
+        Note:
+            For Malayalam ('ml'), this method uses a fallback mechanism via the `gTTS` library
+            as the underlying model does not natively support it efficiently.
+        """
+
         # Validate language_id
         if language_id and language_id.lower() not in SUPPORTED_LANGUAGES:
             supported_langs = ", ".join(SUPPORTED_LANGUAGES.keys())
@@ -249,11 +277,12 @@ class ChatterboxMultilingualTTS:
                 f"Unsupported language_id '{language_id}'. "
                 f"Supported languages: {supported_langs}"
             )
-        
+
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
-            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+            if self.conds is None:
+                raise ValueError("Please `prepare_conditionals` first or specify `audio_prompt_path`")
 
         # Update exaggeration if needed
         if float(exaggeration) != float(self.conds.t3.emotion_adv[0, 0, 0].item()):
@@ -263,6 +292,32 @@ class ChatterboxMultilingualTTS:
                 cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
+
+        if language_id and language_id.lower() == "ml":
+            # Malayalam fallback using gTTS - Contributed by Ahmed Shajahan
+            try:
+                from gtts import gTTS
+                import io
+                import soundfile as sf
+                import librosa
+
+                print("Using gTTS fallback for Malayalam...")
+                tts = gTTS(text, lang='ml')
+                fp = io.BytesIO()
+                tts.write_to_fp(fp)
+                fp.seek(0)
+
+                # Load as float32
+                wav, sr = sf.read(fp)
+
+                # Resample to match model SR if needed
+                if sr != self.sr:
+                    wav = librosa.resample(wav, orig_sr=sr, target_sr=self.sr)
+
+                return torch.from_numpy(wav).float().unsqueeze(0)
+            except Exception as e:
+                print(f"gTTS fallback failed: {e}")
+                # Fallthrough to original model if gTTS fails (though unlikely to work well)
 
         # Norm and tokenize text
         text = punc_norm(text)
