@@ -90,10 +90,10 @@ def punc_norm(text: str) -> str:
         ("—", "-"),
         ("–", "-"),
         (" ,", ","),
-        ("“", '"'),
-        ("”", '"'),
-        ("‘", "'"),
-        ("’", "'"),
+        (""", '"'),
+        (""", '"'),
+        ("'", "'"),
+        ("'", "'"),
     ]
     for old_char_sequence, new_char in punc_to_replace:
         text = text.replace(old_char_sequence, new_char)
@@ -155,6 +155,11 @@ class StreamingMetrics:
     total_generation_time: Optional[float] = None
     total_audio_duration: Optional[float] = None
     chunk_count: int = 0
+    # Profiling times
+    prep_time: Optional[float] = None
+    tokenization_time: Optional[float] = None
+    first_token_time: Optional[float] = None
+    first_decode_time: Optional[float] = None
 
 
 class ChatterboxMultilingualTTS:
@@ -338,10 +343,9 @@ class ChatterboxMultilingualTTS:
         """
         Mirrors the patched-model compilation logic in T3.inference(), but kept here so we
         can stream without modifying T3 itself.
+        
+        OPTIMIZED: Only builds once, then caches the compiled model.
         """
-        # Force rebuild each call (same behavior as T3.inference sets compiled=False).
-        self.t3.compiled = False
-
         if not self.t3.compiled:
             alignment_stream_analyzer = None
             if getattr(self.t3.hp, "is_multilingual", False):
@@ -374,14 +378,22 @@ class ChatterboxMultilingualTTS:
         repetition_penalty: float = 2.0,
         min_p: float = 0.05,
         top_p: float = 1.0,
-        chunk_size: int = 25,
+        chunk_sizes: list = None,  # OPTIMIZED: Support variable chunk sizes
         stop_on_eos: bool = True,
     ) -> Generator[torch.Tensor, None, None]:
         """
         Stream speech tokens from T3 using the same logic as T3.inference(), but yielding
-        token chunks every `chunk_size`.
+        token chunks with adaptive sizing.
+        
+        Args:
+            chunk_sizes: List of chunk sizes [first_chunk, second_chunk, ...]. 
+                        If None, uses [25] for all chunks.
+        
         Yields: torch.LongTensor of shape (Tchunk,)  (1D tokens)
         """
+        if chunk_sizes is None:
+            chunk_sizes = [25]
+        
         # text_tokens is expected as (B, Ttext) where B=2 for CFG
         text_tokens = torch.atleast_2d(text_tokens).to(dtype=torch.long, device=self.t3.device)
 
@@ -431,6 +443,7 @@ class ChatterboxMultilingualTTS:
         past = output.past_key_values
 
         chunk_buf = []
+        chunk_idx = 0
 
         for i in range(max_new_tokens):
             logits_step = output.logits[:, -1, :]  # (2,V) for CFG
@@ -468,11 +481,15 @@ class ChatterboxMultilingualTTS:
                     yield out_chunk
                 return
 
+            # Get current target chunk size
+            current_chunk_size = chunk_sizes[min(chunk_idx, len(chunk_sizes) - 1)]
+
             # Yield full chunk
-            if len(chunk_buf) >= chunk_size:
+            if len(chunk_buf) >= current_chunk_size:
                 out_chunk = torch.cat(chunk_buf, dim=1).squeeze(0)  # (Tchunk,)
                 yield out_chunk
                 chunk_buf = []
+                chunk_idx += 1
 
             # Next token embed
             next_token_embed = self.t3.speech_emb(next_token)
@@ -507,6 +524,8 @@ class ChatterboxMultilingualTTS:
         Decode a token buffer into an audio chunk by running S3Gen on
         (context + new_tokens) and cropping context audio.
         """
+        decode_start = time.time()
+        
         new_tokens = torch.cat(token_buffer, dim=-1)  # 1D
 
         if all_tokens_so_far is not None and all_tokens_so_far.numel() > 0:
@@ -553,10 +572,14 @@ class ChatterboxMultilingualTTS:
         watermarked_chunk = self.watermarker.apply_watermark(audio_chunk, sample_rate=self.sr)
         audio_tensor = torch.from_numpy(watermarked_chunk).unsqueeze(0)
 
+        decode_time = time.time() - decode_start
+
         if metrics.chunk_count == 0:
             metrics.latency_to_first_chunk = time.time() - start_time
+            metrics.first_decode_time = decode_time
             if print_metrics:
-                print(f"Latency to first chunk: {metrics.latency_to_first_chunk:.3f}s")
+                print(f"⏱️ Latency to first chunk: {metrics.latency_to_first_chunk:.3f}s")
+                print(f"⏱️ First decode time: {metrics.first_decode_time:.3f}s")
 
         metrics.chunk_count += 1
         return audio_tensor, audio_duration, True
@@ -573,13 +596,22 @@ class ChatterboxMultilingualTTS:
         min_p: float = 0.05,
         top_p: float = 1.0,
         chunk_size: int = 25,
+        first_chunk_size: int = 5,  # OPTIMIZED: Smaller first chunk for lower latency
         context_window: int = 50,
         fade_duration: float = 0.02,
         print_metrics: bool = False,
         max_new_tokens: int = 1000,
+        max_history_tokens: int = 500,  # OPTIMIZED: Limit token history growth
     ) -> Generator[Tuple[torch.Tensor, StreamingMetrics], None, None]:
         """
         Streaming version of multilingual generate that yields audio chunks as they are produced.
+        
+        OPTIMIZED with:
+        - Cached model compilation (no rebuild on each call)
+        - Smaller first chunk (default 5 tokens vs 25)
+        - Progressive chunk sizing
+        - Detailed profiling metrics
+        - Memory-efficient token history
 
         Yields:
             (audio_chunk_tensor, metrics)
@@ -595,6 +627,8 @@ class ChatterboxMultilingualTTS:
         start_time = time.time()
         metrics = StreamingMetrics()
 
+        # === PREPARATION PHASE ===
+        prep_start = time.time()
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:
@@ -608,8 +642,13 @@ class ChatterboxMultilingualTTS:
                 cond_prompt_speech_tokens=_cond.cond_prompt_speech_tokens,
                 emotion_adv=exaggeration * torch.ones(1, 1, 1),
             ).to(device=self.device)
+        
+        metrics.prep_time = time.time() - prep_start
+        if print_metrics:
+            print(f"⏱️ Preparation time: {metrics.prep_time:.3f}s")
 
-        # Norm and tokenize text
+        # === TOKENIZATION PHASE ===
+        tok_start = time.time()
         text = punc_norm(text)
         tok = self.tokenizer.text_to_tokens(
             text, language_id=language_id.lower() if language_id else None
@@ -622,9 +661,20 @@ class ChatterboxMultilingualTTS:
         eot = self.t3.hp.stop_text_token
         text_tokens = F.pad(text_tokens, (1, 0), value=sot)
         text_tokens = F.pad(text_tokens, (0, 1), value=eot)
+        
+        metrics.tokenization_time = time.time() - tok_start
+        if print_metrics:
+            print(f"⏱️ Tokenization time: {metrics.tokenization_time:.3f}s")
 
+        # === STREAMING GENERATION ===
         total_audio_length = 0.0
         all_tokens_processed = torch.empty((0,), dtype=torch.long, device=self.device)
+        
+        # Progressive chunk sizing: start small, then grow
+        chunk_sizes = [first_chunk_size, chunk_size]
+
+        first_token_start = time.time()
+        first_token_measured = False
 
         with torch.inference_mode():
             for token_chunk_1d in self._t3_inference_stream(
@@ -636,9 +686,15 @@ class ChatterboxMultilingualTTS:
                 repetition_penalty=repetition_penalty,
                 min_p=min_p,
                 top_p=top_p,
-                chunk_size=chunk_size,
+                chunk_sizes=chunk_sizes,
                 stop_on_eos=True,
             ):
+                if not first_token_measured:
+                    metrics.first_token_time = time.time() - first_token_start
+                    if print_metrics:
+                        print(f"⏱️ Time to first token: {metrics.first_token_time:.3f}s")
+                    first_token_measured = True
+                
                 # token_chunk_1d: (Tchunk,)
                 audio_tensor, audio_duration, success = self._process_token_buffer(
                     [token_chunk_1d],
@@ -654,18 +710,21 @@ class ChatterboxMultilingualTTS:
                     total_audio_length += audio_duration
                     yield audio_tensor, metrics
 
-                # Update all tokens processed
+                # Update all tokens processed with memory limit
                 if all_tokens_processed.numel() == 0:
                     all_tokens_processed = token_chunk_1d
                 else:
                     all_tokens_processed = torch.cat([all_tokens_processed, token_chunk_1d], dim=-1)
+                    # Trim history to prevent unbounded growth
+                    if all_tokens_processed.numel() > max_history_tokens:
+                        all_tokens_processed = all_tokens_processed[-max_history_tokens:]
 
         metrics.total_generation_time = time.time() - start_time
         metrics.total_audio_duration = total_audio_length
         if total_audio_length > 0:
             metrics.rtf = metrics.total_generation_time / total_audio_length
             if print_metrics:
-                print(f"Total generation time: {metrics.total_generation_time:.3f}s")
-                print(f"Total audio duration: {metrics.total_audio_duration:.3f}s")
-                print(f"RTF (Real-Time Factor): {metrics.rtf:.3f}")
-                print(f"Total chunks yielded: {metrics.chunk_count}")
+                print(f"⏱️ Total generation time: {metrics.total_generation_time:.3f}s")
+                print(f"⏱️ Total audio duration: {metrics.total_audio_duration:.3f}s")
+                print(f"⏱️ RTF (Real-Time Factor): {metrics.rtf:.3f}")
+                print(f"⏱️ Total chunks yielded: {metrics.chunk_count}")
