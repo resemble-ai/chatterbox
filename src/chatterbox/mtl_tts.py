@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import os
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Generator, Tuple, Optional, Dict
 
 import librosa
@@ -211,10 +213,26 @@ class ChatterboxMultilingualTTS:
 
         s3gen = S3Gen()
         s3gen.load_state_dict(torch.load(ckpt_dir / "s3gen.pt", weights_only=True))
-        # NOTE: S3Gen stays in fp32. Its internal xvector speaker encoder explicitly
-        # casts inputs to float32, which causes dtype mismatches if weights are fp16.
-        # T3 (the transformer) gets the fp16 speedup where it matters most.
         s3gen.to(device).eval()
+
+        # OPTIMIZATION: Convert S3Gen's heavy compute paths to fp16.
+        # The flow (conformer encoder + CFM decoder) runs 4-10 ODE steps per chunk — fp16 halves bandwidth.
+        # HiFiGAN is a conv network that also benefits from fp16.
+        # speaker_encoder stays fp32: its xvector internally casts to fp32 and needs fp32 weights.
+        # tokenizer stays fp32: runs on 16kHz wav, negligible cost anyway.
+        if device != "cpu":
+            s3gen.flow.half()
+            s3gen.mel2wav.half()
+            # Verify speaker_encoder stayed fp32
+            assert next(s3gen.speaker_encoder.parameters()).dtype == torch.float32
+
+        # OPTIMIZATION: torch.compile on HiFiGAN's inference method for kernel fusion.
+        # Note: S3Gen calls mel2wav.inference(), not __call__(), so we compile that directly.
+        # Using default mode (not reduce-overhead) since mel sizes vary per chunk.
+        try:
+            s3gen.mel2wav.inference = torch.compile(s3gen.mel2wav.inference, mode="default")
+        except Exception:
+            pass  # Graceful fallback if torch.compile unavailable or fails
 
         tokenizer = MTLTokenizer(str(ckpt_dir / "grapheme_mtl_merged_expanded_v1.json"))
 
@@ -337,6 +355,7 @@ class ChatterboxMultilingualTTS:
             wav, _ = self.s3gen.inference(
                 speech_tokens=speech_tokens,
                 ref_dict=self.conds.gen,
+                n_cfm_timesteps=4,  # OPTIMIZATION: 4 vs default 10 — 60% fewer ODE steps
             )
             wav = wav.squeeze(0).detach().float().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
@@ -402,19 +421,24 @@ class ChatterboxMultilingualTTS:
         Mirrors the patched-model compilation logic in T3.inference(), but kept here so we
         can stream without modifying T3 itself.
         
-        OPTIMIZED: Only builds once, then caches the compiled model.
+        OPTIMIZED: Only builds patched model once, then caches it.
+        IMPORTANT: Always creates a fresh AlignmentStreamAnalyzer per request because
+        text_tokens_slice depends on the current text length (varies between requests).
+        This matches the official T3.inference() behavior which rebuilds every time.
         """
-        if not self.t3.compiled:
-            alignment_stream_analyzer = None
-            if getattr(self.t3.hp, "is_multilingual", False):
-                alignment_stream_analyzer = AlignmentStreamAnalyzer(
-                    self.t3.tfmr,
-                    None,
-                    text_tokens_slice=(len_cond, len_cond + text_tokens_2d.size(-1)),
-                    alignment_layer_idx=9,
-                    eos_idx=self.t3.hp.stop_speech_token,
-                )
+        # Always create a fresh alignment analyzer — text_tokens_slice changes per request
+        alignment_stream_analyzer = None
+        if getattr(self.t3.hp, "is_multilingual", False):
+            alignment_stream_analyzer = AlignmentStreamAnalyzer(
+                self.t3.tfmr,
+                None,
+                text_tokens_slice=(len_cond, len_cond + text_tokens_2d.size(-1)),
+                alignment_layer_idx=9,
+                eos_idx=self.t3.hp.stop_speech_token,
+            )
 
+        if not self.t3.compiled:
+            # First call: build the full patched model structure
             patched_model = T3HuggingfaceBackend(
                 config=self.t3.cfg,
                 llama=self.t3.tfmr,
@@ -427,6 +451,10 @@ class ChatterboxMultilingualTTS:
             
             # OPTIMIZATION: Patch non-target layers to use SDPA fast path
             self._patch_selective_attention()
+        else:
+            # Subsequent calls: just swap in the fresh analyzer
+            # This prevents dimension mismatches when text length varies between requests
+            self.t3.patched_model.alignment_stream_analyzer = alignment_stream_analyzer
 
     def _t3_inference_stream(
         self,
@@ -498,7 +526,7 @@ class ChatterboxMultilingualTTS:
             past_key_values=None,
             use_cache=True,
             output_attentions=True,
-            output_hidden_states=False,  # OPTIMIZATION: Nothing reads hidden states
+            output_hidden_states=True,
             return_dict=True,
         )
         past = output.past_key_values
@@ -561,7 +589,7 @@ class ChatterboxMultilingualTTS:
                 inputs_embeds=next_token_embed,
                 past_key_values=past,
                 output_attentions=True,
-                output_hidden_states=False,  # OPTIMIZATION: Nothing reads hidden states
+                output_hidden_states=True,
                 return_dict=True,
             )
             past = output.past_key_values
@@ -580,10 +608,21 @@ class ChatterboxMultilingualTTS:
         metrics: StreamingMetrics,
         print_metrics: bool,
         fade_duration: float = 0.02,
+        skip_watermark: bool = False,
+        n_cfm_timesteps: int = 4,
     ):
         """
-        Decode a token buffer into an audio chunk by running S3Gen on
-        (context + new_tokens) and cropping context audio.
+        Decode a token buffer into an audio chunk.
+        
+        OPTIMIZED:
+        - Split flow/hifigan: CFM on all tokens, HiFiGAN only on new mels (~50% HiFiGAN savings)
+        - Reduced CFM timesteps: 4 instead of default 10 (60% fewer ODE steps)
+        - fp16 flow + hifigan: halved memory bandwidth on all decode ops
+        
+        Pipeline:
+          1. CFM flow on [context_tokens + new_tokens] -> full mel spectrogram
+          2. Crop mels to only the new portion (skip context mels)
+          3. HiFiGAN on new mels only -> audio chunk
         """
         decode_start = time.time()
         
@@ -605,34 +644,60 @@ class ChatterboxMultilingualTTS:
         if clean_tokens.numel() == 0:
             return None, 0.0, False
 
-        wav, _ = self.s3gen.inference(
+        # === SPLIT VOCODER PIPELINE ===
+        # Step 1: Run CFM flow on ALL tokens (context + new) for mel coherence
+        # OPTIMIZATION: Use reduced CFM timesteps (4 vs default 10) — 60% fewer ODE steps
+        output_mels = self.s3gen.flow_inference(
             speech_tokens=clean_tokens,
             ref_dict=self.conds.gen,
+            finalize=True,
+            n_cfm_timesteps=n_cfm_timesteps,
         )
-        # OPTIMIZATION NOTE: Model may run in fp16, but watermarker/numpy need float32
-        wav = wav.squeeze(0).detach().float().cpu().numpy()
-
-        # Crop away context portion
+        # output_mels shape: (1, 80, T_mel) where T_mel ~ 2 * n_tokens
+        
+        # Step 2: Crop mels to only the NEW portion (skip context mels)
         if context_length > 0:
-            samples_per_token = len(wav) / max(int(clean_tokens.numel()), 1)
-            skip_samples = int(context_length * samples_per_token)
-            audio_chunk = wav[skip_samples:]
+            total_tokens = int(clean_tokens.numel())
+            total_mel_frames = output_mels.shape[-1]
+            mel_per_token = total_mel_frames / max(total_tokens, 1)
+            skip_mel_frames = int(context_length * mel_per_token)
+            new_mels = output_mels[:, :, skip_mel_frames:]
         else:
-            audio_chunk = wav
+            new_mels = output_mels
+
+        if new_mels.shape[-1] == 0:
+            return None, 0.0, False
+
+        # Step 3: Run HiFiGAN ONLY on new mels (saves ~50% of HiFiGAN per chunk)
+        new_mels = new_mels.to(dtype=self.s3gen.dtype)
+        wav, _ = self.s3gen.hift_inference(new_mels)
+        audio_chunk = wav.squeeze(0).detach().float().cpu().numpy()
 
         if len(audio_chunk) == 0:
             return None, 0.0, False
 
-        # Fade-in to soften boundaries
+        # Apply trim_fade to suppress reference spillover (matches s3gen.inference behavior)
+        # Cache the numpy version to avoid repeated GPU->CPU conversion
+        if not hasattr(self, '_trim_fade_np'):
+            self._trim_fade_np = self.s3gen.trim_fade.cpu().numpy()
+        fade_len = min(len(self._trim_fade_np), len(audio_chunk))
+        if metrics.chunk_count == 0 and fade_len > 0:
+            audio_chunk[:fade_len] *= self._trim_fade_np[:fade_len]
+
+        # Fade-in to soften chunk boundaries
         fade_samples = int(fade_duration * self.sr)
-        if fade_samples > 0:
+        if fade_samples > 0 and metrics.chunk_count > 0:
             fade_samples = min(fade_samples, len(audio_chunk))
             fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=audio_chunk.dtype)
             audio_chunk[:fade_samples] *= fade_in
 
         audio_duration = len(audio_chunk) / self.sr
-        watermarked_chunk = self.watermarker.apply_watermark(audio_chunk, sample_rate=self.sr)
-        audio_tensor = torch.from_numpy(watermarked_chunk).unsqueeze(0)
+
+        # Watermarking: optionally skip per-chunk for speed (apply in server instead)
+        if not skip_watermark:
+            audio_chunk = self.watermarker.apply_watermark(audio_chunk, sample_rate=self.sr)
+        
+        audio_tensor = torch.from_numpy(audio_chunk).unsqueeze(0)
 
         decode_time = time.time() - decode_start
 
@@ -640,8 +705,8 @@ class ChatterboxMultilingualTTS:
             metrics.latency_to_first_chunk = time.time() - start_time
             metrics.first_decode_time = decode_time
             if print_metrics:
-                print(f"â±ï¸ Latency to first chunk: {metrics.latency_to_first_chunk:.3f}s")
-                print(f"â±ï¸ First decode time: {metrics.first_decode_time:.3f}s")
+                print(f"Latency to first chunk: {metrics.latency_to_first_chunk:.3f}s")
+                print(f"First decode time: {metrics.first_decode_time:.3f}s")
 
         metrics.chunk_count += 1
         return audio_tensor, audio_duration, True
@@ -658,22 +723,27 @@ class ChatterboxMultilingualTTS:
         min_p: float = 0.05,
         top_p: float = 1.0,
         chunk_size: int = 25,
-        first_chunk_size: int = 5,  # OPTIMIZED: Smaller first chunk for lower latency
-        context_window: int = 25,  # OPTIMIZATION: Reduced from 50 — fewer vocoder tokens per chunk
+        first_chunk_size: int = 5,
+        context_window: int = 25,
         fade_duration: float = 0.02,
         print_metrics: bool = False,
         max_new_tokens: int = 1000,
-        max_history_tokens: int = 500,  # OPTIMIZED: Limit token history growth
+        max_history_tokens: int = 500,
+        skip_watermark: bool = False,
+        n_cfm_timesteps: int = 4,
     ) -> Generator[Tuple[torch.Tensor, StreamingMetrics], None, None]:
         """
-        Streaming version of multilingual generate that yields audio chunks as they are produced.
+        Streaming TTS that yields audio chunks as they are produced.
         
-        OPTIMIZED with:
-        - Cached model compilation (no rebuild on each call)
-        - Smaller first chunk (default 5 tokens vs 25)
-        - Progressive chunk sizing
-        - Detailed profiling metrics
-        - Memory-efficient token history
+        OPTIMIZATIONS:
+        - Split vocoder: CFM on all tokens, HiFiGAN only on new mels (~50% HiFiGAN savings)
+        - Reduced CFM timesteps: 4 vs default 10 (60% fewer ODE solver passes)
+        - fp16 S3Gen flow + HiFiGAN: halved memory bandwidth on decode
+        - Concurrent pipeline: T3 generates next tokens WHILE vocoder decodes current chunk
+        - Deferred watermarking: skip_watermark=True to apply watermark in server instead
+        - Selective attention: only layer 9 uses eager attention, rest use fast SDPA
+        - T3 in float16, autocast for generation loop
+        - Reduced context_window (25 vs 50)
 
         Yields:
             (audio_chunk_tensor, metrics)
@@ -707,7 +777,7 @@ class ChatterboxMultilingualTTS:
         
         metrics.prep_time = time.time() - prep_start
         if print_metrics:
-            print(f"â±ï¸ Preparation time: {metrics.prep_time:.3f}s")
+            print(f"Preparation time: {metrics.prep_time:.3f}s")
 
         # === TOKENIZATION PHASE ===
         tok_start = time.time()
@@ -726,71 +796,122 @@ class ChatterboxMultilingualTTS:
         
         metrics.tokenization_time = time.time() - tok_start
         if print_metrics:
-            print(f"â±ï¸ Tokenization time: {metrics.tokenization_time:.3f}s")
+            print(f"Tokenization time: {metrics.tokenization_time:.3f}s")
 
-        # === STREAMING GENERATION ===
+        # === STREAMING GENERATION WITH CONCURRENT PIPELINE ===
         total_audio_length = 0.0
         all_tokens_processed = torch.empty((0,), dtype=torch.long, device=self.device)
         
-        # Progressive chunk sizing: start small, then grow
         chunk_sizes = [first_chunk_size, chunk_size]
 
         first_token_start = time.time()
         first_token_measured = False
 
-        # OPTIMIZATION: Use autocast for mixed precision — ensures all ops use fp16 where safe
+        # OPTIMIZATION: Use autocast for mixed precision
         _dev_type = self.device.split(':')[0] if self.device != "cpu" else "cpu"
         _amp_dtype = torch.float16 if _dev_type == "cuda" else torch.bfloat16
 
-        with torch.inference_mode(), torch.autocast(device_type=_dev_type, dtype=_amp_dtype):
-            for token_chunk_1d in self._t3_inference_stream(
-                t3_cond=self.conds.t3,
-                text_tokens=text_tokens,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                cfg_weight=cfg_weight,
-                repetition_penalty=repetition_penalty,
-                min_p=min_p,
-                top_p=top_p,
-                chunk_sizes=chunk_sizes,
-                stop_on_eos=True,
-            ):
-                if not first_token_measured:
-                    metrics.first_token_time = time.time() - first_token_start
-                    if print_metrics:
-                        print(f"â±ï¸ Time to first token: {metrics.first_token_time:.3f}s")
-                    first_token_measured = True
-                
-                # token_chunk_1d: (Tchunk,)
-                audio_tensor, audio_duration, success = self._process_token_buffer(
-                    [token_chunk_1d],
-                    all_tokens_processed,
+        # Concurrent pipeline: decode chunk N in background while T3 generates chunk N+1
+        # Use a dedicated CUDA stream for vocoder to overlap GPU work
+        vocoder_stream = None
+        if _dev_type == "cuda":
+            vocoder_stream = torch.cuda.Stream()
+
+        decode_executor = ThreadPoolExecutor(max_workers=1)
+        pending_decode: Optional[Future] = None
+        pending_tokens_for_history: Optional[torch.Tensor] = None
+
+        def _decode_chunk(token_chunk, all_prev_tokens):
+            """Run vocoder decode, optionally on a separate CUDA stream."""
+            if vocoder_stream is not None:
+                with torch.cuda.stream(vocoder_stream):
+                    result = self._process_token_buffer(
+                        [token_chunk],
+                        all_prev_tokens,
+                        context_window,
+                        start_time,
+                        metrics,
+                        print_metrics,
+                        fade_duration=fade_duration,
+                        skip_watermark=skip_watermark,
+                        n_cfm_timesteps=n_cfm_timesteps,
+                    )
+                vocoder_stream.synchronize()
+                return result
+            else:
+                return self._process_token_buffer(
+                    [token_chunk],
+                    all_prev_tokens,
                     context_window,
                     start_time,
                     metrics,
                     print_metrics,
                     fade_duration=fade_duration,
+                    skip_watermark=skip_watermark,
+                    n_cfm_timesteps=n_cfm_timesteps,
                 )
 
+        try:
+            with torch.inference_mode(), torch.autocast(device_type=_dev_type, dtype=_amp_dtype):
+                for token_chunk_1d in self._t3_inference_stream(
+                    t3_cond=self.conds.t3,
+                    text_tokens=text_tokens,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    cfg_weight=cfg_weight,
+                    repetition_penalty=repetition_penalty,
+                    min_p=min_p,
+                    top_p=top_p,
+                    chunk_sizes=chunk_sizes,
+                    stop_on_eos=True,
+                ):
+                    if not first_token_measured:
+                        metrics.first_token_time = time.time() - first_token_start
+                        if print_metrics:
+                            print(f"Time to first token chunk: {metrics.first_token_time:.3f}s")
+                        first_token_measured = True
+                    
+                    # === CONCURRENT PIPELINE ===
+                    # If there's a pending decode from the previous iteration, 
+                    # wait for it and yield the result. This means T3 was generating
+                    # this chunk's tokens WHILE the previous chunk was being decoded.
+                    if pending_decode is not None:
+                        audio_tensor, audio_duration, success = pending_decode.result()
+                        if success:
+                            total_audio_length += audio_duration
+                            yield audio_tensor, metrics
+                        
+                        # Update token history from the previous chunk
+                        if pending_tokens_for_history is not None:
+                            if all_tokens_processed.numel() == 0:
+                                all_tokens_processed = pending_tokens_for_history
+                            else:
+                                all_tokens_processed = torch.cat([all_tokens_processed, pending_tokens_for_history], dim=-1)
+                                if all_tokens_processed.numel() > max_history_tokens:
+                                    all_tokens_processed = all_tokens_processed[-max_history_tokens:]
+
+                    # Submit current chunk for background decoding
+                    # Clone the token history snapshot so the background thread has stable data
+                    history_snapshot = all_tokens_processed.clone() if all_tokens_processed.numel() > 0 else all_tokens_processed
+                    pending_decode = decode_executor.submit(_decode_chunk, token_chunk_1d, history_snapshot)
+                    pending_tokens_for_history = token_chunk_1d
+
+            # === Flush the last pending decode ===
+            if pending_decode is not None:
+                audio_tensor, audio_duration, success = pending_decode.result()
                 if success:
                     total_audio_length += audio_duration
                     yield audio_tensor, metrics
 
-                # Update all tokens processed with memory limit
-                if all_tokens_processed.numel() == 0:
-                    all_tokens_processed = token_chunk_1d
-                else:
-                    all_tokens_processed = torch.cat([all_tokens_processed, token_chunk_1d], dim=-1)
-                    # Trim history to prevent unbounded growth
-                    if all_tokens_processed.numel() > max_history_tokens:
-                        all_tokens_processed = all_tokens_processed[-max_history_tokens:]
+        finally:
+            decode_executor.shutdown(wait=False)
 
         metrics.total_generation_time = time.time() - start_time
         metrics.total_audio_duration = total_audio_length
         if total_audio_length > 0:
             metrics.rtf = metrics.total_generation_time / total_audio_length
             if print_metrics:
-                print(f"â±ï¸ Total generation time: {metrics.total_generation_time:.3f}s")
-                print(f"â±ï¸ Total audio duration: {metrics.total_audio_duration:.3f}s")
-                print(f"â±ï¸ RTF (Real-Time Factor): {metrics.rtf:.3f}")
-                print(f"â±ï¸ Total chunks yielded: {metrics.chunk_count}")
+                print(f"Total generation time: {metrics.total_generation_time:.3f}s")
+                print(f"Total audio duration: {metrics.total_audio_duration:.3f}s")
+                print(f"RTF (Real-Time Factor): {metrics.rtf:.3f}")
+                print(f"Total chunks yielded: {metrics.chunk_count}")
