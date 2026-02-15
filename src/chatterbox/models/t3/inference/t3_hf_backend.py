@@ -73,25 +73,25 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
     def forward(
         self,
         inputs_embeds: torch.Tensor,
-        past_key_values: Optional[torch.Tensor]=None,
-        use_cache=True,
-        output_attentions=False,
-        output_hidden_states=True,
-        return_dict=True,
+        past_key_values: Optional[torch.Tensor] = None,
+        use_cache: bool = True,
+        output_attentions: bool = False,
+        output_hidden_states: bool = False,   # ✅ default False
+        return_dict: bool = True,
     ):
         """
-        This is a method used by huggingface's generate() method.
-        Overridden here to apply our custom layer norm and speech logit projection layers.
-
-        :param inputs_embeds: (B, S, C) float32 tensor of conditioning inputs. If past key values are given,
-        S should be 1.
+        Overridden HF forward to apply speech_head on transformer hidden state.
+    
+        IMPORTANT:
+        - We do NOT require output_hidden_states=True.
+        - We compute logits from last_hidden_state (always available) to avoid
+          materializing hidden_states lists every step (big speed win).
         """
         is_large_input = inputs_embeds.size(1) != 1
         has_cache = past_key_values is not None and len(past_key_values) > 0
-        assert not (is_large_input and has_cache)
-        assert return_dict
-        assert output_hidden_states
-
+        assert not (is_large_input and has_cache), "Cannot pass long inputs when cache is already populated"
+        assert return_dict, "This backend expects return_dict=True"
+    
         tfmr_out = self.model(
             inputs_embeds=inputs_embeds,
             past_key_values=past_key_values,
@@ -100,17 +100,14 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
             output_hidden_states=output_hidden_states,
             return_dict=True,
         )
-        hidden_states = tfmr_out.hidden_states[-1]  # (B, seq, dim)
-
-        logits = self.speech_head(hidden_states)
-        # assert inputs_embeds.size(0) == 1 # (disabled for CFG)
-
-        # NOTE: hallucination handler may modify logits to force emit an EOS token
-        # logits = self.alignment_stream_analyzer.step(logits)
-
+    
+        # ✅ Always available on HF models (LlamaModel returns this)
+        last_h = tfmr_out.last_hidden_state  # (B, seq, dim)
+        logits = self.speech_head(last_h)
+    
         return CausalLMOutputWithCrossAttentions(
             logits=logits,
             past_key_values=tfmr_out.past_key_values,
-            hidden_states=tfmr_out.hidden_states,
-            attentions=tfmr_out.attentions,
+            hidden_states=(tfmr_out.hidden_states if output_hidden_states else None),
+            attentions=(tfmr_out.attentions if output_attentions else None),
         )

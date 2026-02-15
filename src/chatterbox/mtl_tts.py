@@ -215,24 +215,11 @@ class ChatterboxMultilingualTTS:
         s3gen.load_state_dict(torch.load(ckpt_dir / "s3gen.pt", weights_only=True))
         s3gen.to(device).eval()
 
-        # OPTIMIZATION: Convert S3Gen's heavy compute paths to fp16.
-        # The flow (conformer encoder + CFM decoder) runs 4-10 ODE steps per chunk — fp16 halves bandwidth.
-        # HiFiGAN is a conv network that also benefits from fp16.
-        # speaker_encoder stays fp32: its xvector internally casts to fp32 and needs fp32 weights.
-        # tokenizer stays fp32: runs on 16kHz wav, negligible cost anyway.
-        if device != "cpu":
-            s3gen.flow.half()
-            s3gen.mel2wav.half()
-            # Verify speaker_encoder stayed fp32
-            assert next(s3gen.speaker_encoder.parameters()).dtype == torch.float32
-
-        # OPTIMIZATION: torch.compile on HiFiGAN's inference method for kernel fusion.
-        # Note: S3Gen calls mel2wav.inference(), not __call__(), so we compile that directly.
-        # Using default mode (not reduce-overhead) since mel sizes vary per chunk.
-        try:
-            s3gen.mel2wav.inference = torch.compile(s3gen.mel2wav.inference, mode="default")
-        except Exception:
-            pass  # Graceful fallback if torch.compile unavailable or fails
+        # NOTE: Explicit .half() on s3gen.flow / s3gen.mel2wav was removed.
+        # The CFM ODE solver and HiFiGAN create internal fp32 tensors (timestep embeddings,
+        # noise vectors, etc.) that clash with fp16 weights. Instead, we use torch.autocast
+        # at the inference call sites in _process_token_buffer(), which handles mixed dtypes
+        # correctly by casting at op boundaries.
 
         tokenizer = MTLTokenizer(str(ckpt_dir / "grapheme_mtl_merged_expanded_v1.json"))
 
@@ -352,11 +339,14 @@ class ChatterboxMultilingualTTS:
 
             speech_tokens = drop_invalid_tokens(speech_tokens).to(self.device)
 
-            wav, _ = self.s3gen.inference(
-                speech_tokens=speech_tokens,
-                ref_dict=self.conds.gen,
-                n_cfm_timesteps=4,  # OPTIMIZATION: 4 vs default 10 — 60% fewer ODE steps
-            )
+            autocast_device = "cuda" if "cuda" in str(self.device) else str(self.device)
+            autocast_enabled = autocast_device in ("cuda", "mps")
+            with torch.autocast(device_type=autocast_device, dtype=torch.float16, enabled=autocast_enabled):
+                wav, _ = self.s3gen.inference(
+                    speech_tokens=speech_tokens,
+                    ref_dict=self.conds.gen,
+                    n_cfm_timesteps=4,  # OPTIMIZATION: 4 vs default 10 — 60% fewer ODE steps
+                )
             wav = wav.squeeze(0).detach().float().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
 
@@ -368,31 +358,39 @@ class ChatterboxMultilingualTTS:
 
     def _patch_selective_attention(self):
         """
-        OPTIMIZATION: Patch all transformer layers EXCEPT the alignment analyzer's
-        target layer (layer 9) to skip attention weight computation.
+        OPTIMIZATION: Patch all transformer layers EXCEPT those used by the
+        AlignmentStreamAnalyzer to skip attention weight computation.
         
         How it works:
         - With output_attentions=True (required for alignment analyzer), ALL layers
           fall back from SDPA to slow eager attention. This is ~24x more work than needed.
         - This patch wraps each non-target layer's forward() to override output_attentions=False,
           so those layers use the fast SDPA kernel.
-        - Only layer 9 keeps output_attentions=True for the alignment analyzer.
         - The wrapper reformats the output tuple to match what the model expects.
         
-        Result: ~23 layers use fast SDPA, only 1 layer uses eager attention.
+        IMPORTANT: AlignmentStreamAnalyzer registers hooks on MULTIPLE layers, not just one.
+        From alignment_stream_analyzer.py:
+            LLAMA_ALIGNED_HEADS = [(12, 15), (13, 11), (9, 2)]
+        So layers 9, 12, and 13 all need real attention weights. All others get patched.
+        
+        Result: ~21 layers use fast SDPA, only 3 use eager attention.
         """
         if not hasattr(self.t3, 'tfmr') or not hasattr(self.t3.tfmr, 'layers'):
             return  # Safety check
         
-        target_layer_idx = 9  # AlignmentStreamAnalyzer's alignment_layer_idx
+        # AlignmentStreamAnalyzer needs attention weights from these layers.
+        # See LLAMA_ALIGNED_HEADS in alignment_stream_analyzer.py:
+        #   [(12, 15), (13, 11), (9, 2)]  →  layers 12, 13, 9
+        target_layer_indices = {9, 12, 13}
         
         # Check if already patched to avoid double-patching
         if getattr(self, '_attention_patched', False):
             return
         
+        patched_count = 0
         for i, layer in enumerate(self.t3.tfmr.layers):
-            if i == target_layer_idx:
-                continue  # Leave target layer unchanged — it needs attention weights
+            if i in target_layer_indices:
+                continue  # Leave target layers unchanged — they need attention weights
             
             original_forward = layer.forward
             
@@ -413,6 +411,7 @@ class ChatterboxMultilingualTTS:
                 return wrapper
             
             layer.forward = make_wrapper(original_forward)
+            patched_count += 1
         
         self._attention_patched = True
 
@@ -526,7 +525,7 @@ class ChatterboxMultilingualTTS:
             past_key_values=None,
             use_cache=True,
             output_attentions=True,
-            output_hidden_states=True,
+            output_hidden_states=False,
             return_dict=True,
         )
         past = output.past_key_values
@@ -589,7 +588,7 @@ class ChatterboxMultilingualTTS:
                 inputs_embeds=next_token_embed,
                 past_key_values=past,
                 output_attentions=True,
-                output_hidden_states=True,
+                output_hidden_states=False,
                 return_dict=True,
             )
             past = output.past_key_values
@@ -647,12 +646,16 @@ class ChatterboxMultilingualTTS:
         # === SPLIT VOCODER PIPELINE ===
         # Step 1: Run CFM flow on ALL tokens (context + new) for mel coherence
         # OPTIMIZATION: Use reduced CFM timesteps (4 vs default 10) — 60% fewer ODE steps
-        output_mels = self.s3gen.flow_inference(
-            speech_tokens=clean_tokens,
-            ref_dict=self.conds.gen,
-            finalize=True,
-            n_cfm_timesteps=n_cfm_timesteps,
-        )
+        # OPTIMIZATION: autocast to fp16 — avoids explicit .half() which breaks internal fp32 intermediates
+        autocast_device = "cuda" if "cuda" in str(self.device) else str(self.device)
+        autocast_enabled = autocast_device in ("cuda", "mps")
+        with torch.autocast(device_type=autocast_device, dtype=torch.float16, enabled=autocast_enabled):
+            output_mels = self.s3gen.flow_inference(
+                speech_tokens=clean_tokens,
+                ref_dict=self.conds.gen,
+                finalize=True,
+                n_cfm_timesteps=n_cfm_timesteps,
+            )
         # output_mels shape: (1, 80, T_mel) where T_mel ~ 2 * n_tokens
         
         # Step 2: Crop mels to only the NEW portion (skip context mels)
@@ -669,8 +672,8 @@ class ChatterboxMultilingualTTS:
             return None, 0.0, False
 
         # Step 3: Run HiFiGAN ONLY on new mels (saves ~50% of HiFiGAN per chunk)
-        new_mels = new_mels.to(dtype=self.s3gen.dtype)
-        wav, _ = self.s3gen.hift_inference(new_mels)
+        with torch.autocast(device_type=autocast_device, dtype=torch.float16, enabled=autocast_enabled):
+            wav, _ = self.s3gen.hift_inference(new_mels)
         audio_chunk = wav.squeeze(0).detach().float().cpu().numpy()
 
         if len(audio_chunk) == 0:
