@@ -83,12 +83,12 @@ def punc_norm(text: str) -> str:
     # Replace uncommon/llm punc
     punc_to_replace = [
         ("...", ", "),
-        ("…", ", "),
+        ("â€¦", ", "),
         (":", ","),
         (" - ", ", "),
         (";", ", "),
-        ("—", "-"),
-        ("–", "-"),
+        ("â€”", "-"),
+        ("â€“", "-"),
         (" ,", ","),
         (""", '"'),
         (""", '"'),
@@ -100,7 +100,7 @@ def punc_norm(text: str) -> str:
 
     # Add full stop if no ending punc
     text = text.rstrip(" ")
-    sentence_enders = {".", "!", "?", "-", ",", "、", "，", "。", "？", "！"}
+    sentence_enders = {".", "!", "?", "-", ",", "ã€", "ï¼Œ", "ã€‚", "ï¼Ÿ", "ï¼"}
     if not any(text.endswith(p) for p in sentence_enders):
         text += "."
 
@@ -217,7 +217,7 @@ class ChatterboxMultilingualTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device: torch.device, warmup: bool = True) -> "ChatterboxMultilingualTTS":
+    def from_pretrained(cls, device: torch.device) -> "ChatterboxMultilingualTTS":
         ckpt_dir = Path(
             snapshot_download(
                 repo_id=REPO_ID,
@@ -234,14 +234,7 @@ class ChatterboxMultilingualTTS:
                 token=os.getenv("HF_TOKEN"),
             )
         )
-        instance = cls.from_local(ckpt_dir, device)
-        
-        if warmup:
-            print("🔥 Warming up models (one-time setup)...")
-            instance._warmup_models()
-            print("✓ Models ready for fast inference")
-        
-        return instance
+        return cls.from_local(ckpt_dir, device)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         # Load reference wav
@@ -269,68 +262,6 @@ class ChatterboxMultilingualTTS:
         ).to(device=self.device)
 
         self.conds = Conditionals(t3_cond, s3gen_ref_dict)
-
-    def _warmup_models(self):
-        """
-        Warmup both T3 and S3Gen to trigger compilation/GPU kernel initialization.
-        This significantly reduces latency on the first real generation.
-        """
-        if self.conds is None:
-            raise RuntimeError("Cannot warmup without conditionals. Call prepare_conditionals first or use built-in voice.")
-        
-        warmup_start = time.time()
-        
-        # Longer warmup text to avoid alignment analyzer issues
-        warmup_text = "Hello, this is a warmup test for the model."
-        
-        try:
-            # Tokenize
-            warmup_tokens = self.tokenizer.text_to_tokens(warmup_text, language_id="en").to(self.device)
-            warmup_tokens = torch.cat([warmup_tokens, warmup_tokens], dim=0)  # CFG batch
-            
-            sot = self.t3.hp.start_text_token
-            eot = self.t3.hp.stop_text_token
-            warmup_tokens = F.pad(warmup_tokens, (1, 0), value=sot)
-            warmup_tokens = F.pad(warmup_tokens, (0, 1), value=eot)
-            
-            with torch.inference_mode():
-                # Warmup T3 (generate ~20 tokens to trigger compilation)
-                warmup_speech_tokens = []
-                for i, token_chunk in enumerate(self._t3_inference_stream(
-                    t3_cond=self.conds.t3,
-                    text_tokens=warmup_tokens,
-                    max_new_tokens=25,  # Enough tokens for alignment analyzer
-                    temperature=0.8,
-                    cfg_weight=0.5,
-                    repetition_penalty=2.0,
-                    min_p=0.05,
-                    top_p=1.0,
-                    chunk_sizes=[20],  # Larger chunk to ensure alignment matrix is big enough
-                    stop_on_eos=True,
-                )):
-                    warmup_speech_tokens.append(token_chunk)
-                    # Get at least one good chunk
-                    if i >= 0 and torch.cat(warmup_speech_tokens, dim=-1).numel() >= 15:
-                        break
-                
-                # Warmup S3Gen
-                if warmup_speech_tokens:
-                    warmup_tokens_cat = torch.cat(warmup_speech_tokens, dim=-1)
-                    clean_tokens = drop_invalid_tokens(warmup_tokens_cat).to(self.device)
-                    if clean_tokens.numel() > 0:
-                        _, _ = self.s3gen.inference(
-                            speech_tokens=clean_tokens,
-                            ref_dict=self.conds.gen,
-                        )
-            
-            warmup_time = time.time() - warmup_start
-            print(f"  Warmup completed in {warmup_time:.2f}s")
-            
-        except Exception as e:
-            # Warmup failed but don't crash - just warn
-            print(f"  ⚠️  Warmup failed (first generation may be slower): {e}")
-            print(f"  Continuing anyway...")
-
 
     def generate(
         self,
@@ -414,18 +345,22 @@ class ChatterboxMultilingualTTS:
         can stream without modifying T3 itself.
         
         OPTIMIZED: Only builds once, then caches the compiled model.
+        IMPORTANT: Creates fresh alignment analyzer for each request to avoid dimension mismatches.
         """
+        # Always create a fresh alignment stream analyzer for each request
+        # to avoid tensor dimension mismatches from different text lengths
+        alignment_stream_analyzer = None
+        if getattr(self.t3.hp, "is_multilingual", False):
+            alignment_stream_analyzer = AlignmentStreamAnalyzer(
+                self.t3.tfmr,
+                None,
+                text_tokens_slice=(len_cond, len_cond + text_tokens_2d.size(-1)),
+                alignment_layer_idx=9,
+                eos_idx=self.t3.hp.stop_speech_token,
+            )
+        
+        # If model not yet compiled, create the patched model structure
         if not self.t3.compiled:
-            alignment_stream_analyzer = None
-            if getattr(self.t3.hp, "is_multilingual", False):
-                alignment_stream_analyzer = AlignmentStreamAnalyzer(
-                    self.t3.tfmr,
-                    None,
-                    text_tokens_slice=(len_cond, len_cond + text_tokens_2d.size(-1)),
-                    alignment_layer_idx=9,
-                    eos_idx=self.t3.hp.stop_speech_token,
-                )
-
             patched_model = T3HuggingfaceBackend(
                 config=self.t3.cfg,
                 llama=self.t3.tfmr,
@@ -435,6 +370,10 @@ class ChatterboxMultilingualTTS:
             )
             self.t3.patched_model = patched_model
             self.t3.compiled = True
+        else:
+            # Model already compiled, just update the alignment analyzer
+            # This prevents dimension mismatches when text length varies between requests
+            self.t3.patched_model.alignment_stream_analyzer = alignment_stream_analyzer
 
     def _t3_inference_stream(
         self,
@@ -588,23 +527,16 @@ class ChatterboxMultilingualTTS:
         metrics: StreamingMetrics,
         print_metrics: bool,
         fade_duration: float = 0.02,
-        is_first_chunk: bool = False,  # NEW: Skip context on first chunk
     ):
         """
         Decode a token buffer into an audio chunk by running S3Gen on
         (context + new_tokens) and cropping context audio.
-        
-        For first chunk, skip context to minimize S3Gen overhead.
         """
         decode_start = time.time()
         
         new_tokens = torch.cat(token_buffer, dim=-1)  # 1D
 
-        # OPTIMIZATION: Skip context on first chunk to reduce S3Gen overhead
-        if is_first_chunk or all_tokens_so_far is None or all_tokens_so_far.numel() == 0:
-            tokens_to_process = new_tokens
-            context_length = 0
-        else:
+        if all_tokens_so_far is not None and all_tokens_so_far.numel() > 0:
             context_tokens = (
                 all_tokens_so_far[-context_window:]
                 if all_tokens_so_far.numel() > context_window
@@ -612,6 +544,9 @@ class ChatterboxMultilingualTTS:
             )
             tokens_to_process = torch.cat([context_tokens, new_tokens], dim=-1)
             context_length = int(context_tokens.numel())
+        else:
+            tokens_to_process = new_tokens
+            context_length = 0
 
         clean_tokens = drop_invalid_tokens(tokens_to_process).to(self.device)
         if clean_tokens.numel() == 0:
@@ -634,13 +569,12 @@ class ChatterboxMultilingualTTS:
         if len(audio_chunk) == 0:
             return None, 0.0, False
 
-        # Fade-in to soften boundaries (skip on first chunk as there's no boundary)
-        if not is_first_chunk:
-            fade_samples = int(fade_duration * self.sr)
-            if fade_samples > 0:
-                fade_samples = min(fade_samples, len(audio_chunk))
-                fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=audio_chunk.dtype)
-                audio_chunk[:fade_samples] *= fade_in
+        # Fade-in to soften boundaries
+        fade_samples = int(fade_duration * self.sr)
+        if fade_samples > 0:
+            fade_samples = min(fade_samples, len(audio_chunk))
+            fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=audio_chunk.dtype)
+            audio_chunk[:fade_samples] *= fade_in
 
         audio_duration = len(audio_chunk) / self.sr
         watermarked_chunk = self.watermarker.apply_watermark(audio_chunk, sample_rate=self.sr)
@@ -652,8 +586,8 @@ class ChatterboxMultilingualTTS:
             metrics.latency_to_first_chunk = time.time() - start_time
             metrics.first_decode_time = decode_time
             if print_metrics:
-                print(f"⏱️ Latency to first chunk: {metrics.latency_to_first_chunk:.3f}s")
-                print(f"⏱️ First decode time: {metrics.first_decode_time:.3f}s")
+                print(f"â±ï¸ Latency to first chunk: {metrics.latency_to_first_chunk:.3f}s")
+                print(f"â±ï¸ First decode time: {metrics.first_decode_time:.3f}s")
 
         metrics.chunk_count += 1
         return audio_tensor, audio_duration, True
@@ -719,7 +653,7 @@ class ChatterboxMultilingualTTS:
         
         metrics.prep_time = time.time() - prep_start
         if print_metrics:
-            print(f"⏱️ Preparation time: {metrics.prep_time:.3f}s")
+            print(f"â±ï¸ Preparation time: {metrics.prep_time:.3f}s")
 
         # === TOKENIZATION PHASE ===
         tok_start = time.time()
@@ -738,7 +672,7 @@ class ChatterboxMultilingualTTS:
         
         metrics.tokenization_time = time.time() - tok_start
         if print_metrics:
-            print(f"⏱️ Tokenization time: {metrics.tokenization_time:.3f}s")
+            print(f"â±ï¸ Tokenization time: {metrics.tokenization_time:.3f}s")
 
         # === STREAMING GENERATION ===
         total_audio_length = 0.0
@@ -749,7 +683,6 @@ class ChatterboxMultilingualTTS:
 
         first_token_start = time.time()
         first_token_measured = False
-        chunk_count = 0  # Track chunk count locally
 
         with torch.inference_mode():
             for token_chunk_1d in self._t3_inference_stream(
@@ -767,12 +700,10 @@ class ChatterboxMultilingualTTS:
                 if not first_token_measured:
                     metrics.first_token_time = time.time() - first_token_start
                     if print_metrics:
-                        print(f"⏱️ Time to first token: {metrics.first_token_time:.3f}s")
+                        print(f"â±ï¸ Time to first token: {metrics.first_token_time:.3f}s")
                     first_token_measured = True
                 
                 # token_chunk_1d: (Tchunk,)
-                is_first = (chunk_count == 0)  # Flag for first chunk optimization
-                
                 audio_tensor, audio_duration, success = self._process_token_buffer(
                     [token_chunk_1d],
                     all_tokens_processed,
@@ -781,12 +712,10 @@ class ChatterboxMultilingualTTS:
                     metrics,
                     print_metrics,
                     fade_duration=fade_duration,
-                    is_first_chunk=is_first,  # Pass first chunk flag
                 )
 
                 if success:
                     total_audio_length += audio_duration
-                    chunk_count += 1
                     yield audio_tensor, metrics
 
                 # Update all tokens processed with memory limit
@@ -803,7 +732,7 @@ class ChatterboxMultilingualTTS:
         if total_audio_length > 0:
             metrics.rtf = metrics.total_generation_time / total_audio_length
             if print_metrics:
-                print(f"⏱️ Total generation time: {metrics.total_generation_time:.3f}s")
-                print(f"⏱️ Total audio duration: {metrics.total_audio_duration:.3f}s")
-                print(f"⏱️ RTF (Real-Time Factor): {metrics.rtf:.3f}")
-                print(f"⏱️ Total chunks yielded: {metrics.chunk_count}")
+                print(f"â±ï¸ Total generation time: {metrics.total_generation_time:.3f}s")
+                print(f"â±ï¸ Total audio duration: {metrics.total_audio_duration:.3f}s")
+                print(f"â±ï¸ RTF (Real-Time Factor): {metrics.rtf:.3f}")
+                print(f"â±ï¸ Total chunks yielded: {metrics.chunk_count}")
