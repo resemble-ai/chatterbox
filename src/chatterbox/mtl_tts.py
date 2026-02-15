@@ -211,11 +211,10 @@ class ChatterboxMultilingualTTS:
 
         s3gen = S3Gen()
         s3gen.load_state_dict(torch.load(ckpt_dir / "s3gen.pt", weights_only=True))
-        # OPTIMIZATION: S3Gen vocoder also benefits from float16
-        if device != "cpu":
-            s3gen.to(device).half().eval()
-        else:
-            s3gen.to(device).eval()
+        # NOTE: S3Gen stays in fp32. Its internal xvector speaker encoder explicitly
+        # casts inputs to float32, which causes dtype mismatches if weights are fp16.
+        # T3 (the transformer) gets the fp16 speedup where it matters most.
+        s3gen.to(device).eval()
 
         tokenizer = MTLTokenizer(str(ckpt_dir / "grapheme_mtl_merged_expanded_v1.json"))
 
