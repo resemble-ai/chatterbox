@@ -895,7 +895,10 @@ class ChatterboxMultilingualTTS:
 
                     # Submit current chunk for background decoding
                     # Clone the token history snapshot so the background thread has stable data
-                    history_snapshot = all_tokens_processed.clone() if all_tokens_processed.numel() > 0 else all_tokens_processed
+                    if all_tokens_processed.numel() > context_window:
+                        history_snapshot = all_tokens_processed[-context_window:].clone()
+                    else:
+                        history_snapshot = all_tokens_processed.clone()
                     pending_decode = decode_executor.submit(_decode_chunk, token_chunk_1d, history_snapshot)
                     pending_tokens_for_history = token_chunk_1d
 
