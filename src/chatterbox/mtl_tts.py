@@ -722,18 +722,27 @@ class ChatterboxMultilingualTTS:
         n_cfm_timesteps: int = 4,
     ):
         """
-        Decode a token buffer into an audio chunk.
+        Decode a token buffer into an audio chunk using overlap-add for seamless boundaries.
         
         OPTIMIZED:
-        - Split flow/hifigan: CFM on all tokens, HiFiGAN only on new mels (~50% HiFiGAN savings)
+        - Split flow/hifigan: CFM on all tokens, HiFiGAN only on new mels
         - Reduced CFM timesteps: 4 instead of default 10 (60% fewer ODE steps)
         - fp16 flow + hifigan: halved memory bandwidth on all decode ops
+        - Overlap-add cross-fade: eliminates mel crop boundary artifacts
         
         Pipeline:
           1. CFM flow on [context_tokens + new_tokens] -> full mel spectrogram
-          2. Crop mels to only the new portion (skip context mels)
-          3. HiFiGAN on new mels only -> audio chunk
+          2. Crop mels to new portion WITH extra overlap frames from context
+          3. HiFiGAN on (overlap + new) mels -> audio with overlap prefix
+          4. Cross-fade overlap prefix with previous chunk's tail
+          5. Yield clean audio without boundary discontinuities
         """
+        # Overlap-add parameters
+        # 4 mel frames ~ 20-50ms audio depending on HiFiGAN upsampling factor
+        OVERLAP_MEL_FRAMES = 6
+        # Cross-fade duration in seconds for the audio overlap region
+        CROSSFADE_SECONDS = 0.05
+
         decode_start = time.time()
         
         new_tokens = torch.cat(token_buffer, dim=-1)  # 1D
@@ -754,10 +763,8 @@ class ChatterboxMultilingualTTS:
         if clean_tokens.numel() == 0:
             return None, 0.0, False
 
-        # === SPLIT VOCODER PIPELINE ===
+        # === SPLIT VOCODER PIPELINE WITH OVERLAP-ADD ===
         # Step 1: Run CFM flow on ALL tokens (context + new) for mel coherence
-        # OPTIMIZATION: Use reduced CFM timesteps (4 vs default 10) â€” 60% fewer ODE steps
-        # OPTIMIZATION: autocast to fp16 â€” avoids explicit .half() which breaks internal fp32 intermediates
         autocast_device = "cuda" if "cuda" in str(self.device) else str(self.device)
         autocast_enabled = autocast_device in ("cuda", "mps")
         with torch.autocast(device_type=autocast_device, dtype=torch.float16, enabled=autocast_enabled):
@@ -769,20 +776,25 @@ class ChatterboxMultilingualTTS:
             )
         # output_mels shape: (1, 80, T_mel) where T_mel ~ 2 * n_tokens
         
-        # Step 2: Crop mels to only the NEW portion (skip context mels)
+        # Step 2: Crop mels to new portion WITH overlap from context for cross-fade
         if context_length > 0:
             total_tokens = int(clean_tokens.numel())
             total_mel_frames = output_mels.shape[-1]
             mel_per_token = total_mel_frames / max(total_tokens, 1)
             skip_mel_frames = int(context_length * mel_per_token)
-            new_mels = output_mels[:, :, skip_mel_frames:]
+            
+            # Include extra overlap mel frames from context for cross-fade
+            overlap_start = max(0, skip_mel_frames - OVERLAP_MEL_FRAMES)
+            actual_overlap_mels = skip_mel_frames - overlap_start
+            new_mels = output_mels[:, :, overlap_start:]
         else:
             new_mels = output_mels
+            actual_overlap_mels = 0
 
         if new_mels.shape[-1] == 0:
             return None, 0.0, False
 
-        # Step 3: Run HiFiGAN ONLY on new mels (saves ~50% of HiFiGAN per chunk)
+        # Step 3: Run HiFiGAN on (overlap + new) mels
         with torch.autocast(device_type=autocast_device, dtype=torch.float16, enabled=autocast_enabled):
             wav, _ = self.s3gen.hift_inference(new_mels)
         audio_chunk = wav.squeeze(0).detach().float().cpu().numpy()
@@ -790,20 +802,50 @@ class ChatterboxMultilingualTTS:
         if len(audio_chunk) == 0:
             return None, 0.0, False
 
-        # Apply trim_fade to suppress reference spillover (matches s3gen.inference behavior)
-        # Cache the numpy version to avoid repeated GPU->CPU conversion
-        if not hasattr(self, '_trim_fade_np'):
-            self._trim_fade_np = self.s3gen.trim_fade.cpu().numpy()
-        fade_len = min(len(self._trim_fade_np), len(audio_chunk))
-        if metrics.chunk_count == 0 and fade_len > 0:
-            audio_chunk[:fade_len] *= self._trim_fade_np[:fade_len]
+        # Step 4: Cross-fade overlap region with previous chunk's tail
+        prev_tail = getattr(self, '_prev_chunk_tail', None)
+        
+        if actual_overlap_mels > 0 and prev_tail is not None and len(prev_tail) > 0:
+            # Estimate how many audio samples correspond to the overlap mel frames
+            total_audio_from_mels = len(audio_chunk)
+            total_mel_for_hifigan = new_mels.shape[-1]
+            samples_per_mel = total_audio_from_mels / max(total_mel_for_hifigan, 1)
+            overlap_audio_samples = int(actual_overlap_mels * samples_per_mel)
+            
+            # Use the smaller of: estimated overlap, previous tail length, crossfade duration
+            crossfade_samples = int(CROSSFADE_SECONDS * self.sr)
+            crossfade_len = min(overlap_audio_samples, len(prev_tail), crossfade_samples, len(audio_chunk))
+            
+            if crossfade_len > 1:
+                fade_out = np.linspace(1.0, 0.0, crossfade_len, dtype=audio_chunk.dtype)
+                fade_in = np.linspace(0.0, 1.0, crossfade_len, dtype=audio_chunk.dtype)
+                
+                # Cross-fade: blend previous tail with beginning of current chunk
+                audio_chunk[:crossfade_len] = (
+                    prev_tail[-crossfade_len:] * fade_out +
+                    audio_chunk[:crossfade_len] * fade_in
+                )
+            
+            # Trim the pure-overlap prefix (audio that was already yielded in prev chunk)
+            # Keep only the cross-faded region + new audio
+            trim_samples = max(0, overlap_audio_samples - crossfade_len)
+            if trim_samples > 0 and trim_samples < len(audio_chunk):
+                audio_chunk = audio_chunk[trim_samples:]
+        elif metrics.chunk_count == 0:
+            # First chunk: apply trim_fade to suppress reference spillover
+            if not hasattr(self, '_trim_fade_np'):
+                self._trim_fade_np = self.s3gen.trim_fade.cpu().numpy()
+            fade_len = min(len(self._trim_fade_np), len(audio_chunk))
+            if fade_len > 0:
+                audio_chunk[:fade_len] *= self._trim_fade_np[:fade_len]
 
-        # Fade-in to soften chunk boundaries
-        fade_samples = int(fade_duration * self.sr)
-        if fade_samples > 0 and metrics.chunk_count > 0:
-            fade_samples = min(fade_samples, len(audio_chunk))
-            fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=audio_chunk.dtype)
-            audio_chunk[:fade_samples] *= fade_in
+        if len(audio_chunk) == 0:
+            return None, 0.0, False
+
+        # Step 5: Save tail for next chunk's cross-fade
+        tail_samples = int(CROSSFADE_SECONDS * self.sr) + int(OVERLAP_MEL_FRAMES * 512)
+        tail_samples = min(tail_samples, len(audio_chunk))
+        self._prev_chunk_tail = audio_chunk[-tail_samples:].copy()
 
         audio_duration = len(audio_chunk) / self.sr
 
@@ -882,6 +924,9 @@ class ChatterboxMultilingualTTS:
 
         start_time = time.time()
         metrics = StreamingMetrics()
+
+        # Reset overlap-add state for this new request
+        self._prev_chunk_tail = None
 
         # === PREPARATION PHASE ===
         prep_start = time.time()
