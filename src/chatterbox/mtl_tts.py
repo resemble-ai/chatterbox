@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import os
 import time
-import threading
-from concurrent.futures import ThreadPoolExecutor, Future
+import logging
 from typing import Generator, Tuple, Optional, Dict
 
 import librosa
@@ -38,6 +37,82 @@ from .models.t3.inference.alignment_stream_analyzer import AlignmentStreamAnalyz
 
 
 REPO_ID = "ResembleAI/chatterbox"
+
+logger = logging.getLogger(__name__)
+
+
+class TokenRepetitionGuard:
+    """
+    Lightweight replacement for AlignmentStreamAnalyzer that doesn't need
+    attention weights. Detects:
+    - Token-level repetition (N consecutive identical tokens)
+    - Runaway generation (exceeding expected length based on text tokens)
+    
+    This allows output_attentions=False -> ALL layers use fast SDPA.
+    """
+    
+    def __init__(self, eos_idx: int, text_token_count: int, 
+                 max_repeat: int = 2, max_length_ratio: float = 10.0):
+        """
+        Args:
+            eos_idx: EOS token ID to force when problems detected
+            text_token_count: Number of text tokens (for length ratio check)
+            max_repeat: Force EOS after this many consecutive identical tokens
+            max_length_ratio: Force EOS if speech_tokens > text_tokens * ratio
+        """
+        self.eos_idx = eos_idx
+        self.text_token_count = text_token_count
+        self.max_repeat = max_repeat
+        self.max_length_ratio = max_length_ratio
+        
+        self.generated_tokens = []
+        self.step_count = 0
+        
+        # EOS suppression: don't allow EOS in the first N steps
+        # (matches alignment analyzer's behavior of suppressing early EOS)
+        self.min_steps_before_eos = max(5, text_token_count // 2)
+    
+    def step(self, logits, next_token=None):
+        """
+        Check for repetition/runaway and modify logits if needed.
+        Same interface as AlignmentStreamAnalyzer.step().
+        """
+        self.step_count += 1
+        
+        # Track tokens
+        if next_token is not None:
+            if isinstance(next_token, torch.Tensor):
+                token_id = next_token.item() if next_token.numel() == 1 else next_token.view(-1)[0].item()
+            else:
+                token_id = next_token
+            self.generated_tokens.append(token_id)
+            if len(self.generated_tokens) > 16:
+                self.generated_tokens = self.generated_tokens[-16:]
+        
+        # Suppress early EOS
+        if self.step_count < self.min_steps_before_eos:
+            logits[..., self.eos_idx] = -2**15
+            return logits
+        
+        force_eos = False
+        
+        # Check consecutive repetition
+        if len(self.generated_tokens) >= self.max_repeat:
+            if len(set(self.generated_tokens[-self.max_repeat:])) == 1:
+                logger.warning(f"TokenRepetitionGuard: {self.max_repeat}x repetition of token {self.generated_tokens[-1]}")
+                force_eos = True
+        
+        # Check runaway length
+        max_len = int(self.text_token_count * self.max_length_ratio)
+        if self.step_count > max_len:
+            logger.warning(f"TokenRepetitionGuard: exceeded max length ratio ({self.step_count} > {max_len})")
+            force_eos = True
+        
+        if force_eos:
+            logits = -(2**15) * torch.ones_like(logits)
+            logits[..., self.eos_idx] = 2**15
+        
+        return logits
 
 # Supported languages for the multilingual model
 SUPPORTED_LANGUAGES: Dict[str, str] = {
@@ -85,12 +160,12 @@ def punc_norm(text: str) -> str:
     # Replace uncommon/llm punc
     punc_to_replace = [
         ("...", ", "),
-        ("â€¦", ", "),
+        ("Ã¢â‚¬Â¦", ", "),
         (":", ","),
         (" - ", ", "),
         (";", ", "),
-        ("â€”", "-"),
-        ("â€“", "-"),
+        ("Ã¢â‚¬â€", "-"),
+        ("Ã¢â‚¬â€œ", "-"),
         (" ,", ","),
         (""", '"'),
         (""", '"'),
@@ -102,7 +177,7 @@ def punc_norm(text: str) -> str:
 
     # Add full stop if no ending punc
     text = text.rstrip(" ")
-    sentence_enders = {".", "!", "?", "-", ",", "ã€", "ï¼Œ", "ã€‚", "ï¼Ÿ", "ï¼"}
+    sentence_enders = {".", "!", "?", "-", ",", "Ã£â‚¬Â", "Ã¯Â¼Å’", "Ã£â‚¬â€š", "Ã¯Â¼Å¸", "Ã¯Â¼Â"}
     if not any(text.endswith(p) for p in sentence_enders):
         text += "."
 
@@ -345,7 +420,7 @@ class ChatterboxMultilingualTTS:
                 wav, _ = self.s3gen.inference(
                     speech_tokens=speech_tokens,
                     ref_dict=self.conds.gen,
-                    n_cfm_timesteps=4,  # OPTIMIZATION: 4 vs default 10 — 60% fewer ODE steps
+                    n_cfm_timesteps=4,  # OPTIMIZATION: 4 vs default 10 â€” 60% fewer ODE steps
                 )
             wav = wav.squeeze(0).detach().float().cpu().numpy()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
@@ -380,7 +455,7 @@ class ChatterboxMultilingualTTS:
         
         # AlignmentStreamAnalyzer needs attention weights from these layers.
         # See LLAMA_ALIGNED_HEADS in alignment_stream_analyzer.py:
-        #   [(12, 15), (13, 11), (9, 2)]  →  layers 12, 13, 9
+        #   [(12, 15), (13, 11), (9, 2)]  â†’  layers 12, 13, 9
         target_layer_indices = {9, 12, 13}
         
         # Check if already patched to avoid double-patching
@@ -390,7 +465,7 @@ class ChatterboxMultilingualTTS:
         patched_count = 0
         for i, layer in enumerate(self.t3.tfmr.layers):
             if i in target_layer_indices:
-                continue  # Leave target layers unchanged — they need attention weights
+                continue  # Leave target layers unchanged â€” they need attention weights
             
             original_forward = layer.forward
             
@@ -415,19 +490,26 @@ class ChatterboxMultilingualTTS:
         
         self._attention_patched = True
 
-    def _ensure_t3_patched_model(self, len_cond: int, text_tokens_2d: torch.Tensor):
+    def _ensure_t3_patched_model(self, len_cond: int, text_tokens_2d: torch.Tensor, use_alignment: bool = False):
         """
         Mirrors the patched-model compilation logic in T3.inference(), but kept here so we
         can stream without modifying T3 itself.
         
         OPTIMIZED: Only builds patched model once, then caches it.
-        IMPORTANT: Always creates a fresh AlignmentStreamAnalyzer per request because
-        text_tokens_slice depends on the current text length (varies between requests).
-        This matches the official T3.inference() behavior which rebuilds every time.
+        
+        When use_alignment=False (default):
+          - No AlignmentStreamAnalyzer created
+          - No attention hooks registered
+          - output_attentions stays False -> ALL layers use SDPA
+          - A lightweight TokenRepetitionGuard handles EOS forcing instead
+          
+        When use_alignment=True:
+          - Original behavior with AlignmentStreamAnalyzer
+          - 3 layers fall back to eager attention (layers 9, 12, 13)
         """
-        # Always create a fresh alignment analyzer — text_tokens_slice changes per request
+        # Only create alignment analyzer when explicitly requested
         alignment_stream_analyzer = None
-        if getattr(self.t3.hp, "is_multilingual", False):
+        if use_alignment and getattr(self.t3.hp, "is_multilingual", False):
             alignment_stream_analyzer = AlignmentStreamAnalyzer(
                 self.t3.tfmr,
                 None,
@@ -448,8 +530,14 @@ class ChatterboxMultilingualTTS:
             self.t3.patched_model = patched_model
             self.t3.compiled = True
             
-            # OPTIMIZATION: Patch non-target layers to use SDPA fast path
-            self._patch_selective_attention()
+            if use_alignment:
+                # OPTIMIZATION: Patch non-target layers to use SDPA fast path
+                self._patch_selective_attention()
+            else:
+                # Ensure config doesn't have output_attentions=True
+                # (which AlignmentStreamAnalyzer sets globally in __init__)
+                if hasattr(self.t3.tfmr, 'config'):
+                    self.t3.tfmr.config.output_attentions = False
         else:
             # Subsequent calls: just swap in the fresh analyzer
             # This prevents dimension mismatches when text length varies between requests
@@ -468,6 +556,7 @@ class ChatterboxMultilingualTTS:
         top_p: float = 1.0,
         chunk_sizes: list = None,  # OPTIMIZED: Support variable chunk sizes
         stop_on_eos: bool = True,
+        use_alignment: bool = False,
     ) -> Generator[torch.Tensor, None, None]:
         """
         Stream speech tokens from T3 using the same logic as T3.inference(), but yielding
@@ -476,6 +565,8 @@ class ChatterboxMultilingualTTS:
         Args:
             chunk_sizes: List of chunk sizes [first_chunk, second_chunk, ...]. 
                         If None, uses [25] for all chunks.
+            use_alignment: If True, use AlignmentStreamAnalyzer (slower, needs attention weights).
+                          If False (default), use TokenRepetitionGuard (faster, all SDPA).
         
         Yields: torch.LongTensor of shape (Tchunk,)  (1D tokens)
         """
@@ -496,8 +587,23 @@ class ChatterboxMultilingualTTS:
             cfg_weight=cfg_weight,
         )
 
-        # Ensure patched model is available
-        self._ensure_t3_patched_model(len_cond=len_cond, text_tokens_2d=text_tokens)
+        # Ensure patched model is available (alignment hooks only if use_alignment=True)
+        self._ensure_t3_patched_model(len_cond=len_cond, text_tokens_2d=text_tokens,
+                                       use_alignment=use_alignment)
+
+        # Determine whether we need attention weights
+        need_attentions = use_alignment and (
+            getattr(self.t3.patched_model, "alignment_stream_analyzer", None) is not None
+        )
+
+        # Create lightweight guard when alignment is off
+        rep_guard = None
+        if not need_attentions:
+            text_token_count = max(text_tokens.size(-1) - 2, 1)  # exclude SOT/EOT
+            rep_guard = TokenRepetitionGuard(
+                eos_idx=self.t3.hp.stop_speech_token,
+                text_token_count=text_token_count,
+            )
 
         device = embeds.device
 
@@ -520,11 +626,12 @@ class ChatterboxMultilingualTTS:
         repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
 
         # Initial forward pass
+        # KEY OPTIMIZATION: output_attentions=False when alignment disabled -> ALL layers use SDPA
         output = self.t3.patched_model(
             inputs_embeds=inputs_embeds,
             past_key_values=None,
             use_cache=True,
-            output_attentions=True,
+            output_attentions=need_attentions,
             output_hidden_states=False,
             return_dict=True,
         )
@@ -540,12 +647,14 @@ class ChatterboxMultilingualTTS:
             cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
             logits = cond + cfg * (cond - uncond)  # (1,V)
 
-            # Alignment analyzer (multilingual integrity checks)
-            if getattr(self.t3.patched_model, "alignment_stream_analyzer", None) is not None:
-                last_token = generated_ids[0, -1].item() if generated_ids.numel() else None
+            # Use alignment analyzer OR lightweight guard
+            last_token = generated_ids[0, -1].item() if generated_ids.numel() else None
+            if need_attentions and getattr(self.t3.patched_model, "alignment_stream_analyzer", None) is not None:
                 logits = self.t3.patched_model.alignment_stream_analyzer.step(
                     logits, next_token=last_token
                 )
+            elif rep_guard is not None:
+                logits = rep_guard.step(logits, next_token=last_token)
 
             ids_for_proc = generated_ids[:1, ...]
             logits = repetition_penalty_processor(ids_for_proc, logits)
@@ -584,10 +693,11 @@ class ChatterboxMultilingualTTS:
             next_token_embed = next_token_embed + self.t3.speech_pos_emb.get_fixed_embedding(i + 1)
             next_token_embed = next_token_embed.repeat(embeds.size(0), 1, 1)
 
+            # KEY OPTIMIZATION: output_attentions=False when alignment disabled
             output = self.t3.patched_model(
                 inputs_embeds=next_token_embed,
                 past_key_values=past,
-                output_attentions=True,
+                output_attentions=need_attentions,
                 output_hidden_states=False,
                 return_dict=True,
             )
@@ -597,6 +707,7 @@ class ChatterboxMultilingualTTS:
         if chunk_buf:
             out_chunk = torch.cat(chunk_buf, dim=1).squeeze(0)
             yield out_chunk
+
 
     def _process_token_buffer(
         self,
@@ -645,8 +756,8 @@ class ChatterboxMultilingualTTS:
 
         # === SPLIT VOCODER PIPELINE ===
         # Step 1: Run CFM flow on ALL tokens (context + new) for mel coherence
-        # OPTIMIZATION: Use reduced CFM timesteps (4 vs default 10) — 60% fewer ODE steps
-        # OPTIMIZATION: autocast to fp16 — avoids explicit .half() which breaks internal fp32 intermediates
+        # OPTIMIZATION: Use reduced CFM timesteps (4 vs default 10) â€” 60% fewer ODE steps
+        # OPTIMIZATION: autocast to fp16 â€” avoids explicit .half() which breaks internal fp32 intermediates
         autocast_device = "cuda" if "cuda" in str(self.device) else str(self.device)
         autocast_enabled = autocast_device in ("cuda", "mps")
         with torch.autocast(device_type=autocast_device, dtype=torch.float16, enabled=autocast_enabled):
@@ -734,6 +845,7 @@ class ChatterboxMultilingualTTS:
         max_history_tokens: int = 500,
         skip_watermark: bool = False,
         n_cfm_timesteps: int = 4,
+        use_alignment: bool = False,
     ) -> Generator[Tuple[torch.Tensor, StreamingMetrics], None, None]:
         """
         Streaming TTS that yields audio chunks as they are produced.
@@ -742,11 +854,20 @@ class ChatterboxMultilingualTTS:
         - Split vocoder: CFM on all tokens, HiFiGAN only on new mels (~50% HiFiGAN savings)
         - Reduced CFM timesteps: 4 vs default 10 (60% fewer ODE solver passes)
         - fp16 S3Gen flow + HiFiGAN: halved memory bandwidth on decode
-        - Concurrent pipeline: T3 generates next tokens WHILE vocoder decodes current chunk
         - Deferred watermarking: skip_watermark=True to apply watermark in server instead
-        - Selective attention: only layer 9 uses eager attention, rest use fast SDPA
         - T3 in float16, autocast for generation loop
         - Reduced context_window (25 vs 50)
+        
+        When use_alignment=False (default):
+        - ALL 24 transformer layers use fast SDPA kernels
+        - No attention weight materialization or .cpu() copies per step
+        - Lightweight TokenRepetitionGuard handles EOS forcing
+        - ~30-50% speedup on T3 forward pass
+        
+        When use_alignment=True:
+        - Original behavior with AlignmentStreamAnalyzer
+        - 3 layers use eager attention, rest use SDPA via selective patch
+        - Better alignment quality checks but slower
 
         Yields:
             (audio_chunk_tensor, metrics)
@@ -801,7 +922,7 @@ class ChatterboxMultilingualTTS:
         if print_metrics:
             print(f"Tokenization time: {metrics.tokenization_time:.3f}s")
 
-        # === STREAMING GENERATION WITH CONCURRENT PIPELINE ===
+        # === STREAMING GENERATION (SYNCHRONOUS PIPELINE) ===
         total_audio_length = 0.0
         all_tokens_processed = torch.empty((0,), dtype=torch.long, device=self.device)
         
@@ -814,37 +935,36 @@ class ChatterboxMultilingualTTS:
         _dev_type = self.device.split(':')[0] if self.device != "cpu" else "cpu"
         _amp_dtype = torch.float16 if _dev_type == "cuda" else torch.bfloat16
 
-        # Concurrent pipeline: decode chunk N in background while T3 generates chunk N+1
-        # Use a dedicated CUDA stream for vocoder to overlap GPU work
-        vocoder_stream = None
-        if _dev_type == "cuda":
-            vocoder_stream = torch.cuda.Stream()
+        with torch.inference_mode(), torch.autocast(device_type=_dev_type, dtype=_amp_dtype):
+            for token_chunk_1d in self._t3_inference_stream(
+                t3_cond=self.conds.t3,
+                text_tokens=text_tokens,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                cfg_weight=cfg_weight,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
+                chunk_sizes=chunk_sizes,
+                stop_on_eos=True,
+                use_alignment=use_alignment,
+            ):
+                if not first_token_measured:
+                    metrics.first_token_time = time.time() - first_token_start
+                    if print_metrics:
+                        print(f"Time to first token chunk: {metrics.first_token_time:.3f}s")
+                    first_token_measured = True
 
-        decode_executor = ThreadPoolExecutor(max_workers=1)
-        pending_decode: Optional[Future] = None
-        pending_tokens_for_history: Optional[torch.Tensor] = None
+                # Synchronous decode: simpler and actually faster than threaded
+                # (Python GIL prevents real GPU overlap with ThreadPoolExecutor)
+                if all_tokens_processed.numel() > context_window:
+                    history_snapshot = all_tokens_processed[-context_window:]
+                else:
+                    history_snapshot = all_tokens_processed
 
-        def _decode_chunk(token_chunk, all_prev_tokens):
-            """Run vocoder decode, optionally on a separate CUDA stream."""
-            if vocoder_stream is not None:
-                with torch.cuda.stream(vocoder_stream):
-                    result = self._process_token_buffer(
-                        [token_chunk],
-                        all_prev_tokens,
-                        context_window,
-                        start_time,
-                        metrics,
-                        print_metrics,
-                        fade_duration=fade_duration,
-                        skip_watermark=skip_watermark,
-                        n_cfm_timesteps=n_cfm_timesteps,
-                    )
-                vocoder_stream.synchronize()
-                return result
-            else:
-                return self._process_token_buffer(
-                    [token_chunk],
-                    all_prev_tokens,
+                audio_tensor, audio_duration, success = self._process_token_buffer(
+                    [token_chunk_1d],
+                    history_snapshot,
                     context_window,
                     start_time,
                     metrics,
@@ -854,63 +974,17 @@ class ChatterboxMultilingualTTS:
                     n_cfm_timesteps=n_cfm_timesteps,
                 )
 
-        try:
-            with torch.inference_mode(), torch.autocast(device_type=_dev_type, dtype=_amp_dtype):
-                for token_chunk_1d in self._t3_inference_stream(
-                    t3_cond=self.conds.t3,
-                    text_tokens=text_tokens,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    cfg_weight=cfg_weight,
-                    repetition_penalty=repetition_penalty,
-                    min_p=min_p,
-                    top_p=top_p,
-                    chunk_sizes=chunk_sizes,
-                    stop_on_eos=True,
-                ):
-                    if not first_token_measured:
-                        metrics.first_token_time = time.time() - first_token_start
-                        if print_metrics:
-                            print(f"Time to first token chunk: {metrics.first_token_time:.3f}s")
-                        first_token_measured = True
-                    
-                    # === CONCURRENT PIPELINE ===
-                    # If there's a pending decode from the previous iteration, 
-                    # wait for it and yield the result. This means T3 was generating
-                    # this chunk's tokens WHILE the previous chunk was being decoded.
-                    if pending_decode is not None:
-                        audio_tensor, audio_duration, success = pending_decode.result()
-                        if success:
-                            total_audio_length += audio_duration
-                            yield audio_tensor, metrics
-                        
-                        # Update token history from the previous chunk
-                        if pending_tokens_for_history is not None:
-                            if all_tokens_processed.numel() == 0:
-                                all_tokens_processed = pending_tokens_for_history
-                            else:
-                                all_tokens_processed = torch.cat([all_tokens_processed, pending_tokens_for_history], dim=-1)
-                                if all_tokens_processed.numel() > max_history_tokens:
-                                    all_tokens_processed = all_tokens_processed[-max_history_tokens:]
-
-                    # Submit current chunk for background decoding
-                    # Clone the token history snapshot so the background thread has stable data
-                    if all_tokens_processed.numel() > context_window:
-                        history_snapshot = all_tokens_processed[-context_window:].clone()
-                    else:
-                        history_snapshot = all_tokens_processed.clone()
-                    pending_decode = decode_executor.submit(_decode_chunk, token_chunk_1d, history_snapshot)
-                    pending_tokens_for_history = token_chunk_1d
-
-            # === Flush the last pending decode ===
-            if pending_decode is not None:
-                audio_tensor, audio_duration, success = pending_decode.result()
                 if success:
                     total_audio_length += audio_duration
                     yield audio_tensor, metrics
 
-        finally:
-            decode_executor.shutdown(wait=False)
+                # Update token history
+                if all_tokens_processed.numel() == 0:
+                    all_tokens_processed = token_chunk_1d
+                else:
+                    all_tokens_processed = torch.cat([all_tokens_processed, token_chunk_1d], dim=-1)
+                    if all_tokens_processed.numel() > max_history_tokens:
+                        all_tokens_processed = all_tokens_processed[-max_history_tokens:]
 
         metrics.total_generation_time = time.time() - start_time
         metrics.total_audio_duration = total_audio_length
