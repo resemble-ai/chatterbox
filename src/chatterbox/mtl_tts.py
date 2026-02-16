@@ -46,10 +46,34 @@ class TokenRepetitionGuard:
     Lightweight replacement for AlignmentStreamAnalyzer that doesn't need
     attention weights. Detects:
     - Token-level repetition (N consecutive identical tokens)
+    - Low-diversity tail: model cycling through a small set of garbage tokens
+    - N-gram repetition: repeating short patterns (e.g., A-B-A-B-A-B)
     - Runaway generation (exceeding expected length based on text tokens)
+    
+    The low-diversity and n-gram checks replace the AlignmentStreamAnalyzer's
+    `long_tail` detection, which relied on attention weights we no longer compute.
+    These checks only activate after the model has generated enough tokens for
+    the text content (TAIL_CHECK_RATIO), avoiding false positives during
+    legitimate speech that may have repeated phonemes.
     
     This allows output_attentions=False -> ALL layers use fast SDPA.
     """
+    
+    # Window for diversity check — how many recent tokens to examine
+    DIVERSITY_WINDOW = 12
+    # Minimum unique tokens required in the window; below this -> force EOS
+    DIVERSITY_MIN_UNIQUE = 4
+    
+    # N-gram repetition detection
+    NGRAM_SIZES = [2, 3]
+    # Force EOS if the same n-gram repeats this many times in the window
+    NGRAM_REPEAT_THRESHOLD = 3
+    # Larger window for n-gram analysis
+    NGRAM_WINDOW = 16
+    
+    # Only apply diversity/n-gram checks after this fraction of expected generation length.
+    # Speech tokens ≈ 4-8x text tokens; we start checking after 4x to avoid false positives.
+    TAIL_CHECK_RATIO = 4.0
     
     def __init__(self, eos_idx: int, text_token_count: int, 
                  max_repeat: int = 2, max_length_ratio: float = 10.0):
@@ -71,6 +95,34 @@ class TokenRepetitionGuard:
         # EOS suppression: don't allow EOS in the first N steps
         # (matches alignment analyzer's behavior of suppressing early EOS)
         self.min_steps_before_eos = max(5, text_token_count // 2)
+        
+        # Step count after which tail-quality checks activate
+        self.tail_check_start = int(text_token_count * self.TAIL_CHECK_RATIO)
+    
+    def _check_low_diversity(self) -> bool:
+        """Check if recent tokens have suspiciously low diversity (garbage cycling)."""
+        if len(self.generated_tokens) < self.DIVERSITY_WINDOW:
+            return False
+        window = self.generated_tokens[-self.DIVERSITY_WINDOW:]
+        unique_count = len(set(window))
+        return unique_count < self.DIVERSITY_MIN_UNIQUE
+    
+    def _check_ngram_repetition(self) -> bool:
+        """Check if any short n-gram repeats excessively (e.g., A-B-A-B-A-B)."""
+        if len(self.generated_tokens) < self.NGRAM_WINDOW:
+            return False
+        window = self.generated_tokens[-self.NGRAM_WINDOW:]
+        for n in self.NGRAM_SIZES:
+            if len(window) < n * self.NGRAM_REPEAT_THRESHOLD:
+                continue
+            # Extract all n-grams in the window
+            ngrams = [tuple(window[i:i+n]) for i in range(len(window) - n + 1)]
+            # Count occurrences of the most recent n-gram
+            last_ngram = ngrams[-1]
+            count = ngrams.count(last_ngram)
+            if count >= self.NGRAM_REPEAT_THRESHOLD:
+                return True
+        return False
     
     def step(self, logits, next_token=None):
         """
@@ -86,8 +138,8 @@ class TokenRepetitionGuard:
             else:
                 token_id = next_token
             self.generated_tokens.append(token_id)
-            if len(self.generated_tokens) > 16:
-                self.generated_tokens = self.generated_tokens[-16:]
+            if len(self.generated_tokens) > self.NGRAM_WINDOW + 4:
+                self.generated_tokens = self.generated_tokens[-(self.NGRAM_WINDOW + 4):]
         
         # Suppress early EOS
         if self.step_count < self.min_steps_before_eos:
@@ -95,20 +147,35 @@ class TokenRepetitionGuard:
             return logits
         
         force_eos = False
+        reason = ""
         
-        # Check consecutive repetition
+        # Check 1: Consecutive identical token repetition (always active after min_steps)
         if len(self.generated_tokens) >= self.max_repeat:
             if len(set(self.generated_tokens[-self.max_repeat:])) == 1:
-                logger.warning(f"TokenRepetitionGuard: {self.max_repeat}x repetition of token {self.generated_tokens[-1]}")
+                reason = f"token_repeat ({self.max_repeat}x of {self.generated_tokens[-1]})"
                 force_eos = True
         
-        # Check runaway length
+        # Check 2: Runaway length (always active)
         max_len = int(self.text_token_count * self.max_length_ratio)
-        if self.step_count > max_len:
-            logger.warning(f"TokenRepetitionGuard: exceeded max length ratio ({self.step_count} > {max_len})")
+        if not force_eos and self.step_count > max_len:
+            reason = f"runaway ({self.step_count} > {max_len})"
             force_eos = True
         
+        # Checks 3 & 4: Only activate after enough tokens for actual speech content.
+        # This prevents false positives on legitimate repeated phonemes.
+        if not force_eos and self.step_count > self.tail_check_start:
+            # Check 3: Low-diversity window (model cycling through small token set)
+            if self._check_low_diversity():
+                reason = f"low_diversity (< {self.DIVERSITY_MIN_UNIQUE} unique in last {self.DIVERSITY_WINDOW})"
+                force_eos = True
+            
+            # Check 4: N-gram repetition (e.g., A-B-A-B-A-B pattern)
+            if not force_eos and self._check_ngram_repetition():
+                reason = "ngram_repeat"
+                force_eos = True
+        
         if force_eos:
+            logger.warning(f"TokenRepetitionGuard: forcing EOS — {reason}")
             logits = -(2**15) * torch.ones_like(logits)
             logits[..., self.eos_idx] = 2**15
         
@@ -182,6 +249,92 @@ def punc_norm(text: str) -> str:
         text += "."
 
     return text
+
+
+def trim_trailing_silence(
+    audio: np.ndarray,
+    sr: int,
+    threshold_db: float = -40.0,
+    frame_length: int = 2048,
+    hop_length: int = 512,
+    buffer_ms: float = 150.0,
+    min_silence_ms: float = 300.0,
+) -> np.ndarray:
+    """
+    Trim trailing silence/noise from audio using RMS energy analysis.
+    
+    Workaround for multilingual TTS occasionally generating trailing noise
+    after the actual speech content ends. Scans backwards from the end of
+    the audio to find where speech energy drops below a threshold, then
+    trims from that point (with a small buffer for natural endings).
+    
+    Only trims if the trailing silence exceeds min_silence_ms, preventing
+    removal of legitimate inter-word pauses in streaming chunks.
+    
+    Args:
+        audio: 1D numpy array of audio samples
+        sr: Sample rate
+        threshold_db: dB below peak RMS to consider as silence
+        frame_length: Window size for RMS computation (samples)
+        hop_length: Stride for RMS computation (samples)
+        buffer_ms: Extra audio to keep after last detected speech (ms)
+        min_silence_ms: Only trim if trailing silence exceeds this (ms)
+    
+    Returns:
+        Trimmed audio array. Returns original if no significant trailing silence found.
+    """
+    if len(audio) < frame_length:
+        return audio
+    
+    # Compute RMS energy per frame
+    n_frames = 1 + (len(audio) - frame_length) // hop_length
+    if n_frames <= 0:
+        return audio
+    
+    rms = np.zeros(n_frames, dtype=np.float32)
+    for i in range(n_frames):
+        start = i * hop_length
+        frame = audio[start:start + frame_length]
+        rms[i] = np.sqrt(np.mean(frame ** 2) + 1e-10)
+    
+    # Convert to dB relative to peak RMS
+    peak_rms = rms.max()
+    if peak_rms < 1e-10:
+        return audio  # All silence
+    
+    rms_db = 20.0 * np.log10(rms / peak_rms + 1e-10)
+    
+    # Scan backwards to find last frame above threshold
+    last_speech_frame = n_frames - 1
+    for i in range(n_frames - 1, -1, -1):
+        if rms_db[i] > threshold_db:
+            last_speech_frame = i
+            break
+    
+    # Convert frame index to sample position
+    last_speech_sample = last_speech_frame * hop_length + frame_length
+    
+    # Add buffer
+    buffer_samples = int(buffer_ms * sr / 1000.0)
+    trim_point = min(last_speech_sample + buffer_samples, len(audio))
+    
+    # How much silence is trailing?
+    trailing_silence_samples = len(audio) - trim_point
+    min_silence_samples = int(min_silence_ms * sr / 1000.0)
+    
+    # Only trim if trailing silence is significant
+    if trailing_silence_samples < min_silence_samples:
+        return audio
+    
+    trimmed = audio[:trim_point]
+    
+    # Apply a short fade-out at the trim point for a clean ending
+    fade_out_samples = min(int(0.01 * sr), len(trimmed))  # 10ms fade
+    if fade_out_samples > 1:
+        fade = np.linspace(1.0, 0.0, fade_out_samples, dtype=trimmed.dtype)
+        trimmed[-fade_out_samples:] *= fade
+    
+    return trimmed
 
 
 @dataclass
@@ -423,6 +576,7 @@ class ChatterboxMultilingualTTS:
                     n_cfm_timesteps=4,  # OPTIMIZATION: 4 vs default 10 â€” 60% fewer ODE steps
                 )
             wav = wav.squeeze(0).detach().float().cpu().numpy()
+            wav = trim_trailing_silence(wav, self.sr)
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
 
         return torch.from_numpy(watermarked_wav).unsqueeze(0)
@@ -739,9 +893,9 @@ class ChatterboxMultilingualTTS:
         """
         # Overlap-add parameters
         # 4 mel frames ~ 20-50ms audio depending on HiFiGAN upsampling factor
-        OVERLAP_MEL_FRAMES = 6
+        OVERLAP_MEL_FRAMES = 4
         # Cross-fade duration in seconds for the audio overlap region
-        CROSSFADE_SECONDS = 0.05
+        CROSSFADE_SECONDS = 0.03
 
         decode_start = time.time()
         
@@ -842,7 +996,17 @@ class ChatterboxMultilingualTTS:
         if len(audio_chunk) == 0:
             return None, 0.0, False
 
-        # Step 5: Save tail for next chunk's cross-fade
+        # Step 5: Trim trailing silence/noise from this chunk.
+        # Only trims if >300ms of silence at the end, so mid-stream chunks
+        # with legitimate inter-word pauses are unaffected. Catches the
+        # multilingual TTS tail noise issue where the model generates
+        # garbage tokens after speech content ends.
+        audio_chunk = trim_trailing_silence(audio_chunk, self.sr)
+
+        if len(audio_chunk) == 0:
+            return None, 0.0, False
+
+        # Step 6: Save tail for next chunk's cross-fade
         tail_samples = int(CROSSFADE_SECONDS * self.sr) + int(OVERLAP_MEL_FRAMES * 512)
         tail_samples = min(tail_samples, len(audio_chunk))
         self._prev_chunk_tail = audio_chunk[-tail_samples:].copy()
