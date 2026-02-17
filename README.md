@@ -86,12 +86,12 @@ ta.save("test-english.wav", wav, model.sr)
 multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device)
 
 french_text = "Bonjour, comment ça va? Ceci est le modèle de synthèse vocale multilingue Chatterbox, il prend en charge 23 langues."
-wav_french = multilingual_model.generate(spanish_text, language_id="fr")
-ta.save("test-french.wav", wav_french, model.sr)
+wav_french = multilingual_model.generate(french_text, language_id="fr")
+ta.save("test-french.wav", wav_french, multilingual_model.sr)
 
 chinese_text = "你好，今天天气真不错，希望你有一个愉快的周末。"
 wav_chinese = multilingual_model.generate(chinese_text, language_id="zh")
-ta.save("test-chinese.wav", wav_chinese, model.sr)
+ta.save("test-chinese.wav", wav_chinese, multilingual_model.sr)
 
 # If you want to synthesize with a different voice, specify the audio prompt
 AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
