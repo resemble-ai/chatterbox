@@ -160,7 +160,7 @@ with gr.Blocks(title="Chatterbox Turbo", css=CUSTOM_CSS) as demo:
                 min_p = gr.Slider(0.00, 1.00, step=0.01, label="Min P (Set to 0 to disable)", value=0.00)
                 norm_loudness = gr.Checkbox(value=True, label="Normalize Loudness (-27 LUFS)")
 
-    demo.load(fn=load_model, inputs=[], outputs=model_state)
+    demo.load(fn=load_model, inputs=None, outputs=model_state)
 
     run_btn.click(
         fn=generate,
@@ -180,7 +180,4 @@ with gr.Blocks(title="Chatterbox Turbo", css=CUSTOM_CSS) as demo:
     )
 
 if __name__ == "__main__":
-    demo.queue(
-        max_size=50,
-        default_concurrency_limit=1,
-    ).launch(share=True)
+    demo.queue(max_size=50).launch(share=True, max_threads=1)
