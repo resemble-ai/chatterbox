@@ -167,7 +167,7 @@ class ChineseCangjieConverter:
     def _load_cangjie_mapping(self, model_dir=None):
         """Load Cangjie mapping from HuggingFace model repository."""        
         try:
-            if Path(model_dir).exists():
+            if model_dir and Path(model_dir).exists():
                 cangjie_file = Path(model_dir) / "Cangjie5_TC.json"
             else:
                 cangjie_file = hf_hub_download(
