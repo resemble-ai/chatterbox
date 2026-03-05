@@ -1,11 +1,15 @@
+"""
+uv run examples/gradio_tts_app.py
+"""
 import random
 import numpy as np
 import torch
 import gradio as gr
 from chatterbox.tts import ChatterboxTTS
+from chatterbox.models.utils import get_device
 
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = get_device()
 
 
 def set_seed(seed: int):
