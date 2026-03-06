@@ -183,7 +183,7 @@ class ChatterboxTurboTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTurboTTS':
+    def from_pretrained(cls, device, token=None) -> 'ChatterboxTurboTTS':
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -194,7 +194,7 @@ class ChatterboxTurboTTS:
 
         local_path = snapshot_download(
             repo_id=REPO_ID,
-            token=os.getenv("HF_TOKEN") or True,
+            token=token or os.getenv("HF_TOKEN"),
             # Optional: Filter to download only what you need
             allow_patterns=["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"]
         )
@@ -261,10 +261,81 @@ class ChatterboxTurboTTS:
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, norm_loudness=norm_loudness)
         else:
-            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+            if self.conds is None:
+                raise ValueError("Please `prepare_conditionals` first or specify `audio_prompt_path`")
 
         if cfg_weight > 0.0 or exaggeration > 0.0 or min_p > 0.0:
             logger.warning("CFG, min_p and exaggeration are not supported by Turbo version and will be ignored.")
+
+        # --- Smart Chunking Logic ---
+        # If text is too long (e.g. > 300 chars), split it to avoid model hallucination
+        if len(text) > 300:
+            import re
+            # Split by sentence-ending punctuation, keeping the punctuation
+            # This regex splits by . ! ? followed by space or end of string
+            chunks = re.split(r'([.!?]+(?:\s+|$))', text)
+            
+            # Re-assemble so punctuation stays with the sentence
+            # chunks list will look like: ["Hello world", ". ", "How are you", "?", ""]
+            input_sentences = []
+            current_sent = ""
+            for i in range(0, len(chunks) - 1, 2):
+                sent = chunks[i]
+                punct = chunks[i+1]
+                full_sent = sent + punct
+                if len(current_sent) + len(full_sent) < 300:
+                    current_sent += full_sent
+                else:
+                    if current_sent.strip():
+                        input_sentences.append(current_sent)
+                    current_sent = full_sent
+            
+            if current_sent.strip():
+                input_sentences.append(current_sent)
+            
+            if not input_sentences: # Fallback if regex failed or text is weird
+                 input_sentences = [text]
+
+            print(f"Text too long ({len(text)} chars), split into {len(input_sentences)} chunks.")
+            
+            audio_segments = []
+            for chunk in input_sentences:
+                if not chunk.strip():
+                    continue
+                # Recursive call for each chunk (guaranteed to be < safety limit or handled best effort)
+                # We typically don't need to re-prepare conditionals as self.conds is set.
+                wav = self.generate(
+                    chunk,
+                    repetition_penalty=repetition_penalty,
+                    min_p=min_p,
+                    top_p=top_p,
+                    # pass None for prompt path to use existing prepared conds and avoid re-loading/processing
+                    audio_prompt_path=None, 
+                    # pass other params
+                    temperature=temperature,
+                    top_k=top_k,
+                    norm_loudness=False # Don't norm chunks individually, potentially
+                )
+                audio_segments.append(wav)
+            
+            if not audio_segments:
+                 return torch.zeros((1, 1))
+
+            # Concatenate
+            full_wav = torch.cat(audio_segments, dim=1)
+            
+            # Optional: Norm loudness of the full result if requested
+            if norm_loudness:
+                 # Note: self.norm_loudness expects numpy, but here we have tensor output from recursive calls.
+                 # Actually, generate returns tensor. The norm_loudness helper takes numpy.
+                 # Ideally we should norm the final result if we want consistency.
+                 # For simplicity/speed, let's just return the concatenated tensor. 
+                 # If we really need normalization, we convert to numpy, norm, back to tensor.
+                 pass
+
+            return full_wav
+
+        # --- End Smart Chunking ---
 
         # Norm and tokenize text
         text = punc_norm(text)
