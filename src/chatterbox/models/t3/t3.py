@@ -29,8 +29,10 @@ logger = logging.getLogger(__name__)
 
 def _ensure_BOT_EOT(text_tokens: Tensor, hp):
     B = text_tokens.size(0)
-    assert (text_tokens == hp.start_text_token).int().sum() >= B, "missing start_text_token"
-    assert (text_tokens == hp.stop_text_token).int().sum() >= B, "missing stop_text_token"
+    has_start = (text_tokens == hp.start_text_token).any(dim=-1).all()
+    has_stop = (text_tokens == hp.stop_text_token).any(dim=-1).all()
+    assert has_start, "missing start_text_token"
+    assert has_stop, "missing stop_text_token"
 
 
 class T3(nn.Module):
@@ -317,13 +319,17 @@ class T3(nn.Module):
         inputs_embeds = embeds
         device = embeds.device
 
+        # output_attentions is only needed for alignment_stream_analyzer (multilingual).
+        # When True, HuggingFace disables SDPA fused kernels and falls back to slow manual attention.
+        _needs_attentions = self.patched_model.alignment_stream_analyzer is not None
+
         # ---- Initial Forward Pass (Prefill/Prompt Processing) ----
         output = self.patched_model(
             inputs_embeds=inputs_embeds,
             past_key_values=None,
             use_cache=True,
-            output_attentions=True,
-            output_hidden_states=True,
+            output_attentions=_needs_attentions,
+            output_hidden_states=False,
             return_dict=True,
         )
         # Initialize kv_cache with the full context.
@@ -347,6 +353,12 @@ class T3(nn.Module):
         is_finished = torch.zeros(B_orig, dtype=torch.bool, device=device)
         current_token_idx = len_initial_speech
 
+        # [PERF] Pre-hoist tensors that would cause GPU/CPU sync if created inside the loop
+        _stop_token_t = torch.tensor(self.hp.stop_speech_token, device=device, dtype=torch.long)
+        _cfg_weight_t = torch.as_tensor(cfg_weight, device=device, dtype=embeds.dtype) if cfg_weight > 0.0 else None
+        if self.hp.input_pos_emb == "learned":
+            _pos_indices = torch.arange(len_initial_speech, len_initial_speech + max_new_tokens, device=device, dtype=torch.long)
+
         for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
             # Get the logits for the last time step
             logits_step = output.logits[:, -1, :] # (B_total, V)
@@ -355,9 +367,7 @@ class T3(nn.Module):
             if cfg_weight > 0.0:
                 # Split the logits (B_total, V) into conditional and unconditional parts
                 cond, uncond = torch.split(logits_step, B_orig, dim=0)
-                cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
-                # Combine using CFG formula
-                logits = cond + cfg * (cond - uncond) # (B_orig, V)
+                logits = cond + _cfg_weight_t * (cond - uncond) # (B_orig, V)
             else:
                 logits = logits_step # (B_orig, V)
             
@@ -394,7 +404,7 @@ class T3(nn.Module):
             # If a sequence is finished, force the generation of the EOS token (padding)
             next_token = torch.where(
                 is_finished.unsqueeze(1),
-                torch.tensor(self.hp.stop_speech_token, device=device, dtype=torch.long),
+                _stop_token_t,
                 next_token
             )
 
@@ -406,9 +416,10 @@ class T3(nn.Module):
             is_finished = is_finished | (next_token.squeeze(-1) == self.hp.stop_speech_token)
 
             # Check if all sequences are finished (Early Stopping)
-            if is_finished.all():
-                logger.info(f"✅ All sequences finished. Stopping generation at step {i+1}")
-                break
+            if (i + 1) % 10 == 0 or i == max_new_tokens - 1:
+                if is_finished.all():
+                    logger.info(f"✅ All sequences finished. Stopping generation at step {i+1}")
+                    break
 
             # --- Prepare for Next Step ---
 
@@ -417,8 +428,7 @@ class T3(nn.Module):
             
             # Apply positional embedding for the next step
             if self.hp.input_pos_emb == "learned":
-                 # The position index is len_initial_speech + i
-                next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(len_initial_speech + i)
+                next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(_pos_indices[i])
 
             # For CFG, duplicate the embeddings for the full batch (B_total)
             if cfg_weight > 0.0:
@@ -429,8 +439,8 @@ class T3(nn.Module):
             output = self.patched_model(
                 inputs_embeds=next_token_embed,
                 past_key_values=past,
-                output_attentions=True,
-                output_hidden_states=True,
+                output_attentions=_needs_attentions,
+                output_hidden_states=False,
                 return_dict=True,
             )
             # Update the kv_cache.
