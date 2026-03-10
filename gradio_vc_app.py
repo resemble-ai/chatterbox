@@ -3,7 +3,8 @@ import gradio as gr
 from chatterbox.vc import ChatterboxVC
 
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# Detect device (Mac with M1/M2/M3/M4)
+DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 
 
 model = ChatterboxVC.from_pretrained(DEVICE)

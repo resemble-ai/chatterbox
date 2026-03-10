@@ -10,7 +10,6 @@ from diffusers.models.attention import (
     ApproximateGELU,
 )
 from diffusers.models.attention_processor import Attention
-from diffusers.models.lora import LoRACompatibleLinear
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 
 
@@ -45,7 +44,7 @@ class SnakeBeta(nn.Module):
         """
         super().__init__()
         self.in_features = out_features if isinstance(out_features, list) else [out_features]
-        self.proj = LoRACompatibleLinear(in_features, out_features)
+        self.proj = nn.Linear(in_features, out_features)
 
         # initialize alpha
         self.alpha_logscale = alpha_logscale
@@ -123,7 +122,7 @@ class FeedForward(nn.Module):
         # project dropout
         self.net.append(nn.Dropout(dropout))
         # project out
-        self.net.append(LoRACompatibleLinear(inner_dim, dim_out))
+        self.net.append(nn.Linear(inner_dim, dim_out))
         # FF as used in Vision Transformer, MLP-Mixer, etc. have a final dropout
         if final_dropout:
             self.net.append(nn.Dropout(dropout))

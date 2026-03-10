@@ -1,5 +1,5 @@
-import torchaudio as ta
 import torch
+import torchaudio as ta
 from chatterbox.tts import ChatterboxTTS
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
