@@ -16,8 +16,11 @@ from transformers.generation.logits_process import (
     TemperatureLogitsWarper,
     TopKLogitsWarper,
     TopPLogitsWarper,
-    MinPLogitsWarper,
 )
+try:
+    from transformers.generation.logits_process import MinPLogitsWarper
+except ImportError:
+    from transformers.generation.logits_process import MinPLogitsProcessor as MinPLogitsWarper
 from .modules.learned_pos_emb import LearnedPositionEmbeddings
 
 from .modules.cond_enc import T3CondEnc, T3Cond

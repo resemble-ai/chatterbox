@@ -3,7 +3,10 @@ from typing import Optional
 import torch
 from torch import nn as nn
 from transformers import LlamaConfig, LlamaModel, LlamaPreTrainedModel, GenerationMixin
-from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
+try:
+    from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
+except ImportError:
+    from transformers.modeling_outputs import CausalLMOutput as CausalLMOutputWithCrossAttentions
 
 
 class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
@@ -35,8 +38,8 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
     @torch.inference_mode()
     def prepare_inputs_for_generation(
         self, input_ids: torch.Tensor, decoder_cond: torch.Tensor, use_cache: bool, past_key_values=None,
-        # This argument was introduced in some recent version of transformers (>=4.29.1)
-        cache_position=None
+        cache_position=None,
+        **kwargs,
     ):
         """
         This is a method used by huggingface's generate() method.
