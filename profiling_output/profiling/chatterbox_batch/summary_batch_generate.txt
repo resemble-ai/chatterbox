@@ -1,8 +1,0 @@
---- CHATTERBOX PERFORMANCE SUMMARY (Python) ---
-Source: profiling_output\profiling\chatterbox_batch\py_profile_batch_generate.json
-FUNCTION | TOTAL (s) | SELF (s) | CALLS | LOCATION
----
-start | 0.0267 | 0.0000 | 1 | tools\profiling_wrapper.py
-__enter__ | 0.0267 | 0.0000 | 1 | torch\autograd\profiler.py
-_prepare_trace | 0.0267 | 0.0000 | 1 | torch\autograd\profiler.py
-PyCapsule._prepare_profiler | 0.0267 | 0.0267 | 1 | <built-in>
