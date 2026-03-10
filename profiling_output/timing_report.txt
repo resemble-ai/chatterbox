@@ -1,0 +1,24 @@
+============================================================
+  CHATTERBOX TTS — BATCHED PROFILING TIMING REPORT
+============================================================
+
+Device:             cuda
+Dtype:              torch.bfloat16
+torch.compile:      False
+Batch size:         2
+Variations:         1
+Audio prompt:       (default voice)
+
+------------------------------------------------------------
+Phase                                 Time (s)
+------------------------------------------------------------
+model_load                              27.239
+warmup                                   2.847
+generate_batched                        12.730
+------------------------------------------------------------
+
+Avg time per output................      6.365 s
+Throughput.........................       0.16 outputs/s
+
+Peak VRAM allocated................     1722.5 MB
+Peak VRAM reserved.................     1878.0 MB

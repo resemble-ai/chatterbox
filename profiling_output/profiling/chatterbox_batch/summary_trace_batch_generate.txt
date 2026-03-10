@@ -1,0 +1,338 @@
+--- CHATTERBOX TORCH KERNEL SUMMARY ---
+Source: profiling_output\profiling\chatterbox_batch\trace_batch_generate.json
+FUNCTION/KERNEL | SELF (ms) | TOTAL (ms) | CALLS | INPUT SHAPES (Top)
+---
+cudaEventRecord | 5818.83 | 5818.83 | 1240212 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (4777.9ms - 82%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (412.6ms - 7%)
+  [Immediate Internal Callers]:
+   -> aten::matmul (866.4ms - 15%)
+   -> aten::linear (434.1ms - 7%)
+   -> aten::transpose (383.1ms - 7%)
+tqdm/_monitor.py(60): run | 5218.24 | 12730.92 | 1 | -
+  [Immediate Internal Callers]:
+   -> threading.py(1045): _bootstrap_inner (12730.9ms - 100%)
+chatterbox/models/t3/t3.py(229): inference | 3014.75 | 10592.97 | 1 | -
+  [Origin Scripts]:
+   -> chatterbox/tts.py(270): generate (10593.0ms - 100%)
+  [Immediate Internal Callers]:
+   -> torch/utils/_contextlib.py(113): decorate_context (10593.0ms - 100%)
+chatterbox/tts.py(270): generate | 2132.08 | 12730.20 | 1 | -
+  [Origin Scripts]:
+   -> profile_chatterbox_batched.py(232): main (12730.2ms - 100%)
+  [Immediate Internal Callers]:
+cudaLaunchKernel | 883.81 | 883.81 | 133170 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (732.4ms - 83%)
+   -> chatterbox/models/t3/t3.py(229): inference (36.0ms - 4%)
+  [Immediate Internal Callers]:
+   -> aten::mul (170.7ms - 19%)
+   -> aten::add (133.2ms - 15%)
+   -> aten::copy_ (130.9ms - 15%)
+aten::matmul | 458.40 | 2727.60 | 26475 | [[4,1,1024],[1024,1024]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (2578.0ms - 95%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (138.2ms - 5%)
+  [Immediate Internal Callers]:
+   -> aten::linear (1753.5ms - 64%)
+   -> <built-in method matmul of type object at 0x00007FFDC4477450> (957.1ms - 35%)
+   -> transformers/models/llama/modeling_llama.py(146): forward (17.0ms - 1%)
+aten::mm | 363.22 | 559.71 | 20894 | [[4,1024],[1024,1024]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (517.9ms - 93%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (40.5ms - 7%)
+  [Immediate Internal Callers]:
+   -> aten::matmul (559.7ms - 100%)
+aten::transpose | 218.55 | 635.10 | 41735 | [[1024,1024],[],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (496.3ms - 78%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (104.7ms - 16%)
+  [Immediate Internal Callers]:
+   -> aten::t (345.4ms - 54%)
+   -> <built-in method transpose of Tensor object at 0x00000206D024E030> (246.9ms - 39%)
+   -> aten::_scaled_dot_product_efficient_attention (33.9ms - 5%)
+aten::linear | 214.20 | 3194.38 | 22807 | [[4,1,1024],[1024,1024],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (2677.6ms - 84%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (319.5ms - 10%)
+  [Immediate Internal Callers]:
+   -> <built-in function linear> (3194.4ms - 100%)
+transformers/models/llama/modeling_llama.py(307): forward | 200.55 | 6095.18 | 2730 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (6095.2ms - 100%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(528): forward (6095.2ms - 100%)
+aten::_to_copy | 179.16 | 814.97 | 17927 | [[4,1,1024],[],[],[],[],[],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (744.8ms - 91%)
+   -> chatterbox/models/t3/t3.py(229): inference (34.9ms - 4%)
+  [Immediate Internal Callers]:
+   -> aten::to (815.0ms - 100%)
+aten::reshape | 176.60 | 573.07 | 38108 | [[4,1,1024],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (502.7ms - 88%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (37.3ms - 7%)
+  [Immediate Internal Callers]:
+   -> aten::matmul (492.0ms - 86%)
+   -> <built-in method reshape of Tensor object at 0x00000206D024E2D0> (47.0ms - 8%)
+   -> aten::linear (21.7ms - 4%)
+aten::mul | 175.12 | 347.12 | 26441 | [[4,16,1,64],[1,1,1,64]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (325.8ms - 94%)
+   -> chatterbox/models/s3gen/decoder.py(61): forward (7.8ms - 2%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(202): apply_rotary_pos_emb (145.6ms - 42%)
+   -> transformers/models/llama/modeling_llama.py(69): forward (141.1ms - 41%)
+   -> transformers/models/llama/modeling_llama.py(240): forward (35.8ms - 10%)
+cuLaunchKernel | 155.48 | 155.48 | 18916 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (145.7ms - 94%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (8.1ms - 5%)
+  [Immediate Internal Callers]:
+   -> aten::mm (130.7ms - 84%)
+   -> aten::bmm (15.2ms - 10%)
+   -> aten::addmm (9.4ms - 6%)
+transformers/models/llama/modeling_llama.py(69): forward | 149.55 | 1980.55 | 5551 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (1980.6ms - 100%)
+  [Immediate Internal Callers]:
+   -> torch/nn/modules/module.py(1755): _call_impl (1980.6ms - 100%)
+<built-in function linear> | 141.60 | 3558.03 | 22807 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (2989.0ms - 84%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (350.9ms - 10%)
+  [Immediate Internal Callers]:
+   -> torch/nn/modules/linear.py(124): forward (3552.1ms - 100%)
+   -> torch/nn/modules/module.py(1927): __getattr__ (5.9ms - 0%)
+aten::add | 130.89 | 264.16 | 20908 | [[4,1,1],[],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (243.4ms - 92%)
+   -> chatterbox/models/s3gen/matcha/transformer.py(245): forward (13.3ms - 5%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(637): forward (74.5ms - 28%)
+   -> transformers/models/llama/modeling_llama.py(69): forward (68.1ms - 26%)
+   -> transformers/models/llama/modeling_llama.py(202): apply_rotary_pos_emb (61.4ms - 23%)
+aten::t | 124.28 | 672.55 | 22811 | [[1024,1024]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (560.6ms - 83%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (67.0ms - 10%)
+  [Immediate Internal Callers]:
+   -> aten::linear (672.4ms - 100%)
+   -> aten::nonzero (0.1ms - 0%)
+aten::slice | 123.51 | 377.93 | 24855 | [[4,16,1,64],[],[],[],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (341.4ms - 90%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (18.5ms - 5%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(195): rotate_half (166.6ms - 44%)
+   -> transformers/models/llama/modeling_llama.py(307): forward (163.7ms - 43%)
+   -> aten::narrow (17.5ms - 5%)
+transformers/models/llama/modeling_llama.py(195): rotate_half | 120.42 | 689.29 | 5460 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (689.3ms - 100%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(202): apply_rotary_pos_emb (689.3ms - 100%)
+aten::bmm | 106.58 | 160.27 | 5581 | [[1,32,1],[1,1,1]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (157.8ms - 98%)
+   -> chatterbox/models/s3gen/transformer/attention.py(84): forward_attention (2.0ms - 1%)
+  [Immediate Internal Callers]:
+   -> aten::matmul (160.3ms - 100%)
+transformers/models/llama/modeling_llama.py(202): apply_rotary_pos_emb | 102.79 | 1324.23 | 2730 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (1324.2ms - 100%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(307): forward (1324.2ms - 100%)
+transformers/models/llama/modeling_llama.py(860): forward | 101.34 | 10068.27 | 91 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (10068.3ms - 100%)
+  [Immediate Internal Callers]:
+   -> torch/nn/modules/module.py(1755): _call_impl (10068.3ms - 100%)
+aten::copy_ | 95.46 | 279.12 | 20831 | [[4,1,1024],[4,1,1024],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (205.0ms - 73%)
+   -> chatterbox/models/t3/t3.py(229): inference (34.7ms - 12%)
+  [Immediate Internal Callers]:
+   -> aten::_to_copy (240.9ms - 86%)
+   -> aten::clone (19.2ms - 7%)
+   -> aten::constant_pad_nd (10.2ms - 4%)
+torch/nn/modules/module.py(1755): _call_impl | 94.38 | 49790.96 | 47398 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (35706.2ms - 72%)
+   -> chatterbox/models/t3/t3.py(229): inference (7260.4ms - 15%)
+  [Immediate Internal Callers]:
+   -> nn.Module: T3HuggingfaceBackend_0 (10093.7ms - 20%)
+   -> nn.Module: LlamaModel_0 (10069.3ms - 20%)
+   -> nn.Module: CausalConditionalCFM_0 (1833.7ms - 4%)
+<built-in method to of Tensor object at 0x00000206D023A1B0> | 86.17 | 1066.60 | 14769 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (1029.0ms - 96%)
+   -> chatterbox/models/s3gen/decoder.py(27): mask_to_bias (9.9ms - 1%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(69): forward (821.2ms - 77%)
+   -> transformers/models/llama/modeling_llama.py(307): forward (194.4ms - 18%)
+   -> transformers/models/llama/modeling_llama.py(146): forward (13.4ms - 1%)
+aten::to | 85.19 | 1073.10 | 24440 | [[4,1,1024],[],[],[],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (989.0ms - 92%)
+   -> chatterbox/models/t3/t3.py(229): inference (38.1ms - 4%)
+  [Immediate Internal Callers]:
+   -> <built-in method to of Tensor object at 0x00000206D023A1B0> (806.8ms - 75%)
+   -> aten::softmax (160.0ms - 15%)
+   -> <built-in method tensor of type object at 0x00007FFDC4477450> (31.3ms - 3%)
+aten::pow | 84.04 | 230.37 | 5630 | [[4,1,1024],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (225.7ms - 98%)
+   -> chatterbox/models/s3gen/hifigan.py(75): forward (2.8ms - 1%)
+  [Immediate Internal Callers]:
+   -> <built-in method pow of Tensor object at 0x00000206D024E090> (225.7ms - 98%)
+   -> <built-in method pow of type object at 0x00007FFDC4477450> (3.8ms - 2%)
+   -> aten::pow (0.8ms - 0%)
+aten::cat | 79.75 | 153.43 | 11139 | [[[4,16,1,32],[4,16,1,32]],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (150.7ms - 98%)
+   -> chatterbox/models/t3/t3.py(229): inference (1.0ms - 1%)
+  [Immediate Internal Callers]:
+   -> <built-in method cat of type object at 0x00007FFDC4477450> (153.4ms - 100%)
+   -> aten::concat (0.0ms - 0%)
+<built-in method cat of type object at 0x00007FFDC4477450> | 77.75 | 334.22 | 11138 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (328.9ms - 98%)
+   -> chatterbox/models/t3/t3.py(229): inference (2.1ms - 1%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(195): rotate_half (170.7ms - 51%)
+   -> transformers/cache_utils.py(408): update (154.2ms - 46%)
+   -> transformers/models/llama/modeling_llama.py(146): forward (3.2ms - 1%)
+<built-in method transpose of Tensor object at 0x00000206D024E030> | 77.71 | 477.03 | 16093 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (407.9ms - 86%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (65.9ms - 14%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(307): forward (405.2ms - 85%)
+   -> transformers/models/llama/modeling_llama.py(146): forward (2.7ms - 1%)
+transformers/models/llama/modeling_llama.py(637): forward | 73.18 | 9855.76 | 2730 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (9855.8ms - 100%)
+  [Immediate Internal Callers]:
+   -> torch/nn/modules/module.py(1755): _call_impl (9855.8ms - 100%)
+aten::cudnn_convolution | 68.39 | 93.25 | 545 | [[4,256,1,496],[256,256,1,3],[],[],[]...
+  [Origin Scripts]:
+   -> chatterbox/models/s3gen/hifigan.py(156): forward (35.4ms - 38%)
+   -> chatterbox/models/s3gen/decoder.py(96): forward (19.4ms - 21%)
+  [Immediate Internal Callers]:
+   -> aten::_convolution (93.3ms - 100%)
+aten::as_strided | 63.78 | 63.78 | 90256 | [[4,16,1,64],[],[],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (52.2ms - 82%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (5.2ms - 8%)
+  [Immediate Internal Callers]:
+   -> aten::transpose (33.5ms - 52%)
+   -> aten::slice (15.9ms - 25%)
+   -> aten::expand (7.8ms - 12%)
+aten::expand | 62.81 | 190.42 | 12562 | [[4,16,1,64],[],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (171.4ms - 90%)
+   -> diffusers/models/attention_processor.py(658): prepare_attention_mask (8.8ms - 5%)
+  [Immediate Internal Callers]:
+   -> aten::matmul (169.4ms - 89%)
+   -> aten::repeat_interleave (8.8ms - 5%)
+   -> aten::scaled_dot_product_attention (8.1ms - 4%)
+aten::empty_strided | 61.33 | 61.33 | 18108 | [[],[],[],[],[],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (57.7ms - 94%)
+   -> chatterbox/models/t3/t3.py(229): inference (1.0ms - 2%)
+  [Immediate Internal Callers]:
+   -> aten::_to_copy (60.8ms - 99%)
+   -> aten::empty_like (0.3ms - 1%)
+   -> aten::_weight_norm_interface (0.3ms - 0%)
+<built-in method view of Tensor object at 0x00000206D023A210> | 59.28 | 161.68 | 10506 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (125.1ms - 77%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (35.4ms - 22%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(307): forward (125.1ms - 77%)
+   -> chatterbox/models/s3gen/transformer/attention.py(55): forward_qkv (0.4ms - 0%)
+<built-in function open> | 56.53 | 56.53 | 13 | -
+  [Origin Scripts]:
+   -> tokenize.py(392): open (56.5ms - 100%)
+  [Immediate Internal Callers]:
+cudaStreamSynchronize | 52.78 | 52.78 | 527 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/t3.py(229): inference (29.4ms - 56%)
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (17.2ms - 33%)
+  [Immediate Internal Callers]:
+   -> aten::copy_ (42.8ms - 81%)
+   -> aten::_local_scalar_dense (9.9ms - 19%)
+   -> aten::nonzero (0.1ms - 0%)
+transformers/models/llama/modeling_llama.py(240): forward | 51.04 | 1545.23 | 2730 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (1545.2ms - 100%)
+  [Immediate Internal Callers]:
+   -> torch/nn/modules/module.py(1755): _call_impl (1545.2ms - 100%)
+aten::addmm | 50.48 | 97.03 | 1913 | [[256],[1976,512],[512,256],[],[]]
+  [Origin Scripts]:
+   -> diffusers/models/attention_processor.py(1527): __call__ (33.5ms - 34%)
+   -> diffusers/models/activations.py(87): forward (26.0ms - 27%)
+  [Immediate Internal Callers]:
+   -> aten::linear (97.0ms - 100%)
+torch/nn/modules/module.py(1927): __getattr__ | 49.54 | 55.46 | 97242 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (44.1ms - 80%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (3.9ms - 7%)
+  [Immediate Internal Callers]:
+   -> torch/nn/modules/linear.py(124): forward (13.1ms - 24%)
+   -> transformers/models/llama/modeling_llama.py(637): forward (10.8ms - 19%)
+   -> transformers/models/llama/modeling_llama.py(307): forward (10.1ms - 18%)
+<built-in method _get_tracing_state of PyCapsule object at 0x00000205FF217870> | 45.21 | 45.21 | 50297 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (36.2ms - 80%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (2.9ms - 6%)
+  [Immediate Internal Callers]:
+   -> torch/nn/modules/module.py(1755): _call_impl (41.4ms - 92%)
+   -> torch/_tensor.py(1159): __len__ (3.8ms - 8%)
+   -> torch/_tensor.py(1175): __iter__ (0.0ms - 0%)
+aten::mean | 42.20 | 78.51 | 5551 | [[4,1,1024],[],[],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (78.5ms - 100%)
+  [Immediate Internal Callers]:
+   -> <built-in method mean of Tensor object at 0x00000206D024D310> (78.5ms - 100%)
+aten::unsqueeze | 41.83 | 120.92 | 8130 | [[1,1,64],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (88.7ms - 73%)
+   -> chatterbox/models/s3gen/decoder.py(96): forward (9.7ms - 8%)
+  [Immediate Internal Callers]:
+   -> <built-in method unsqueeze of Tensor object at 0x00000206D0202B70> (87.7ms - 73%)
+   -> aten::_convolution (18.1ms - 15%)
+   -> aten::repeat_interleave (8.0ms - 7%)
+torch/nn/modules/linear.py(124): forward | 39.92 | 3605.11 | 22807 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (3028.5ms - 84%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (355.5ms - 10%)
+  [Immediate Internal Callers]:
+   -> torch/nn/modules/module.py(1755): _call_impl (3513.5ms - 97%)
+   -> diffusers/models/lora.py(451): forward (91.6ms - 3%)
+<built-in method mean of Tensor object at 0x00000206D024D310> | 38.04 | 169.42 | 5551 | -
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (169.4ms - 100%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(69): forward (169.4ms - 100%)
+aten::native_layer_norm | 37.55 | 152.42 | 1437 | [[4,494,256],[],[256],[256],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/s3gen/matcha/transformer.py(245): forward (98.5ms - 65%)
+   -> chatterbox/models/s3gen/decoder.py(61): forward (51.3ms - 34%)
+  [Immediate Internal Callers]:
+   -> aten::layer_norm (152.4ms - 100%)
+aten::view | 36.62 | 36.62 | 51142 | [[4,1,1024],[]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (27.2ms - 74%)
+   -> diffusers/models/attention_processor.py(1527): __call__ (3.5ms - 10%)
+  [Immediate Internal Callers]:
+   -> aten::reshape (26.9ms - 73%)
+   -> <built-in method view of Tensor object at 0x00000206D023A210> (5.7ms - 16%)
+   -> aten::native_layer_norm (2.0ms - 5%)
+aten::neg | 35.98 | 73.43 | 5460 | [[4,16,1,32]]
+  [Origin Scripts]:
+   -> chatterbox/models/t3/inference/t3_hf_backend.py(73): forward (73.4ms - 100%)
+  [Immediate Internal Callers]:
+   -> transformers/models/llama/modeling_llama.py(195): rotate_half (73.4ms - 100%)
