@@ -22,7 +22,7 @@ texts_batch = [ "This is the first sentence to be synthesized in a batch.",
 
 
 # If you want to synthesize with a different voice, specify the audio prompt:
-AUDIO_PROMPT_PATH = "C:/_myDrive/repos/auto-vlog/assets/audio_sample1.wav"
+AUDIO_PROMPT_PATH = "YOUR_AUDIO_PROMPT.wav"
 
 
 # Batching - list of strings to synthesize multiple different texts in a single batch.
