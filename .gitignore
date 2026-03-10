@@ -46,3 +46,4 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+diff.txt
