@@ -318,12 +318,10 @@ class ChatterboxTTS:
 
         # Update exaggeration if needed (Ensure dtype consistency and robust checks)
         if self.conds.t3.emotion_adv is not None and self.conds.t3.emotion_adv.numel() > 0:
-            # Use .item() for safe comparison and ensure the new tensor matches dtype
-            if exaggeration != self.conds.t3.emotion_adv[0, 0, 0].item():
-                self.conds.t3.emotion_adv = exaggeration * torch.ones(batch_size, 1, 1, device=self.device, dtype=self.dtype)
+            self.conds.t3.emotion_adv = exaggeration * torch.ones(batch_size, 1, 1, device=self.device, dtype=self.dtype)
         elif exaggeration != 0.5: # Default value check
-             # Handle case where it might be None initially but a new value is provided
-             self.conds.t3.emotion_adv = exaggeration * torch.ones(batch_size, 1, 1, device=self.device, dtype=self.dtype)
+            # Handle case where it might be None initially but a new value is provided
+            self.conds.t3.emotion_adv = exaggeration * torch.ones(batch_size, 1, 1, device=self.device, dtype=self.dtype)
 
         # Norm and tokenize text
         texts = [punc_norm(t) for t in text]
@@ -369,7 +367,7 @@ class ChatterboxTTS:
             speech_tokens_padded = torch.nn.utils.rnn.pad_sequence(speech_tokens_list, batch_first=True, padding_value=self.t3.hp.stop_speech_token)
             clean_tokens_list = drop_invalid_tokens(speech_tokens_padded)
             s3gen_tokens_padded = torch.nn.utils.rnn.pad_sequence(clean_tokens_list, batch_first=True, padding_value=0)
-            s3gen_token_lens = torch.tensor([len(t) for t in clean_tokens_list], device=self.device)
+            s3gen_token_lens = torch.tensor([len(t) for t in clean_tokens_list]).to(self.device)
 
             wavs, _ = self.s3gen.inference(
                 speech_tokens=s3gen_tokens_padded.to(self.device),

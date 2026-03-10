@@ -1,20 +1,6 @@
->>> SYNC HUNTER INITIALIZED. PID: 403668
+>>> SYNC HUNTER INITIALIZED. PID: 412292
 SYNC DETECTED
-Trigger: src\chatterbox\tts.py:322
-Code: if exaggeration != self.conds.t3.emotion_adv[0, 0, 0].item():
-Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
-Stack Trace:
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
-    main()
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
-    wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 322, in generate
-    if exaggeration != self.conds.t3.emotion_adv[0, 0, 0].item():
-
---
-
-SYNC DETECTED
-Trigger: src\chatterbox\tts.py:331
+Trigger: src\chatterbox\tts.py:329
 Code: text_tokens = torch.nn.utils.rnn.pad_sequence(tokenized_texts, batch_first=True, padding_value=0).to(self.device)
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
 Stack Trace:
@@ -22,89 +8,89 @@ Stack Trace:
     main()
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 331, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 329, in generate
     text_tokens = torch.nn.utils.rnn.pad_sequence(tokenized_texts, batch_first=True, padding_value=0).to(self.device)
 
 --
 
 SYNC DETECTED
-Trigger: src\chatterbox\models\t3\t3.py:32
-Code: assert (text_tokens == hp.start_text_token).int().sum() >= B, "missing start_text_token"
+Trigger: src\chatterbox\models\t3\t3.py:34
+Code: assert has_start, "missing start_text_token"
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
 Stack Trace:
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
     main()
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 357, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 355, in generate
     speech_tokens_list = self.t3.inference(
   File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
     return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 255, in inference
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 257, in inference
     _ensure_BOT_EOT(text_tokens, self.hp)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 32, in _ensure_BOT_EOT
-    assert (text_tokens == hp.start_text_token).int().sum() >= B, "missing start_text_token"
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 34, in _ensure_BOT_EOT
+    assert has_start, "missing start_text_token"
 
 --
 
 SYNC DETECTED
-Trigger: src\chatterbox\models\t3\t3.py:33
-Code: assert (text_tokens == hp.stop_text_token).int().sum() >= B, "missing stop_text_token"
+Trigger: src\chatterbox\models\t3\t3.py:35
+Code: assert has_stop, "missing stop_text_token"
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
 Stack Trace:
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
     main()
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 357, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 355, in generate
     speech_tokens_list = self.t3.inference(
   File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
     return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 255, in inference
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 257, in inference
     _ensure_BOT_EOT(text_tokens, self.hp)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 33, in _ensure_BOT_EOT
-    assert (text_tokens == hp.stop_text_token).int().sum() >= B, "missing stop_text_token"
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 35, in _ensure_BOT_EOT
+    assert has_stop, "missing stop_text_token"
 
 --
 
 SYNC DETECTED
-Trigger: src\chatterbox\models\t3\t3.py:358
-Code: cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
+Trigger: src\chatterbox\models\t3\t3.py:353
+Code: _stop_token_t = torch.tensor(self.hp.stop_speech_token, device=device, dtype=torch.long)
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
 Stack Trace:
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
     main()
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 357, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 355, in generate
     speech_tokens_list = self.t3.inference(
   File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
     return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 358, in inference
-    cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 353, in inference
+    _stop_token_t = torch.tensor(self.hp.stop_speech_token, device=device, dtype=torch.long)
 
 --
 
 SYNC DETECTED
-Trigger: src\chatterbox\models\t3\t3.py:397
-Code: torch.tensor(self.hp.stop_speech_token, device=device, dtype=torch.long),
+Trigger: src\chatterbox\models\t3\t3.py:354
+Code: _cfg_weight_t = torch.as_tensor(cfg_weight, device=device, dtype=embeds.dtype) if cfg_weight > 0.0 else None
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
 Stack Trace:
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
     main()
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 357, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 355, in generate
     speech_tokens_list = self.t3.inference(
   File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
     return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 397, in inference
-    torch.tensor(self.hp.stop_speech_token, device=device, dtype=torch.long),
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 354, in inference
+    _cfg_weight_t = torch.as_tensor(cfg_weight, device=device, dtype=embeds.dtype) if cfg_weight > 0.0 else None
 
 --
 
 SYNC DETECTED
-Trigger: src\chatterbox\models\t3\t3.py:409
+Trigger: src\chatterbox\models\t3\t3.py:416
 Code: if is_finished.all():
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
 Stack Trace:
@@ -112,37 +98,17 @@ Stack Trace:
     main()
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 357, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 355, in generate
     speech_tokens_list = self.t3.inference(
   File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
     return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 409, in inference
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 416, in inference
     if is_finished.all():
 
 --
 
 SYNC DETECTED
-Trigger: src\chatterbox\models\t3\modules\learned_pos_emb.py:31
-Code: idx = idx.to(device) if torch.is_tensor(idx) else torch.tensor(idx, device=device)
-Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
-Stack Trace:
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
-    main()
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
-    wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 357, in generate
-    speech_tokens_list = self.t3.inference(
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 421, in inference
-    next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(len_initial_speech + i)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\modules\learned_pos_emb.py", line 31, in get_fixed_embedding
-    idx = idx.to(device) if torch.is_tensor(idx) else torch.tensor(idx, device=device)
-
---
-
-SYNC DETECTED
-Trigger: src\chatterbox\models\t3\t3.py:445
+Trigger: src\chatterbox\models\t3\t3.py:451
 Code: eos_idx = (gen_ids == self.hp.stop_speech_token).nonzero(as_tuple=True)[0]
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
 Stack Trace:
@@ -150,17 +116,17 @@ Stack Trace:
     main()
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 357, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 355, in generate
     speech_tokens_list = self.t3.inference(
   File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
     return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 445, in inference
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 451, in inference
     eos_idx = (gen_ids == self.hp.stop_speech_token).nonzero(as_tuple=True)[0]
 
 --
 
 SYNC DETECTED
-Trigger: src\chatterbox\models\t3\t3.py:447
+Trigger: src\chatterbox\models\t3\t3.py:453
 Code: gen_ids = gen_ids[:eos_idx[0]]
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
 Stack Trace:
@@ -168,11 +134,11 @@ Stack Trace:
     main()
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 357, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 355, in generate
     speech_tokens_list = self.t3.inference(
   File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
     return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 447, in inference
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\t3\t3.py", line 453, in inference
     gen_ids = gen_ids[:eos_idx[0]]
 
 --
@@ -186,7 +152,7 @@ Stack Trace:
     main()
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 370, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 368, in generate
     clean_tokens_list = drop_invalid_tokens(speech_tokens_padded)
   File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3tokenizer\s3tokenizer.py", line 32, in drop_invalid_tokens
     return [row[row < SPEECH_VOCAB_SIZE] for row in x]
@@ -196,8 +162,22 @@ Stack Trace:
 --
 
 SYNC DETECTED
-Trigger: src\chatterbox\tts.py:372
-Code: s3gen_token_lens = torch.tensor([len(t) for t in clean_tokens_list], device=self.device)
+Trigger: src\chatterbox\tts.py:370
+Code: s3gen_token_lens = torch.tensor([len(t) for t in clean_tokens_list]).to(self.device)
+Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
+Stack Trace:
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
+    main()
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
+    wavs = model.generate(**gen_kwargs)
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 370, in generate
+    s3gen_token_lens = torch.tensor([len(t) for t in clean_tokens_list]).to(self.device)
+
+--
+
+SYNC DETECTED
+Trigger: src\chatterbox\models\s3gen\utils\mask.py:189
+Code: seq_range = torch.arange(0,
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
 Stack Trace:
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
@@ -205,20 +185,6 @@ Stack Trace:
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
   File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 372, in generate
-    s3gen_token_lens = torch.tensor([len(t) for t in clean_tokens_list], device=self.device)
-
---
-
-SYNC DETECTED
-Trigger: src\chatterbox\models\s3gen\utils\mask.py:187
-Code: max_len = max_len if max_len > 0 else lengths.max().item()
-Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
-Stack Trace:
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
-    main()
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
-    wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 374, in generate
     wavs, _ = self.s3gen.inference(
   File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
     return func(*args, **kwargs)
@@ -234,19 +200,49 @@ Stack Trace:
     return func(*args, **kwargs)
   File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\flow.py", line 287, in inference
     mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\utils\mask.py", line 187, in make_pad_mask
-    max_len = max_len if max_len > 0 else lengths.max().item()
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\utils\mask.py", line 189, in make_pad_mask
+    seq_range = torch.arange(0,
 
 --
 
 SYNC DETECTED
-Trigger: src\chatterbox\models\s3gen\utils\mask.py:163
-Code: if (chunk_masks.sum(dim=-1) == 0).sum().item() != 0:
+Trigger: src\chatterbox\models\s3gen\utils\mask.py:193
+Code: seq_range_expand = seq_range.unsqueeze(0).expand(batch_size, max_len)
+Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
+Stack Trace:
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
+    main()
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
+    wavs = model.generate(**gen_kwargs)
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 372, in generate
+    wavs, _ = self.s3gen.inference(
+  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\s3gen.py", line 315, in inference
+    output_mels = self.flow_inference(speech_tokens, speech_token_lens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
+  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\s3gen.py", line 282, in flow_inference
+    return super().forward(speech_tokens, speech_token_lens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\s3gen.py", line 198, in forward
+    output_mels, _ = self.flow.inference(
+  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\flow.py", line 287, in inference
+    mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\utils\mask.py", line 193, in make_pad_mask
+    seq_range_expand = seq_range.unsqueeze(0).expand(batch_size, max_len)
+
+--
+
+SYNC DETECTED
+Trigger: src\chatterbox\models\s3gen\utils\mask.py:164
+Code: if (chunk_masks.sum(dim=-1) == 0).any():
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
 Stack Trace:
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 374, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 372, in generate
     wavs, _ = self.s3gen.inference(
   File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
     return func(*args, **kwargs)
@@ -268,42 +264,8 @@ Stack Trace:
     return forward_call(*args, **kwargs)
   File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\transformer\upsample_encoder.py", line 275, in forward
     chunk_masks = add_optional_chunk_mask(xs, masks,
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\utils\mask.py", line 163, in add_optional_chunk_mask
-    if (chunk_masks.sum(dim=-1) == 0).sum().item() != 0:
-
---
-
-SYNC DETECTED
-Trigger: src\chatterbox\models\s3gen\flow_matching.py:223
-Code: z = self.rand_noise[:, :, :mu.size(2)].to(mu.device).to(mu.dtype) * temperature
-Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
-Stack Trace:
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
-    wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 374, in generate
-    wavs, _ = self.s3gen.inference(
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\s3gen.py", line 315, in inference
-    output_mels = self.flow_inference(speech_tokens, speech_token_lens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\s3gen.py", line 282, in flow_inference
-    return super().forward(speech_tokens, speech_token_lens, ref_wav=ref_wav, ref_sr=ref_sr, ref_dict=ref_dict, finalize=finalize)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\s3gen.py", line 198, in forward
-    output_mels, _ = self.flow.inference(
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\flow.py", line 308, in inference
-    feat, _ = self.decoder(
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\nn\modules\module.py", line 1751, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\nn\modules\module.py", line 1762, in _call_impl
-    return forward_call(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\flow_matching.py", line 223, in forward
-    z = self.rand_noise[:, :, :mu.size(2)].to(mu.device).to(mu.dtype) * temperature
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\utils\mask.py", line 164, in add_optional_chunk_mask
+    if (chunk_masks.sum(dim=-1) == 0).any():
 
 --
 
@@ -342,66 +304,6 @@ Stack Trace:
 --
 
 SYNC DETECTED
-Trigger: src\chatterbox\models\s3gen\hifigan.py:444
-Code: self.istft_params["n_fft"], self.istft_params["hop_len"], self.istft_params["n_fft"], window=self.stft_window.to(x.device),
-Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
-Stack Trace:
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
-    main()
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
-    wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 374, in generate
-    wavs, _ = self.s3gen.inference(
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\s3gen.py", line 318, in inference
-    output_wavs, output_sources = self.hift_inference(output_mels, cache_source)
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\s3gen.py", line 295, in hift_inference
-    return self.mel2wav.inference(speech_feat=speech_feat, cache_source=cache_source)
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\hifigan.py", line 531, in inference
-    generated_speech = self.decode(x=speech_feat, s=s)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\hifigan.py", line 467, in decode
-    s_stft_real, s_stft_imag = self._stft(s.squeeze(1))
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\hifigan.py", line 444, in _stft
-    self.istft_params["n_fft"], self.istft_params["hop_len"], self.istft_params["n_fft"], window=self.stft_window.to(x.device),
-
---
-
-SYNC DETECTED
-Trigger: src\chatterbox\models\s3gen\hifigan.py:455
-Code: self.istft_params["n_fft"], window=self.stft_window.to(magnitude.device))
-Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
-Stack Trace:
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 288, in <module>
-    main()
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
-    wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 374, in generate
-    wavs, _ = self.s3gen.inference(
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\s3gen.py", line 318, in inference
-    output_wavs, output_sources = self.hift_inference(output_mels, cache_source)
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\s3gen.py", line 295, in hift_inference
-    return self.mel2wav.inference(speech_feat=speech_feat, cache_source=cache_source)
-  File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\hifigan.py", line 531, in inference
-    generated_speech = self.decode(x=speech_feat, s=s)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\hifigan.py", line 500, in decode
-    x = self._istft(magnitude, phase)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\models\s3gen\hifigan.py", line 455, in _istft
-    self.istft_params["n_fft"], window=self.stft_window.to(magnitude.device))
-
---
-
-SYNC DETECTED
 Trigger: src\chatterbox\models\s3gen\hifigan.py:454
 Code: inverse_transform = torch.istft(torch.complex(real.float(), img.float()), self.istft_params["n_fft"], self.istft_params["hop_len"],
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
@@ -410,7 +312,7 @@ Stack Trace:
     main()
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 374, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 372, in generate
     wavs, _ = self.s3gen.inference(
   File "C:\_myDrive\repos\auto-vlog\venv\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
     return func(*args, **kwargs)
@@ -432,7 +334,7 @@ Stack Trace:
 --
 
 SYNC DETECTED
-Trigger: src\chatterbox\tts.py:385
+Trigger: src\chatterbox\tts.py:383
 Code: trimmed_wav = wav[:audio_lengths[i]].cpu().float().numpy()
 Message: called a synchronizing CUDA operation (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\c10\cuda\CUDAFunctions.cpp:152.)
 Stack Trace:
@@ -440,7 +342,7 @@ Stack Trace:
     main()
   File "C:\_myDrive\repos\auto-vlog\chatterbox\profile_chatterbox_batched.py", line 235, in main
     wavs = model.generate(**gen_kwargs)
-  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 385, in generate
+  File "C:\_myDrive\repos\auto-vlog\chatterbox\src\chatterbox\tts.py", line 383, in generate
     trimmed_wav = wav[:audio_lengths[i]].cpu().float().numpy()
 
 --

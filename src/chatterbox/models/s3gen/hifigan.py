@@ -413,7 +413,7 @@ class HiFTGenerator(nn.Module):
         self.ups.apply(init_weights)
         self.conv_post.apply(init_weights)
         self.reflection_pad = nn.ReflectionPad1d((1, 0))
-        self.stft_window = torch.from_numpy(get_window("hann", istft_params["n_fft"], fftbins=True).astype(np.float32))
+        self.register_buffer('stft_window', torch.from_numpy(get_window("hann", istft_params["n_fft"], fftbins=True).astype(np.float32)))
         self.f0_predictor = f0_predictor
 
     @property
@@ -441,7 +441,7 @@ class HiFTGenerator(nn.Module):
         # This function requires FP32 input for stft
         spec = torch.stft(
             x.float(),
-            self.istft_params["n_fft"], self.istft_params["hop_len"], self.istft_params["n_fft"], window=self.stft_window.to(x.device),
+            self.istft_params["n_fft"], self.istft_params["hop_len"], self.istft_params["n_fft"], window=self.stft_window.to(device=x.device, dtype=torch.float32),
             return_complex=True)
         spec = torch.view_as_real(spec)  # [B, F, TT, 2]
         return spec[..., 0], spec[..., 1]
@@ -452,7 +452,7 @@ class HiFTGenerator(nn.Module):
         img = magnitude * torch.sin(phase)
         # This function requires FP32 complex input for istft
         inverse_transform = torch.istft(torch.complex(real.float(), img.float()), self.istft_params["n_fft"], self.istft_params["hop_len"],
-                                        self.istft_params["n_fft"], window=self.stft_window.to(magnitude.device))
+                                        self.istft_params["n_fft"], window=self.stft_window.to(device=magnitude.device, dtype=torch.float32))
         return inverse_transform
 
     def decode(self, x: torch.Tensor, s: torch.Tensor = torch.zeros(1, 1, 0)) -> torch.Tensor:
