@@ -67,7 +67,7 @@ with gr.Blocks() as demo:
         with gr.Column():
             audio_output = gr.Audio(label="Output Audio")
 
-    demo.load(fn=load_model, inputs=[], outputs=model_state)
+    demo.load(fn=load_model, inputs=None, outputs=model_state)
 
     run_btn.click(
         fn=generate,
@@ -87,7 +87,4 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
-    demo.queue(
-        max_size=50,
-        default_concurrency_limit=1,
-    ).launch(share=True)
+    demo.queue(max_size=50).launch(share=True, max_threads=1)
