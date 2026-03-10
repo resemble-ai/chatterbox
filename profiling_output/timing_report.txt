@@ -12,13 +12,13 @@ Audio prompt:       (default voice)
 ------------------------------------------------------------
 Phase                                 Time (s)
 ------------------------------------------------------------
-model_load                              30.626
-warmup                                   5.162
-generate_batched                        11.704
+model_load                              27.015
+warmup                                   2.741
+generate_batched                        11.371
 ------------------------------------------------------------
 
-Avg time per output................      5.852 s
-Throughput.........................       0.17 outputs/s
+Avg time per output................      5.686 s
+Throughput.........................       0.18 outputs/s
 
-Peak VRAM allocated................     1724.0 MB
-Peak VRAM reserved.................     1878.0 MB
+Peak VRAM allocated................     1722.3 MB
+Peak VRAM reserved.................     1864.0 MB

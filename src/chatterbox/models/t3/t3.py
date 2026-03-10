@@ -319,13 +319,17 @@ class T3(nn.Module):
         inputs_embeds = embeds
         device = embeds.device
 
+        # output_attentions is only needed for alignment_stream_analyzer (multilingual).
+        # When True, HuggingFace disables SDPA fused kernels and falls back to slow manual attention.
+        _needs_attentions = self.patched_model.alignment_stream_analyzer is not None
+
         # ---- Initial Forward Pass (Prefill/Prompt Processing) ----
         output = self.patched_model(
             inputs_embeds=inputs_embeds,
             past_key_values=None,
             use_cache=True,
-            output_attentions=True,
-            output_hidden_states=True,
+            output_attentions=_needs_attentions,
+            output_hidden_states=False,
             return_dict=True,
         )
         # Initialize kv_cache with the full context.
@@ -435,8 +439,8 @@ class T3(nn.Module):
             output = self.patched_model(
                 inputs_embeds=next_token_embed,
                 past_key_values=past,
-                output_attentions=True,
-                output_hidden_states=True,
+                output_attentions=_needs_attentions,
+                output_hidden_states=False,
                 return_dict=True,
             )
             # Update the kv_cache.
