@@ -363,11 +363,17 @@ class TimedChatterboxTTS:
 
             seg_token_ranges: List[Tuple[int, int]] = []
             cursor = 0
+            n_segs = len(text_token_counts)
             for i, tc in enumerate(text_token_counts):
-                count = round(group_total * tc / total_text_tokens)
-                count = max(count, 1)
-                if i == len(text_token_counts) - 1:
-                    count = group_total - cursor  # remainder to last
+                if i == n_segs - 1:
+                    count = group_total - cursor
+                else:
+                    count = round(group_total * tc / total_text_tokens)
+                    count = max(count, 1)
+                    # Don't consume so many tokens that later segments starve.
+                    remaining_after = n_segs - 1 - i   # segments still to come
+                    count = min(count, group_total - cursor - remaining_after)
+                    count = max(count, 1)
                 seg_token_ranges.append((cursor, cursor + count))
                 cursor += count
 
@@ -425,7 +431,7 @@ class TimedChatterboxTTS:
         full_wav_tensor = self.model.speech_tokens_to_wav(
             all_resampled, apply_watermark=False
         )
-        full_wav_np = full_wav_tensor.squeeze(0).numpy().astype(np.float32)
+        full_wav_np = full_wav_tensor.squeeze(0).numpy()
 
         # ── 6. Assemble final audio with absolute positioning ────────────
 

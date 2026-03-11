@@ -425,7 +425,8 @@ class ChatterboxTTS:
 
         # Update exaggeration
         if t3_cond.emotion_adv is not None and t3_cond.emotion_adv.numel() > 0:
-            t3_cond.emotion_adv = exaggeration * torch.ones(1, 1, 1, device=self.device, dtype=self.dtype)
+            bs = t3_cond.speaker_emb.size(0)
+            t3_cond.emotion_adv = exaggeration * torch.ones(bs, 1, 1, device=self.device, dtype=self.dtype)
 
         normed = punc_norm(text)
         text_tokens = self.tokenizer.text_to_tokens(normed).squeeze(0).unsqueeze(0).to(self.device)
@@ -487,7 +488,8 @@ class ChatterboxTTS:
         gen_cond = self.conds.gen
 
         tokens_2d = speech_tokens.unsqueeze(0).to(self.device)      # (1, T)
-        token_lens = torch.tensor([tokens_2d.size(1)], device=self.device)
+        num_tokens = tokens_2d.size(1)
+        token_lens = torch.tensor([num_tokens], device=self.device)
 
         with torch.inference_mode():
             wavs, _ = self.s3gen.inference(
@@ -496,7 +498,7 @@ class ChatterboxTTS:
                 ref_dict=gen_cond,
             )
 
-        audio_length = token_lens[0] * TOKEN_TO_WAV_RATIO
+        audio_length = num_tokens * TOKEN_TO_WAV_RATIO
         trimmed = wavs[0, :audio_length].cpu().float().numpy()
         if apply_watermark:
             trimmed = self.watermarker.apply_watermark(trimmed, sample_rate=self.sr)
