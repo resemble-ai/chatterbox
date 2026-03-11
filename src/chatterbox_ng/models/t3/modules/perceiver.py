@@ -4,9 +4,12 @@
 import math
 
 import torch
-from torch import nn
 import torch.nn.functional as F
 from einops import rearrange
+from torch import nn
+# In recent torch versions, torch.backends.cuda.sdp_kernel is deprecated.
+# Use torch.nn.attention.sdpa_kernel instead.
+from torch.nn.attention import sdpa_kernel, SDPBackend
 
 
 class RelativePositionBias(nn.Module):
@@ -92,7 +95,21 @@ class AttentionQKV(nn.Module):
     def flash_attention(self, q, k, v, mask=None):
         config = self.flash_config if self.flash_config else {}
 
-        with torch.backends.cuda.sdp_kernel(**config):
+        # Map sdp_kernel flags to sdpa_kernel backends if necessary, 
+        # or just use sdpa_kernel with the same logic if possible.
+        # However, sdpa_kernel is a context manager that takes a list of backends.
+
+        backends = []
+        if config.get("enable_flash", True):
+            backends.append(SDPBackend.FLASH_ATTENTION)
+        if config.get("enable_math", True):
+            backends.append(SDPBackend.MATH)
+        if config.get("enable_mem_efficient", True):
+            backends.append(SDPBackend.EFFICIENT_ATTENTION)
+        if config.get("enable_cudnn", True):
+            backends.append(SDPBackend.CUDNN_ATTENTION)
+
+        with sdpa_kernel(backends):
             out = F.scaled_dot_product_attention(
                 q, k, v,
                 attn_mask=mask,
@@ -119,14 +136,14 @@ class AttentionBlock2(nn.Module):
     """
 
     def __init__(
-        self,
-        channels,
-        num_heads=1,
-        num_head_channels=-1,
-        relative_pos_embeddings=False,
-        flash_attention=True,
-        dropout_rate=0.2,
-        scale=None
+            self,
+            channels,
+            num_heads=1,
+            num_head_channels=-1,
+            relative_pos_embeddings=False,
+            flash_attention=True,
+            dropout_rate=0.2,
+            scale=None
     ):
         super().__init__()
         self.channels = channels
@@ -135,7 +152,7 @@ class AttentionBlock2(nn.Module):
             self.num_heads = num_heads
         else:
             assert (
-                channels % num_head_channels == 0
+                    channels % num_head_channels == 0
             ), f"channels {channels} is not divisible by num_head_channels {num_head_channels}"
             self.num_heads = channels // num_head_channels
 
@@ -146,12 +163,14 @@ class AttentionBlock2(nn.Module):
         self.to_k = nn.Linear(channels, channels)
         self.to_v = nn.Linear(channels, channels)
 
-        self.attention = AttentionQKV(self.num_heads, channels // self.num_heads, dropout_rate=dropout_rate, flash=flash_attention, scale=scale)
+        self.attention = AttentionQKV(self.num_heads, channels // self.num_heads, dropout_rate=dropout_rate,
+                                      flash=flash_attention, scale=scale)
 
         self.proj_out = nn.Linear(channels, channels)
 
         if relative_pos_embeddings:
-            self.relative_pos_embeddings = RelativePositionBias(scale=(channels // self.num_heads) ** .5, causal=False, heads=num_heads, num_buckets=32, max_distance=64)
+            self.relative_pos_embeddings = RelativePositionBias(scale=(channels // self.num_heads) ** .5, causal=False,
+                                                                heads=num_heads, num_buckets=32, max_distance=64)
         else:
             self.relative_pos_embeddings = None
 
@@ -174,7 +193,9 @@ class AttentionBlock2(nn.Module):
 
 class Perceiver(nn.Module):
     """Inspired by https://arxiv.org/abs/2103.03206"""
-    def __init__(self, pre_attention_query_token=32, pre_attention_query_size=1024, embedding_dim=1024, num_attn_heads=4):
+
+    def __init__(self, pre_attention_query_token=32, pre_attention_query_size=1024, embedding_dim=1024,
+                 num_attn_heads=4):
         """
         Initialize the perceiver module.
 

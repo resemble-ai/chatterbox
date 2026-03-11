@@ -53,7 +53,7 @@ We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions 
 ```python
 import torchaudio as ta
 import torch
-from chatterbox.tts_turbo import ChatterboxTurboTTS
+from chatterbox_ng.tts_turbo import ChatterboxTurboTTS
 
 # Load the Turbo model
 model = ChatterboxTurboTTS.from_pretrained(device="cuda")
@@ -72,8 +72,8 @@ ta.save("test-turbo.wav", wav, model.sr)
 ```python
 
 import torchaudio as ta
-from chatterbox.tts import ChatterboxTTS
-from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+from chatterbox_ng.tts import ChatterboxTTS
+from chatterbox_ng.mtl_tts import ChatterboxMultilingualTTS
 
 # English example
 model = ChatterboxTTS.from_pretrained(device="cuda")

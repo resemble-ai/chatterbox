@@ -75,7 +75,7 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         inputs_embeds: torch.Tensor,
         past_key_values: Optional[torch.Tensor]=None,
         use_cache=True,
-        output_attentions=False,
+        output_attentions=None,
         output_hidden_states=True,
         return_dict=True,
     ):
@@ -91,6 +91,9 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         assert not (is_large_input and has_cache)
         assert return_dict
         assert output_hidden_states
+
+        if output_attentions is None:
+            output_attentions = self.config.output_attentions
 
         tfmr_out = self.model(
             inputs_embeds=inputs_embeds,

@@ -278,6 +278,11 @@ class T3(nn.Module):
             # Default to None for English models, only create for multilingual
             alignment_stream_analyzer = None
             if self.hp.is_multilingual:
+                # IMPORTANT: Switch to eager implementation BEFORE creating AlignmentStreamAnalyzer
+                # to avoid warnings and errors about SDPA not supporting output_attentions.
+                self.cfg._attn_implementation = "eager"
+                self.cfg.output_attentions = True
+                
                 alignment_stream_analyzer = AlignmentStreamAnalyzer(
                     self.tfmr,
                     None,
@@ -311,6 +316,7 @@ class T3(nn.Module):
         #     length_penalty=length_penalty,
         #     repetition_penalty=repetition_penalty,
         #     do_sample=do_sample,
+        #     output_attentions=self.cfg.output_attentions,
         #     # cache_implementation=None if not self.compiled else "static",
         # )
 

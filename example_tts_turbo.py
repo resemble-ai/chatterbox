@@ -1,6 +1,6 @@
 import torchaudio as ta
 import torch
-from chatterbox.tts_turbo import ChatterboxTurboTTS
+from chatterbox_ng.tts_turbo import ChatterboxTurboTTS
 
 # Load the Turbo model
 model = ChatterboxTurboTTS.from_pretrained(device="cuda")

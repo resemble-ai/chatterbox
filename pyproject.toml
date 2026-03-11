@@ -1,30 +1,29 @@
 [project]
-name = "chatterbox-tts"
-version = "0.1.6"
+name = "chatterbox-ng"
+version = "0.1.7"
 description = "Chatterbox: Open Source TTS and Voice Conversion by Resemble AI"
 readme = "README.md"
-requires-python = "==3.14.3"
+requires-python = ">=3.14.3,<3.15.0"
 license = {file = "LICENSE"}
 authors = [
     {name = "resemble-ai", email = "engineering@resemble.ai"}
 ]
 dependencies = [
-    "numpy",
-    "librosa",
-    "s3tokenizer",
-    "torch",
-    "torchaudio",
-    "torchcodec",
-    "transformers",
-    "diffusers",
-#    "resemble-perth",
-    "conformer",
-    "safetensors",
-    "spacy-pkuseg",
-    "pykakasi",
-    "gradio",
-    "pyloudnorm",
-    "omegaconf"
+    "numpy==2.4.3",
+    "librosa==0.11.0",
+    "s3tokenizer==0.3.0",
+    "torch==2.10.0",
+    "torchaudio==2.10.0",
+    "torchcodec==0.10.0",
+    "transformers==5.3.0",
+    "diffusers==0.37.0",
+    "conformer==0.3.2",
+    "safetensors==0.7.0",
+    "spacy-pkuseg==1.0.1",
+    "pykakasi==2.3.0",
+    "gradio==6.9.0",
+    "pyloudnorm==0.2.0",
+    "omegaconf==2.3.0"
 ]
 
 [dependency-groups]
@@ -34,6 +33,7 @@ dev = [
     "pre-commit",
     "pyright",
     "ruff",
+    "scipy-stubs",
     "setuptools",
     "setuptools_rust",
     "ty",
@@ -41,12 +41,112 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/resemble-ai/chatterbox"
-Repository = "https://github.com/resemble-ai/chatterbox"
+Homepage = "https://github.com/kamikaze/chatterbox-ng"
+Repository = "https://github.com/kamikaze/chatterbox-ng"
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+exclude = ["tests"]
+
+[tool.setuptools_scm]
+
+[tool.bdist_wheel]
+universal = true
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+target-version = "py314"
+
+[tool.ruff.analyze]
+detect-string-imports = true
+
+[tool.ruff.lint]
+select = [
+    "FAST",
+    "YTT",
+    "ANN",
+    "I",
+    "E",
+    "W",
+    "PYI",
+    "A",
+    "ARG",
+    "ASYNC",
+    "B",
+    "C4",
+    "DTZ",
+    "EM",
+    "EXE",
+    "F",
+    "FA",
+    "FBT",
+    "FLY",
+    "FURB",
+    "G",
+    "ICN",
+    "INP",
+    "ISC",
+    "LOG",
+    "N",
+    "NPY",
+    "PD",
+    "PERF",
+    "PIE",
+    "PLC",
+    "PLE",
+    "PLR",
+    "PLW",
+    "PT",
+    "PTH",
+    "Q",
+    "RET",
+    "RSE",
+    "RUF",
+    "S",
+    "SIM",
+    "SLF",
+    "SLOT",
+    "T20",
+    "TC",
+    "TID",
+    "TRY",
+    "UP",
+]
+ignore = [
+    "ASYNC109",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["DTZ", "S101"]
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+inline-quotes = "single"
+
+[tool.ruff.format]
+exclude = ["*.pyi"]
+indent-style = "space"
+quote-style = "single"
+
+[tool.pyright]
+pythonVersion = "3.14"
+venvPath = "."
+venv = ".venv"
+reportMatchNotExhaustive = "error"
+reportUnnecessaryComparison = "error"
+
+[tool.ty.rules]
+unknown-argument = "ignore"  # false positives for Pydantic model fields
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "--cov python3_commons --cov-fail-under=15 --cov-report term-missing --verbose"
+norecursedirs = ["dist", "build", ".tox"]
+testpaths = ["tests"]

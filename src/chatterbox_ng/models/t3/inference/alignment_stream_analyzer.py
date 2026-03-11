@@ -84,6 +84,12 @@ class AlignmentStreamAnalyzer:
         target_layer.register_forward_hook(attention_forward_hook)
         if hasattr(tfmr, 'config') and hasattr(tfmr.config, 'output_attentions'):
             self.original_output_attentions = tfmr.config.output_attentions
+            self.original_attn_implementation = getattr(tfmr.config, "_attn_implementation", "eager")
+            
+            # We must use eager implementation to get attentions.
+            # Setting it on the config might not be enough if the model was already initialized with SDPA.
+            # However, LlamaAttention will check config._attn_implementation during forward in some versions.
+            tfmr.config._attn_implementation = "eager"
             tfmr.config.output_attentions = True
 
     def step(self, logits, next_token=None):

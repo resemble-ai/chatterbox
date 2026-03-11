@@ -1,7 +1,7 @@
 import torch
 import torchaudio as ta
 
-from chatterbox.vc import ChatterboxVC
+from chatterbox_ng.vc import ChatterboxVC
 
 # Automatically detect the best available device
 if torch.cuda.is_available():
