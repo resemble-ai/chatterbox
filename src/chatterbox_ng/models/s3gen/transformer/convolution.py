@@ -15,7 +15,6 @@
 # Modified from ESPnet(https://github.com/espnet/espnet)
 """ConvolutionModule definition."""
 
-from typing import Tuple
 
 import torch
 from torch import nn
@@ -28,7 +27,7 @@ class ConvolutionModule(nn.Module):
                  channels: int,
                  kernel_size: int = 15,
                  activation: nn.Module = nn.ReLU(),
-                 norm: str = "batch_norm",
+                 norm: str = 'batch_norm',
                  causal: bool = False,
                  bias: bool = True):
         """Construct an ConvolutionModule object.
@@ -70,7 +69,7 @@ class ConvolutionModule(nn.Module):
         )
 
         assert norm in ['batch_norm', 'layer_norm']
-        if norm == "batch_norm":
+        if norm == 'batch_norm':
             self.use_layer_norm = False
             self.norm = nn.BatchNorm1d(channels)
         else:
@@ -92,7 +91,7 @@ class ConvolutionModule(nn.Module):
         x: torch.Tensor,
         mask_pad: torch.Tensor = torch.ones((0, 0, 0), dtype=torch.bool),
         cache: torch.Tensor = torch.zeros((0, 0, 0)),
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute convolution module.
         Args:
             x (torch.Tensor): Input tensor (#batch, time, channels).

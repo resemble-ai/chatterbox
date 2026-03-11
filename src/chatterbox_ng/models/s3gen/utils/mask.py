@@ -57,7 +57,7 @@ def subsequent_chunk_mask(
         size: int,
         chunk_size: int,
         num_left_chunks: int = -1,
-        device: torch.device = torch.device("cpu"),
+        device: torch.device = torch.device('cpu'),
 ) -> torch.Tensor:
     """Create mask for subsequent steps (size, size) with chunk size,
        this is for streaming encoder

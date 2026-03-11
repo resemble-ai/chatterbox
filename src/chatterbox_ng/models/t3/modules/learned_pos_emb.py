@@ -1,7 +1,6 @@
-from typing import Union
 
 import torch
-from torch import nn, Tensor
+from torch import Tensor, nn
 
 
 class LearnedPositionEmbeddings(nn.Module):
@@ -18,7 +17,7 @@ class LearnedPositionEmbeddings(nn.Module):
         sl = x.shape[1]
         return self.emb(torch.arange(0, sl, device=x.device))
 
-    def get_fixed_embedding(self, idx: 'Union[int, Tensor]'):
+    def get_fixed_embedding(self, idx: int | Tensor):
         """
         Args:
             idx: scalar int or an integer tensor of shape (T,) or (B, T)

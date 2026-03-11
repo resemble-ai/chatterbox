@@ -5,11 +5,10 @@ import torch
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
-from .models.s3tokenizer import S3_SR
 from .models.s3gen import S3GEN_SR, S3Gen
+from .models.s3tokenizer import S3_SR
 
-
-REPO_ID = "ResembleAI/chatterbox"
+REPO_ID = 'ResembleAI/chatterbox'
 
 
 class ChatterboxVC:
@@ -35,39 +34,39 @@ class ChatterboxVC:
             }
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxVC':
+    def from_local(cls, ckpt_dir, device) -> ChatterboxVC:
         ckpt_dir = Path(ckpt_dir)
-        
+
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
-        if device in ["cpu", "mps"]:
+        if device in ['cpu', 'mps']:
             map_location = torch.device('cpu')
         else:
             map_location = None
-            
+
         ref_dict = None
-        if (builtin_voice := ckpt_dir / "conds.pt").exists():
+        if (builtin_voice := ckpt_dir / 'conds.pt').exists():
             states = torch.load(builtin_voice, map_location=map_location)
             ref_dict = states['gen']
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
-            load_file(ckpt_dir / "s3gen.safetensors"), strict=False
+            load_file(ckpt_dir / 's3gen.safetensors'), strict=False
         )
         s3gen.to(device).eval()
 
         return cls(s3gen, device, ref_dict=ref_dict)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxVC':
+    def from_pretrained(cls, device) -> ChatterboxVC:
         # Check if MPS is available on macOS
-        if device == "mps" and not torch.backends.mps.is_available():
+        if device == 'mps' and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
-                print("MPS not available because the current PyTorch install was not built with MPS enabled.")
+                print('MPS not available because the current PyTorch install was not built with MPS enabled.')
             else:
-                print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
-            device = "cpu"
-            
-        for fpath in ["s3gen.safetensors", "conds.pt"]:
+                print('MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.')
+            device = 'cpu'
+
+        for fpath in ['s3gen.safetensors', 'conds.pt']:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 
         return cls.from_local(Path(local_path).parent, device)
@@ -87,7 +86,7 @@ class ChatterboxVC:
         if target_voice_path:
             self.set_target_voice(target_voice_path)
         else:
-            assert self.ref_dict is not None, "Please `prepare_conditionals` first or specify `target_voice_path`"
+            assert self.ref_dict is not None, 'Please `prepare_conditionals` first or specify `target_voice_path`'
 
         with torch.inference_mode():
             audio_16, _ = librosa.load(audio, sr=S3_SR)

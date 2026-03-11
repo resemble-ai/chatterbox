@@ -13,28 +13,27 @@
 # limitations under the License.
 
 import logging
+from functools import lru_cache
 
 import numpy as np
 import torch
 import torchaudio as ta
-from functools import lru_cache
-from typing import Optional
 
 from ..s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
+from .configs import CFM_PARAMS
 from .const import S3GEN_SR
-from .flow import CausalMaskedDiffWithXvec
-from .xvector import CAMPPlus
-from .utils.mel import mel_spectrogram
+from .decoder import ConditionalDecoder
 from .f0_predictor import ConvRNNF0Predictor
+from .flow import CausalMaskedDiffWithXvec
+from .flow_matching import CausalConditionalCFM
 from .hifigan import HiFTGenerator
 from .transformer.upsample_encoder import UpsampleConformerEncoder
-from .flow_matching import CausalConditionalCFM
-from .decoder import ConditionalDecoder
-from .configs import CFM_PARAMS
+from .utils.mel import mel_spectrogram
+from .xvector import CAMPPlus
 
 
 def drop_invalid_tokens(x):
-    assert len(x.shape) <= 2 and x.shape[0] == 1, "only batch size of one allowed for now"
+    assert len(x.shape) <= 2 and x.shape[0] == 1, 'only batch size of one allowed for now'
     return x[x < SPEECH_VOCAB_SIZE]
 
 
@@ -52,7 +51,7 @@ class S3Token2Mel(torch.nn.Module):
     """
     def __init__(self, meanflow=False):
         super().__init__()
-        self.tokenizer = S3Tokenizer("speech_tokenizer_v2_25hz")
+        self.tokenizer = S3Tokenizer('speech_tokenizer_v2_25hz')
         self.mel_extractor = mel_spectrogram # TODO: make it a torch module?
         self.speaker_encoder = CAMPPlus(
             # NOTE: This doesn't affect inference. It turns off activation checkpointing
@@ -119,10 +118,10 @@ class S3Token2Mel(torch.nn.Module):
         self,
         ref_wav: torch.Tensor,
         ref_sr: int,
-        device="auto",
+        device='auto',
         ref_fade_out=True,
     ):
-        device = self.device if device == "auto" else device
+        device = self.device if device == 'auto' else device
         if isinstance(ref_wav, np.ndarray):
             ref_wav = torch.from_numpy(ref_wav).float()
 
@@ -133,7 +132,7 @@ class S3Token2Mel(torch.nn.Module):
             ref_wav = ref_wav.unsqueeze(0)  # (B, L)
 
         if ref_wav.size(1) > 10 * ref_sr:
-            print("WARNING: s3gen received ref longer than 10s")
+            print('WARNING: s3gen received ref longer than 10s')
 
         ref_wav_24 = ref_wav
         if ref_sr != S3GEN_SR:
@@ -157,7 +156,7 @@ class S3Token2Mel(torch.nn.Module):
         # Make sure mel_len = 2 * stoken_len (happens when the input is not padded to multiple of 40ms)
         if ref_mels_24.shape[1] != 2 * ref_speech_tokens.shape[1]:
             logging.warning(
-                "Reference mel length is not equal to 2 * reference token length.\n"
+                'Reference mel length is not equal to 2 * reference token length.\n'
             )
             ref_speech_tokens = ref_speech_tokens[:, :ref_mels_24.shape[1] // 2]
             ref_speech_token_lens[0] = ref_speech_tokens.shape[1]
@@ -174,10 +173,10 @@ class S3Token2Mel(torch.nn.Module):
         self,
         speech_tokens: torch.LongTensor,
         # locally-computed ref embedding (mutex with ref_dict)
-        ref_wav: Optional[torch.Tensor],
-        ref_sr: Optional[int],
+        ref_wav: torch.Tensor | None,
+        ref_sr: int | None,
         # pre-computed ref embedding (prod API)
-        ref_dict: Optional[dict] = None,
+        ref_dict: dict | None = None,
         n_cfm_timesteps = None,
         finalize: bool = False,
         speech_token_lens=None,
@@ -199,7 +198,7 @@ class S3Token2Mel(torch.nn.Module):
         - `ref_sr`: reference sample rate
         - `finalize`: whether streaming is finished or not. Note that if False, the last 3 tokens will be ignored.
         """
-        assert (ref_wav is None) ^ (ref_dict is None), f"Must provide exactly one of ref_wav or ref_dict (got {ref_wav} and {ref_dict})"
+        assert (ref_wav is None) ^ (ref_dict is None), f'Must provide exactly one of ref_wav or ref_dict (got {ref_wav} and {ref_dict})'
 
         if ref_dict is None:
             ref_dict = self.embed_ref(ref_wav, ref_sr)
@@ -236,7 +235,7 @@ class S3Token2Wav(S3Token2Mel):
     TODO: make these modules configurable?
     """
 
-    ignore_state_dict_missing = ("tokenizer._mel_filters", "tokenizer.window")
+    ignore_state_dict_missing = ('tokenizer._mel_filters', 'tokenizer.window')
 
     def __init__(self, meanflow=False):
         super().__init__(meanflow)
@@ -255,17 +254,17 @@ class S3Token2Wav(S3Token2Mel):
         n_trim = S3GEN_SR // 50  # 20ms = half of a frame
         trim_fade = torch.zeros(2 * n_trim)
         trim_fade[n_trim:] = (torch.cos(torch.linspace(torch.pi, 0, n_trim)) + 1) / 2
-        self.register_buffer("trim_fade", trim_fade, persistent=False) # (buffers get automatic device casting)
-        self.estimator_dtype = "fp32"
+        self.register_buffer('trim_fade', trim_fade, persistent=False) # (buffers get automatic device casting)
+        self.estimator_dtype = 'fp32'
 
     def forward(
         self,
         speech_tokens,
         # locally-computed ref embedding (mutex with ref_dict)
-        ref_wav: Optional[torch.Tensor],
-        ref_sr: Optional[int],
+        ref_wav: torch.Tensor | None,
+        ref_sr: int | None,
         # pre-computed ref embedding (prod API)
-        ref_dict: Optional[dict] = None,
+        ref_dict: dict | None = None,
         finalize: bool = False,
         speech_token_lens=None,
         skip_vocoder=False,
@@ -302,10 +301,10 @@ class S3Token2Wav(S3Token2Mel):
         self,
         speech_tokens,
         # locally-computed ref embedding (mutex with ref_dict)
-        ref_wav: Optional[torch.Tensor] = None,
-        ref_sr: Optional[int] = None,
+        ref_wav: torch.Tensor | None = None,
+        ref_sr: int | None = None,
         # pre-computed ref embedding (prod API)
-        ref_dict: Optional[dict] = None,
+        ref_dict: dict | None = None,
         n_cfm_timesteps = None,
         finalize: bool = False,
         speech_token_lens=None,
@@ -331,10 +330,10 @@ class S3Token2Wav(S3Token2Mel):
         self,
         speech_tokens,
         # locally-computed ref embedding (mutex with ref_dict)
-        ref_wav: Optional[torch.Tensor] = None,
-        ref_sr: Optional[int] = None,
+        ref_wav: torch.Tensor | None = None,
+        ref_sr: int | None = None,
         # pre-computed ref embedding (prod API)
-        ref_dict: Optional[dict] = None,
+        ref_dict: dict | None = None,
         # left as a kwarg because this can change input/output size ratio
         drop_invalid_tokens=True,
         n_cfm_timesteps=None,

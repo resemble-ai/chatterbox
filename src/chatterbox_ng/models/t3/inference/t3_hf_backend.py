@@ -1,8 +1,7 @@
-from typing import Optional
 
 import torch
 from torch import nn as nn
-from transformers import LlamaConfig, LlamaModel, LlamaPreTrainedModel, GenerationMixin
+from transformers import GenerationMixin, LlamaConfig, LlamaModel, LlamaPreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 
@@ -23,7 +22,7 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         speech_head,
         latents_queue=None,
         logits_queue=None,
-        alignment_stream_analyzer: 'AlignmentStreamAnalyzer'=None,
+        alignment_stream_analyzer: AlignmentStreamAnalyzer=None,
     ):
         super().__init__(config)
         self.model = llama
@@ -64,16 +63,16 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
             self._added_cond = True
 
         return {
-            "inputs_embeds": inputs_embeds,
-            "past_key_values": past_key_values,
-            "use_cache": use_cache,
+            'inputs_embeds': inputs_embeds,
+            'past_key_values': past_key_values,
+            'use_cache': use_cache,
         }
 
     @torch.inference_mode()
     def forward(
         self,
         inputs_embeds: torch.Tensor,
-        past_key_values: Optional[torch.Tensor]=None,
+        past_key_values: torch.Tensor | None=None,
         use_cache=True,
         output_attentions=None,
         output_hidden_states=True,

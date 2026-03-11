@@ -1,28 +1,28 @@
-import os
+import logging
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import librosa
-import torch
 import pyloudnorm as ln
-
-from safetensors.torch import load_file
+import torch
 from huggingface_hub import snapshot_download
+from safetensors.torch import load_file
 from transformers import AutoTokenizer
 
-from .models.t3 import T3
-from .models.s3tokenizer import S3_SR
 from .models.s3gen import S3GEN_SR, S3Gen
-from .models.tokenizers import EnTokenizer
-from .models.voice_encoder import VoiceEncoder
+from .models.s3gen.const import S3GEN_SIL
+from .models.s3tokenizer import S3_SR
+from .models.t3 import T3
 from .models.t3.modules.cond_enc import T3Cond
 from .models.t3.modules.t3_config import T3Config
-from .models.s3gen.const import S3GEN_SIL
-import logging
+from .models.tokenizers import EnTokenizer
+from .models.voice_encoder import VoiceEncoder
+
 logger = logging.getLogger(__name__)
 
-REPO_ID = "ResembleAI/chatterbox-turbo"
+REPO_ID = 'ResembleAI/chatterbox-turbo'
 
 
 def punc_norm(text: str) -> str:
@@ -31,35 +31,35 @@ def punc_norm(text: str) -> str:
         containing chars not seen often in the dataset
     """
     if len(text) == 0:
-        return "You need to add some text for me to talk."
+        return 'You need to add some text for me to talk.'
 
     # Capitalise first letter
     if text[0].islower():
         text = text[0].upper() + text[1:]
 
     # Remove multiple space chars
-    text = " ".join(text.split())
+    text = ' '.join(text.split())
 
     # Replace uncommon/llm punc
     punc_to_replace = [
-        ("…", ", "),
-        (":", ","),
-        ("—", "-"),
-        ("–", "-"),
-        (" ,", ","),
-        ("“", "\""),
-        ("”", "\""),
-        ("‘", "'"),
-        ("’", "'"),
+        ('…', ', '),
+        (':', ','),
+        ('—', '-'),
+        ('–', '-'),
+        (' ,', ','),
+        ('“', '"'),
+        ('”', '"'),
+        ('‘', "'"),
+        ('’', "'"),
     ]
     for old_char_sequence, new_char in punc_to_replace:
         text = text.replace(old_char_sequence, new_char)
 
     # Add full stop if no ending punc
-    text = text.rstrip(" ")
-    sentence_enders = {".", "!", "?", "-", ","}
+    text = text.rstrip(' ')
+    sentence_enders = {'.', '!', '?', '-', ','}
     if not any(text.endswith(p) for p in sentence_enders):
-        text += "."
+        text += '.'
 
     return text
 
@@ -99,7 +99,7 @@ class Conditionals:
         torch.save(arg_dict, fpath)
 
     @classmethod
-    def load(cls, fpath, map_location="cpu"):
+    def load(cls, fpath, map_location='cpu'):
         if isinstance(map_location, str):
             map_location = torch.device(map_location)
         kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
@@ -128,24 +128,24 @@ class ChatterboxTurboTTS:
         self.conds = conds
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxTurboTTS':
+    def from_local(cls, ckpt_dir, device) -> ChatterboxTurboTTS:
         ckpt_dir = Path(ckpt_dir)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
-        if device in ["cpu", "mps"]:
+        if device in ['cpu', 'mps']:
             map_location = torch.device('cpu')
         else:
             map_location = None
 
         ve = VoiceEncoder()
         ve.load_state_dict(
-            load_file(ckpt_dir / "ve.safetensors")
+            load_file(ckpt_dir / 've.safetensors')
         )
         ve.to(device).eval()
 
         # Turbo specific hp
         hp = T3Config(text_tokens_dict_size=50276)
-        hp.llama_config_name = "GPT2_medium"
+        hp.llama_config_name = 'GPT2_medium'
         hp.speech_tokens_dict_size = 6563
         hp.input_pos_emb = None
         hp.speech_cond_prompt_len = 375
@@ -153,15 +153,15 @@ class ChatterboxTurboTTS:
         hp.emotion_adv = False
 
         t3 = T3(hp)
-        t3_state = load_file(ckpt_dir / "t3_turbo_v1.safetensors")
-        if "model" in t3_state.keys():
-            t3_state = t3_state["model"][0]
+        t3_state = load_file(ckpt_dir / 't3_turbo_v1.safetensors')
+        if 'model' in t3_state.keys():
+            t3_state = t3_state['model'][0]
         t3.load_state_dict(t3_state)
         del t3.tfmr.wte
         t3.to(device).eval()
 
         s3gen = S3Gen(meanflow=True)
-        weights = load_file(ckpt_dir / "s3gen_meanflow.safetensors")
+        weights = load_file(ckpt_dir / 's3gen_meanflow.safetensors')
         s3gen.load_state_dict(
             weights, strict=True
         )
@@ -171,30 +171,30 @@ class ChatterboxTurboTTS:
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
         if len(tokenizer) != 50276:
-            print(f"WARNING: Tokenizer len {len(tokenizer)} != 50276")
+            print(f'WARNING: Tokenizer len {len(tokenizer)} != 50276')
 
         conds = None
-        builtin_voice = ckpt_dir / "conds.pt"
+        builtin_voice = ckpt_dir / 'conds.pt'
         if builtin_voice.exists():
             conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTurboTTS':
+    def from_pretrained(cls, device) -> ChatterboxTurboTTS:
         # Check if MPS is available on macOS
-        if device == "mps" and not torch.backends.mps.is_available():
+        if device == 'mps' and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
-                print("MPS not available because the current PyTorch install was not built with MPS enabled.")
+                print('MPS not available because the current PyTorch install was not built with MPS enabled.')
             else:
-                print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
-            device = "cpu"
+                print('MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.')
+            device = 'cpu'
 
         local_path = snapshot_download(
             repo_id=REPO_ID,
-            token=os.getenv("HF_TOKEN") or True,
+            token=os.getenv('HF_TOKEN') or True,
             # Optional: Filter to download only what you need
-            allow_patterns=["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"]
+            allow_patterns=['*.safetensors', '*.json', '*.txt', '*.pt', '*.model']
         )
 
         return cls.from_local(local_path, device)
@@ -208,7 +208,7 @@ class ChatterboxTurboTTS:
             if math.isfinite(gain_linear) and gain_linear > 0.0:
                 wav = wav * gain_linear
         except Exception as e:
-            print(f"Warning: Error in norm_loudness, skipping: {e}")
+            print(f'Warning: Error in norm_loudness, skipping: {e}')
 
         return wav
 
@@ -216,7 +216,7 @@ class ChatterboxTurboTTS:
         ## Load and norm reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
-        assert len(s3gen_ref_wav) / _sr > 5.0, "Audio prompt must be longer than 5 seconds!"
+        assert len(s3gen_ref_wav) / _sr > 5.0, 'Audio prompt must be longer than 5 seconds!'
 
         if norm_loudness:
             s3gen_ref_wav = self.norm_loudness(s3gen_ref_wav, _sr)
@@ -259,14 +259,14 @@ class ChatterboxTurboTTS:
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, norm_loudness=norm_loudness)
         else:
-            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+            assert self.conds is not None, 'Please `prepare_conditionals` first or specify `audio_prompt_path`'
 
         if cfg_weight > 0.0 or exaggeration > 0.0 or min_p > 0.0:
-            logger.warning("CFG, min_p and exaggeration are not supported by Turbo version and will be ignored.")
+            logger.warning('CFG, min_p and exaggeration are not supported by Turbo version and will be ignored.')
 
         # Norm and tokenize text
         text = punc_norm(text)
-        text_tokens = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+        text_tokens = self.tokenizer(text, return_tensors='pt', padding=True, truncation=True)
         text_tokens = text_tokens.input_ids.to(self.device)
 
         speech_tokens = self.t3.inference_turbo(

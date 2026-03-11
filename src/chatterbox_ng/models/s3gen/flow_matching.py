@@ -11,12 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import threading
 import torch
 import torch.nn.functional as F
-from .matcha.flow_matching import BASECFM
-from .configs import CFM_PARAMS
 from tqdm import tqdm
+
+from .configs import CFM_PARAMS
+from .matcha.flow_matching import BASECFM
 
 
 def cast_all(*args, dtype):
@@ -58,7 +58,7 @@ class ConditionalCFM(BASECFM):
                 shape: (batch_size, n_feats, mel_timesteps)
         """
 
-        raise NotImplementedError("unused, needs updating for meanflow model")
+        raise NotImplementedError('unused, needs updating for meanflow model')
 
         z = torch.randn_like(mu).to(mu.device).to(mu.dtype) * temperature
         cache_size = flow_cache.shape[2]
@@ -182,7 +182,7 @@ class ConditionalCFM(BASECFM):
             cond = cond * cfg_mask.view(-1, 1, 1)
 
         pred = self.estimator(y, mask, mu, t.squeeze(), spks, cond)
-        loss = F.mse_loss(pred * mask, u * mask, reduction="sum") / (torch.sum(mask) * u.shape[1])
+        loss = F.mse_loss(pred * mask, u * mask, reduction='sum') / (torch.sum(mask) * u.shape[1])
         return loss, y
 
 
@@ -236,7 +236,7 @@ class CausalConditionalCFM(ConditionalCFM):
         in_dtype = x.dtype
         x, t_span, mu, mask, spks, cond = cast_all(x, t_span, mu, mask, spks, cond, dtype=self.estimator.dtype)
 
-        print("S3 Token -> Mel Inference...")
+        print('S3 Token -> Mel Inference...')
         for t, r in tqdm(zip(t_span[..., :-1], t_span[..., 1:]), total=t_span.shape[-1] - 1):
             t, r = t[None], r[None]
             dxdt = self.estimator.forward(x, mask=mask, mu=mu, t=t, spks=spks, cond=cond, r=r)

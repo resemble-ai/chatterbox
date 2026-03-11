@@ -11,7 +11,7 @@ class VoiceEncConfig:
     fmin = 0
     preemphasis = 0.
     mel_power = 2.0
-    mel_type = "amp"
+    mel_type = 'amp'
     normalized_mels = False
     ve_partial_frames = 160
     ve_final_relu = True

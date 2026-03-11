@@ -1,40 +1,38 @@
 # Copyright (c) 2025 Resemble AI
 # MIT License
 import logging
-from typing import Union, Optional, List
 
 logger = logging.getLogger(__name__)
 
-from tqdm import tqdm
 import torch
 import torch.nn.functional as F
-from torch import nn, Tensor
-from transformers import LlamaModel, LlamaConfig, GPT2Config, GPT2Model
+from torch import Tensor, nn
+from tqdm import tqdm
+from transformers import GPT2Config, GPT2Model, LlamaConfig, LlamaModel
 from transformers.generation.logits_process import (
     LogitsProcessorList,
+    MinPLogitsWarper,
     RepetitionPenaltyLogitsProcessor,
     TemperatureLogitsWarper,
     TopKLogitsWarper,
     TopPLogitsWarper,
-    MinPLogitsWarper,
 )
-from .modules.learned_pos_emb import LearnedPositionEmbeddings
 
-from .modules.cond_enc import T3CondEnc, T3Cond
-from .modules.t3_config import T3Config
-from .llama_configs import LLAMA_CONFIGS
-from .inference.t3_hf_backend import T3HuggingfaceBackend
-from .inference.alignment_stream_analyzer import AlignmentStreamAnalyzer
 from ..utils import AttrDict
-
+from .inference.alignment_stream_analyzer import AlignmentStreamAnalyzer
+from .inference.t3_hf_backend import T3HuggingfaceBackend
+from .llama_configs import LLAMA_CONFIGS
+from .modules.cond_enc import T3Cond, T3CondEnc
+from .modules.learned_pos_emb import LearnedPositionEmbeddings
+from .modules.t3_config import T3Config
 
 logger = logging.getLogger(__name__)
 
 
 def _ensure_BOT_EOT(text_tokens: Tensor, hp):
     B = text_tokens.size(0)
-    assert (text_tokens == hp.start_text_token).int().sum() >= B, "missing start_text_token"
-    assert (text_tokens == hp.stop_text_token).int().sum() >= B, "missing stop_text_token"
+    assert (text_tokens == hp.start_text_token).int().sum() >= B, 'missing start_text_token'
+    assert (text_tokens == hp.stop_text_token).int().sum() >= B, 'missing stop_text_token'
 
 
 class T3(nn.Module):
@@ -54,7 +52,7 @@ class T3(nn.Module):
         self.hp = hp
 
         config_dict = LLAMA_CONFIGS[hp.llama_config_name]
-        self.is_gpt = config_dict.get("model_type") == "gpt2"
+        self.is_gpt = config_dict.get('model_type') == 'gpt2'
 
         if self.is_gpt:
             self.cfg = GPT2Config(**config_dict)
@@ -74,7 +72,7 @@ class T3(nn.Module):
         # custom position embedding
         self.text_pos_emb = None
         self.speech_pos_emb = None
-        if hp.input_pos_emb == "learned":
+        if hp.input_pos_emb == 'learned':
             max_text_seq_len = hp.max_text_tokens + 2
             self.text_pos_emb = LearnedPositionEmbeddings(max_text_seq_len, self.dim)
 
@@ -115,7 +113,7 @@ class T3(nn.Module):
             text_emb[1].zero_()  # CFG uncond
 
         speech_emb = self.speech_emb(speech_tokens)  # (B, len_speech, dim)
-        if self.hp.input_pos_emb == "learned":
+        if self.hp.input_pos_emb == 'learned':
             text_emb = text_emb + self.text_pos_emb(text_tokens)
             speech_emb = speech_emb + self.speech_pos_emb(speech_tokens)
         len_cond = cond_emb.size(1)
@@ -229,10 +227,10 @@ class T3(nn.Module):
         *,
         t3_cond: T3Cond,
         text_tokens: Tensor,
-        initial_speech_tokens: Optional[Tensor]=None,
+        initial_speech_tokens: Tensor | None=None,
 
         # misc conditioning
-        prepend_prompt_speech_tokens: Optional[Tensor]=None,
+        prepend_prompt_speech_tokens: Tensor | None=None,
 
         # HF generate args
         num_return_sequences=1,
@@ -251,7 +249,7 @@ class T3(nn.Module):
             text_tokens: a 1D (unbatched) or 2D (batched) tensor.
         """
         # Validate / sanitize inputs
-        assert prepend_prompt_speech_tokens is None, "not implemented"
+        assert prepend_prompt_speech_tokens is None, 'not implemented'
         _ensure_BOT_EOT(text_tokens, self.hp)
         text_tokens = torch.atleast_2d(text_tokens).to(dtype=torch.long, device=self.device)
 
@@ -280,9 +278,9 @@ class T3(nn.Module):
             if self.hp.is_multilingual:
                 # IMPORTANT: Switch to eager implementation BEFORE creating AlignmentStreamAnalyzer
                 # to avoid warnings and errors about SDPA not supporting output_attentions.
-                self.cfg._attn_implementation = "eager"
+                self.cfg._attn_implementation = 'eager'
                 self.cfg.output_attentions = True
-                
+
                 alignment_stream_analyzer = AlignmentStreamAnalyzer(
                     self.tfmr,
                     None,
@@ -355,14 +353,14 @@ class T3(nn.Module):
         past = output.past_key_values
 
         # ---- Generation Loop using kv_cache ----
-        for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
+        for i in tqdm(range(max_new_tokens), desc='Sampling', dynamic_ncols=True):
             logits_step = output.logits[:, -1, :]
             # CFG combine  → (1, V)
             cond   = logits_step[0:1, :]
             uncond = logits_step[1:2, :]
             cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
             logits = cond + cfg * (cond - uncond)
-            
+
             # Apply alignment stream analyzer integrity checks
             if self.patched_model.alignment_stream_analyzer is not None:
                 if logits.dim() == 1:            # guard in case something upstream squeezed
@@ -374,11 +372,11 @@ class T3(nn.Module):
             # Apply repetition penalty
             ids_for_proc = generated_ids[:1, ...]   # batch = 1
             logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
-            
+
             # Apply temperature scaling.
             if temperature != 1.0:
                 logits = logits / temperature
-                
+
             # Apply min_p and top_p filtering
             logits = min_p_warper(ids_for_proc, logits)
             logits = top_p_warper(ids_for_proc, logits)
@@ -392,7 +390,7 @@ class T3(nn.Module):
 
             # Check for EOS token.
             if next_token.view(-1) == self.hp.stop_speech_token:
-                logger.info(f"✅ EOS token detected! Stopping generation at step {i+1}")
+                logger.info(f'✅ EOS token detected! Stopping generation at step {i+1}')
                 break
 
             # Get embedding for the new token.
@@ -475,8 +473,8 @@ class T3(nn.Module):
 
             input_ids = torch.cat(generated_speech_tokens, dim=1)
             processed_logits = logits_processors(input_ids, speech_logits[:, -1, :])
-            if torch.all(processed_logits == -float("inf")):
-                print("Warning: All logits are -inf")
+            if torch.all(processed_logits == -float('inf')):
+                print('Warning: All logits are -inf')
                 break
 
             probs = F.softmax(processed_logits, dim=-1)

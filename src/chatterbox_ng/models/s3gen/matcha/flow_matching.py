@@ -19,7 +19,7 @@ class BASECFM(torch.nn.Module, ABC):
         self.n_spks = n_spks
         self.spk_emb_dim = spk_emb_dim
         self.solver = cfm_params.solver
-        if hasattr(cfm_params, "sigma_min"):
+        if hasattr(cfm_params, 'sigma_min'):
             self.sigma_min = cfm_params.sigma_min
         else:
             self.sigma_min = 1e-4
@@ -109,7 +109,7 @@ class BASECFM(torch.nn.Module, ABC):
         y = (1 - (1 - self.sigma_min) * t) * z + t * x1
         u = x1 - (1 - self.sigma_min) * z
 
-        loss = F.mse_loss(self.estimator(y, mask, mu, t.squeeze(), spks), u, reduction="sum") / (
+        loss = F.mse_loss(self.estimator(y, mask, mu, t.squeeze(), spks), u, reduction='sum') / (
             torch.sum(mask) * u.shape[1]
         )
         return loss, y

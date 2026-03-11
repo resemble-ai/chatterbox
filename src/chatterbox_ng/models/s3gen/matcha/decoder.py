@@ -1,12 +1,11 @@
 import math
-from typing import Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from conformer import ConformerBlock
 from diffusers.models.activations import get_activation
 from einops import pack, rearrange, repeat
+from torch import nn
 
 from .transformer import BasicTransformerBlock
 
@@ -15,7 +14,7 @@ class SinusoidalPosEmb(torch.nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
-        assert self.dim % 2 == 0, "SinusoidalPosEmb requires dim to be even"
+        assert self.dim % 2 == 0, 'SinusoidalPosEmb requires dim to be even'
 
     def forward(self, x, scale=1000):
         if x.ndim < 1:
@@ -75,9 +74,9 @@ class TimestepEmbedding(nn.Module):
         self,
         in_channels: int,
         time_embed_dim: int,
-        act_fn: str = "silu",
+        act_fn: str = 'silu',
         out_dim: int = None,
-        post_act_fn: Optional[str] = None,
+        post_act_fn: str | None = None,
         cond_proj_dim=None,
     ):
         super().__init__()
@@ -131,7 +130,7 @@ class Upsample1D(nn.Module):
             number of output channels. Defaults to `channels`.
     """
 
-    def __init__(self, channels, use_conv=False, use_conv_transpose=True, out_channels=None, name="conv"):
+    def __init__(self, channels, use_conv=False, use_conv_transpose=True, out_channels=None, name='conv'):
         super().__init__()
         self.channels = channels
         self.out_channels = out_channels or channels
@@ -150,7 +149,7 @@ class Upsample1D(nn.Module):
         if self.use_conv_transpose:
             return self.conv(inputs)
 
-        outputs = F.interpolate(inputs, scale_factor=2.0, mode="nearest")
+        outputs = F.interpolate(inputs, scale_factor=2.0, mode='nearest')
 
         if self.use_conv:
             outputs = self.conv(outputs)
@@ -208,10 +207,10 @@ class Decoder(nn.Module):
         n_blocks=1,
         num_mid_blocks=2,
         num_heads=4,
-        act_fn="snake",
-        down_block_type="transformer",
-        mid_block_type="transformer",
-        up_block_type="transformer",
+        act_fn='snake',
+        down_block_type='transformer',
+        mid_block_type='transformer',
+        up_block_type='transformer',
     ):
         super().__init__()
         channels = tuple(channels)
@@ -223,7 +222,7 @@ class Decoder(nn.Module):
         self.time_mlp = TimestepEmbedding(
             in_channels=in_channels,
             time_embed_dim=time_embed_dim,
-            act_fn="silu",
+            act_fn='silu',
         )
 
         self.down_blocks = nn.ModuleList([])
@@ -317,7 +316,7 @@ class Decoder(nn.Module):
 
     @staticmethod
     def get_block(block_type, dim, attention_head_dim, num_heads, dropout, act_fn):
-        if block_type == "conformer":
+        if block_type == 'conformer':
             block = ConformerWrapper(
                 dim=dim,
                 dim_head=attention_head_dim,
@@ -329,7 +328,7 @@ class Decoder(nn.Module):
                 conv_dropout=dropout,
                 conv_kernel_size=31,
             )
-        elif block_type == "transformer":
+        elif block_type == 'transformer':
             block = BasicTransformerBlock(
                 dim=dim,
                 num_attention_heads=num_heads,
@@ -338,14 +337,14 @@ class Decoder(nn.Module):
                 activation_fn=act_fn,
             )
         else:
-            raise ValueError(f"Unknown block type {block_type}")
+            raise ValueError(f'Unknown block type {block_type}')
 
         return block
 
     def initialize_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv1d):
-                nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
 
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
@@ -355,7 +354,7 @@ class Decoder(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
             elif isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
 
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
@@ -381,27 +380,27 @@ class Decoder(nn.Module):
         t = self.time_embeddings(t)
         t = self.time_mlp(t)
 
-        x = pack([x, mu], "b * t")[0]
+        x = pack([x, mu], 'b * t')[0]
 
         if spks is not None:
-            spks = repeat(spks, "b c -> b c t", t=x.shape[-1])
-            x = pack([x, spks], "b * t")[0]
+            spks = repeat(spks, 'b c -> b c t', t=x.shape[-1])
+            x = pack([x, spks], 'b * t')[0]
 
         hiddens = []
         masks = [mask]
         for resnet, transformer_blocks, downsample in self.down_blocks:
             mask_down = masks[-1]
             x = resnet(x, mask_down, t)
-            x = rearrange(x, "b c t -> b t c")
-            mask_down = rearrange(mask_down, "b 1 t -> b t")
+            x = rearrange(x, 'b c t -> b t c')
+            mask_down = rearrange(mask_down, 'b 1 t -> b t')
             for transformer_block in transformer_blocks:
                 x = transformer_block(
                     hidden_states=x,
                     attention_mask=mask_down,
                     timestep=t,
                 )
-            x = rearrange(x, "b t c -> b c t")
-            mask_down = rearrange(mask_down, "b t -> b 1 t")
+            x = rearrange(x, 'b t c -> b c t')
+            mask_down = rearrange(mask_down, 'b t -> b 1 t')
             hiddens.append(x)  # Save hidden states for skip connections
             x = downsample(x * mask_down)
             masks.append(mask_down[:, :, ::2])
@@ -411,30 +410,30 @@ class Decoder(nn.Module):
 
         for resnet, transformer_blocks in self.mid_blocks:
             x = resnet(x, mask_mid, t)
-            x = rearrange(x, "b c t -> b t c")
-            mask_mid = rearrange(mask_mid, "b 1 t -> b t")
+            x = rearrange(x, 'b c t -> b t c')
+            mask_mid = rearrange(mask_mid, 'b 1 t -> b t')
             for transformer_block in transformer_blocks:
                 x = transformer_block(
                     hidden_states=x,
                     attention_mask=mask_mid,
                     timestep=t,
                 )
-            x = rearrange(x, "b t c -> b c t")
-            mask_mid = rearrange(mask_mid, "b t -> b 1 t")
+            x = rearrange(x, 'b t c -> b c t')
+            mask_mid = rearrange(mask_mid, 'b t -> b 1 t')
 
         for resnet, transformer_blocks, upsample in self.up_blocks:
             mask_up = masks.pop()
-            x = resnet(pack([x, hiddens.pop()], "b * t")[0], mask_up, t)
-            x = rearrange(x, "b c t -> b t c")
-            mask_up = rearrange(mask_up, "b 1 t -> b t")
+            x = resnet(pack([x, hiddens.pop()], 'b * t')[0], mask_up, t)
+            x = rearrange(x, 'b c t -> b t c')
+            mask_up = rearrange(mask_up, 'b 1 t -> b t')
             for transformer_block in transformer_blocks:
                 x = transformer_block(
                     hidden_states=x,
                     attention_mask=mask_up,
                     timestep=t,
                 )
-            x = rearrange(x, "b t c -> b c t")
-            mask_up = rearrange(mask_up, "b t -> b 1 t")
+            x = rearrange(x, 'b t c -> b c t')
+            mask_up = rearrange(mask_up, 'b t -> b 1 t')
             x = upsample(x * mask_up)
 
         x = self.final_block(x, mask_up)

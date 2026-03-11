@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 def get_intmeanflow_time_mixer(dims):
@@ -21,7 +21,7 @@ if __name__ == '__main__':
 
     W_layer = get_intmeanflow_time_mixer(D_example)
 
-    print(f"Layer weight (AFTER init):\n{W_layer.weight.data}\n")
+    print(f'Layer weight (AFTER init):\n{W_layer.weight.data}\n')
 
     e_t = torch.tensor([0., 1., 2., 3., 4., 5.])
     e_r = torch.tensor([6., 7., 8., 9., 10., 11.])
@@ -29,8 +29,8 @@ if __name__ == '__main__':
 
     output = W_layer(e_concat)
 
-    print(f"Test Input e_t: \n{e_t}")
-    print(f"Test Input e_r: \n{e_r}")
-    print(f"Test Input concat: \n{e_concat}")
+    print(f'Test Input e_t: \n{e_t}')
+    print(f'Test Input e_r: \n{e_r}')
+    print(f'Test Input concat: \n{e_concat}')
 
-    print(f"Forward Pass Output: \n{output.squeeze(0)}")
+    print(f'Forward Pass Output: \n{output.squeeze(0)}')

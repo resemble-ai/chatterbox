@@ -16,11 +16,10 @@
 """Positonal Encoding Module."""
 
 import math
-from typing import Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
 
 
 class PositionalEncoding(torch.nn.Module):
@@ -58,8 +57,8 @@ class PositionalEncoding(torch.nn.Module):
 
     def forward(self,
                 x: torch.Tensor,
-                offset: Union[int, torch.Tensor] = 0) \
-            -> Tuple[torch.Tensor, torch.Tensor]:
+                offset: int | torch.Tensor = 0) \
+            -> tuple[torch.Tensor, torch.Tensor]:
         """Add positional encoding.
 
         Args:
@@ -77,7 +76,7 @@ class PositionalEncoding(torch.nn.Module):
         return self.dropout(x), self.dropout(pos_emb)
 
     def position_encoding(self,
-                          offset: Union[int, torch.Tensor],
+                          offset: int | torch.Tensor,
                           size: int,
                           apply_dropout: bool = True) -> torch.Tensor:
         """ For getting encoding in a streaming fashion
@@ -97,10 +96,7 @@ class PositionalEncoding(torch.nn.Module):
         """
         # How to subscript a Union type:
         #   https://github.com/pytorch/pytorch/issues/69434
-        if isinstance(offset, int):
-            assert offset + size <= self.max_len
-            pos_emb = self.pe[:, offset:offset + size]
-        elif isinstance(offset, torch.Tensor) and offset.dim() == 0:  # scalar
+        if isinstance(offset, int) or (isinstance(offset, torch.Tensor) and offset.dim() == 0):
             assert offset + size <= self.max_len
             pos_emb = self.pe[:, offset:offset + size]
         else:  # for batched streaming decoding on GPU
@@ -132,8 +128,8 @@ class RelPositionalEncoding(PositionalEncoding):
 
     def forward(self,
                 x: torch.Tensor,
-                offset: Union[int, torch.Tensor] = 0) \
-            -> Tuple[torch.Tensor, torch.Tensor]:
+                offset: int | torch.Tensor = 0) \
+            -> tuple[torch.Tensor, torch.Tensor]:
         """Compute positional encoding.
         Args:
             x (torch.Tensor): Input tensor (batch, time, `*`).
@@ -160,8 +156,8 @@ class WhisperPositionalEncoding(PositionalEncoding):
         scaled_time = torch.arange(max_len)[:, np.newaxis] * \
             inv_timescales[np.newaxis, :]
         pe = torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], dim=1)
-        delattr(self, "pe")
-        self.register_buffer("pe", pe.unsqueeze(0))
+        delattr(self, 'pe')
+        self.register_buffer('pe', pe.unsqueeze(0))
 
 
 class LearnablePositionalEncoding(PositionalEncoding):
@@ -186,14 +182,14 @@ class NoPositionalEncoding(torch.nn.Module):
 
     def forward(self,
                 x: torch.Tensor,
-                offset: Union[int, torch.Tensor] = 0) \
-            -> Tuple[torch.Tensor, torch.Tensor]:
+                offset: int | torch.Tensor = 0) \
+            -> tuple[torch.Tensor, torch.Tensor]:
         """ Just return zero vector for interface compatibility
         """
         pos_emb = torch.zeros(1, x.size(1), self.d_model).to(x.device)
         return self.dropout(x), pos_emb
 
-    def position_encoding(self, offset: Union[int, torch.Tensor],
+    def position_encoding(self, offset: int | torch.Tensor,
                           size: int) -> torch.Tensor:
         return torch.zeros(1, size, self.d_model)
 
@@ -214,7 +210,7 @@ class EspnetRelPositionalEncoding(torch.nn.Module):
 
     def __init__(self, d_model: int, dropout_rate: float, max_len: int = 5000):
         """Construct an PositionalEncoding object."""
-        super(EspnetRelPositionalEncoding, self).__init__()
+        super().__init__()
         self.d_model = d_model
         self.xscale = math.sqrt(self.d_model)
         self.dropout = torch.nn.Dropout(p=dropout_rate)
@@ -253,8 +249,8 @@ class EspnetRelPositionalEncoding(torch.nn.Module):
         pe = torch.cat([pe_positive, pe_negative], dim=1)
         self.pe = pe.to(device=x.device, dtype=x.dtype)
 
-    def forward(self, x: torch.Tensor, offset: Union[int, torch.Tensor] = 0) \
-            -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, offset: int | torch.Tensor = 0) \
+            -> tuple[torch.Tensor, torch.Tensor]:
         """Add positional encoding.
 
         Args:
@@ -270,7 +266,7 @@ class EspnetRelPositionalEncoding(torch.nn.Module):
         return self.dropout(x), self.dropout(pos_emb)
 
     def position_encoding(self,
-                          offset: Union[int, torch.Tensor],
+                          offset: int | torch.Tensor,
                           size: int) -> torch.Tensor:
         """ For getting encoding in a streaming fashion
 

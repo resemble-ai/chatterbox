@@ -15,23 +15,21 @@
 # limitations under the License.
 # Modified from ESPnet(https://github.com/espnet/espnet)
 """Encoder definition."""
-from typing import Tuple
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 
+from ..utils.class_utils import (
+    COSYVOICE_ACTIVATION_CLASSES,
+    COSYVOICE_ATTENTION_CLASSES,
+    COSYVOICE_EMB_CLASSES,
+    COSYVOICE_SUBSAMPLE_CLASSES,
+)
+from ..utils.mask import add_optional_chunk_mask, make_pad_mask
 from .convolution import ConvolutionModule
 from .encoder_layer import ConformerEncoderLayer
 from .positionwise_feed_forward import PositionwiseFeedForward
-from ..utils.class_utils import (
-    COSYVOICE_EMB_CLASSES,
-    COSYVOICE_SUBSAMPLE_CLASSES,
-    COSYVOICE_ATTENTION_CLASSES,
-    COSYVOICE_ACTIVATION_CLASSES,
-)
-from ..utils.mask import make_pad_mask
-from ..utils.mask import add_optional_chunk_mask
 
 
 class Upsample1D(nn.Module):
@@ -57,7 +55,7 @@ class Upsample1D(nn.Module):
         self.conv = nn.Conv1d(self.channels, self.out_channels, stride * 2 + 1, stride=1, padding=0)
 
     def forward(self, inputs: torch.Tensor, input_lengths: torch.Tensor):
-        outputs = F.interpolate(inputs, scale_factor=float(self.stride), mode="nearest")
+        outputs = F.interpolate(inputs, scale_factor=float(self.stride), mode='nearest')
         outputs = F.pad(outputs, (self.stride * 2, 0), value=0.0)
         outputs = self.conv(outputs)
         return outputs, input_lengths * self.stride
@@ -108,8 +106,8 @@ class UpsampleConformerEncoder(torch.nn.Module):
         dropout_rate: float = 0.1,
         positional_dropout_rate: float = 0.1,
         attention_dropout_rate: float = 0.1,
-        input_layer: str = "linear",
-        pos_enc_layer_type: str = "rel_pos_espnet",
+        input_layer: str = 'linear',
+        pos_enc_layer_type: str = 'rel_pos_espnet',
         normalize_before: bool = True,
         static_chunk_size: int = 0,
         use_dynamic_chunk: bool = False,
@@ -117,12 +115,12 @@ class UpsampleConformerEncoder(torch.nn.Module):
         use_dynamic_left_chunk: bool = False,
         positionwise_conv_kernel_size: int = 1,
         macaron_style: bool = False,
-        selfattention_layer_type: str = "rel_selfattn",
-        activation_type: str = "swish",
+        selfattention_layer_type: str = 'rel_selfattn',
+        activation_type: str = 'swish',
         use_cnn_module: bool = False,
         cnn_module_kernel: int = 15,
         causal: bool = False,
-        cnn_module_norm: str = "batch_norm",
+        cnn_module_norm: str = 'batch_norm',
         key_bias: bool = True,
         gradient_checkpointing: bool = False,
     ):
@@ -240,7 +238,7 @@ class UpsampleConformerEncoder(torch.nn.Module):
         xs_lens: torch.Tensor,
         decoding_chunk_size: int = 0,
         num_decoding_left_chunks: int = -1,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Embed positions in tensor.
 
         Args:

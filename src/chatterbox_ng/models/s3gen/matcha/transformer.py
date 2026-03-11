@@ -1,7 +1,6 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
 import torch
-import torch.nn as nn
 from diffusers.models.attention import (
     GEGLU,
     GELU,
@@ -12,6 +11,7 @@ from diffusers.models.attention import (
 from diffusers.models.attention_processor import Attention
 from diffusers.models.lora import LoRACompatibleLinear
 from diffusers.utils.torch_utils import maybe_allow_in_graph
+from torch import nn
 
 
 class SnakeBeta(nn.Module):
@@ -96,25 +96,25 @@ class FeedForward(nn.Module):
     def __init__(
         self,
         dim: int,
-        dim_out: Optional[int] = None,
+        dim_out: int | None = None,
         mult: int = 4,
         dropout: float = 0.0,
-        activation_fn: str = "geglu",
+        activation_fn: str = 'geglu',
         final_dropout: bool = False,
     ):
         super().__init__()
         inner_dim = int(dim * mult)
         dim_out = dim_out if dim_out is not None else dim
 
-        if activation_fn == "gelu":
+        if activation_fn == 'gelu':
             act_fn = GELU(dim, inner_dim)
-        if activation_fn == "gelu-approximate":
-            act_fn = GELU(dim, inner_dim, approximate="tanh")
-        elif activation_fn == "geglu":
+        if activation_fn == 'gelu-approximate':
+            act_fn = GELU(dim, inner_dim, approximate='tanh')
+        elif activation_fn == 'geglu':
             act_fn = GEGLU(dim, inner_dim)
-        elif activation_fn == "geglu-approximate":
+        elif activation_fn == 'geglu-approximate':
             act_fn = ApproximateGELU(dim, inner_dim)
-        elif activation_fn == "snakebeta":
+        elif activation_fn == 'snakebeta':
             act_fn = SnakeBeta(dim, inner_dim)
 
         self.net = nn.ModuleList([])
@@ -162,27 +162,27 @@ class BasicTransformerBlock(nn.Module):
         num_attention_heads: int,
         attention_head_dim: int,
         dropout=0.0,
-        cross_attention_dim: Optional[int] = None,
-        activation_fn: str = "geglu",
-        num_embeds_ada_norm: Optional[int] = None,
+        cross_attention_dim: int | None = None,
+        activation_fn: str = 'geglu',
+        num_embeds_ada_norm: int | None = None,
         attention_bias: bool = False,
         only_cross_attention: bool = False,
         double_self_attention: bool = False,
         upcast_attention: bool = False,
         norm_elementwise_affine: bool = True,
-        norm_type: str = "layer_norm",
+        norm_type: str = 'layer_norm',
         final_dropout: bool = False,
     ):
         super().__init__()
         self.only_cross_attention = only_cross_attention
 
-        self.use_ada_layer_norm_zero = (num_embeds_ada_norm is not None) and norm_type == "ada_norm_zero"
-        self.use_ada_layer_norm = (num_embeds_ada_norm is not None) and norm_type == "ada_norm"
+        self.use_ada_layer_norm_zero = (num_embeds_ada_norm is not None) and norm_type == 'ada_norm_zero'
+        self.use_ada_layer_norm = (num_embeds_ada_norm is not None) and norm_type == 'ada_norm'
 
-        if norm_type in ("ada_norm", "ada_norm_zero") and num_embeds_ada_norm is None:
+        if norm_type in ('ada_norm', 'ada_norm_zero') and num_embeds_ada_norm is None:
             raise ValueError(
-                f"`norm_type` is set to {norm_type}, but `num_embeds_ada_norm` is not defined. Please make sure to"
-                f" define `num_embeds_ada_norm` if setting `norm_type` to {norm_type}."
+                f'`norm_type` is set to {norm_type}, but `num_embeds_ada_norm` is not defined. Please make sure to'
+                f' define `num_embeds_ada_norm` if setting `norm_type` to {norm_type}.'
             )
 
         # Define 3 blocks. Each block has its own normalization layer.
@@ -235,7 +235,7 @@ class BasicTransformerBlock(nn.Module):
         self._chunk_size = None
         self._chunk_dim = 0
 
-    def set_chunk_feed_forward(self, chunk_size: Optional[int], dim: int):
+    def set_chunk_feed_forward(self, chunk_size: int | None, dim: int):
         # Sets chunk feed-forward
         self._chunk_size = chunk_size
         self._chunk_dim = dim
@@ -243,12 +243,12 @@ class BasicTransformerBlock(nn.Module):
     def forward(
         self,
         hidden_states: torch.FloatTensor,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        encoder_hidden_states: Optional[torch.FloatTensor] = None,
-        encoder_attention_mask: Optional[torch.FloatTensor] = None,
-        timestep: Optional[torch.LongTensor] = None,
-        cross_attention_kwargs: Dict[str, Any] = None,
-        class_labels: Optional[torch.LongTensor] = None,
+        attention_mask: torch.FloatTensor | None = None,
+        encoder_hidden_states: torch.FloatTensor | None = None,
+        encoder_attention_mask: torch.FloatTensor | None = None,
+        timestep: torch.LongTensor | None = None,
+        cross_attention_kwargs: dict[str, Any] = None,
+        class_labels: torch.LongTensor | None = None,
     ):
         # Notice that normalization is always applied before the real computation in the following blocks.
         # 1. Self-Attention
@@ -297,7 +297,7 @@ class BasicTransformerBlock(nn.Module):
             # "feed_forward_chunk_size" can be used to save memory
             if norm_hidden_states.shape[self._chunk_dim] % self._chunk_size != 0:
                 raise ValueError(
-                    f"`hidden_states` dimension to be chunked: {norm_hidden_states.shape[self._chunk_dim]} has to be divisible by chunk size: {self._chunk_size}. Make sure to set an appropriate `chunk_size` when calling `unet.enable_forward_chunking`."
+                    f'`hidden_states` dimension to be chunked: {norm_hidden_states.shape[self._chunk_dim]} has to be divisible by chunk size: {self._chunk_size}. Make sure to set an appropriate `chunk_size` when calling `unet.enable_forward_chunking`.'
                 )
 
             num_chunks = norm_hidden_states.shape[self._chunk_dim] // self._chunk_size

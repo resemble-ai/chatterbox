@@ -1,13 +1,12 @@
 # Adapted from https://github.com/CorentinJ/Real-Time-Voice-Cloning
 # MIT License
-from typing import List, Union, Optional
 
-import numpy as np
-from numpy.lib.stride_tricks import as_strided
 import librosa
+import numpy as np
 import torch
 import torch.nn.functional as F
-from torch import nn, Tensor
+from numpy.lib.stride_tricks import as_strided
+from torch import Tensor, nn
 
 from .config import VoiceEncConfig
 from .melspec import melspectrogram
@@ -105,7 +104,7 @@ def stride_as_partials(
         mel = mel[:target_len]
 
     # Ensure the numpy array data is float32 and contiguous in memory
-    mel = mel.astype(np.float32, order="C")
+    mel = mel.astype(np.float32, order='C')
 
     # Re-arrange the array in memory to be of shape (N, P, M) with partials overlapping eachother,
     # where N is the number of partials, P is the number of frames of each partial and M the
@@ -146,7 +145,7 @@ class VoiceEncoder(nn.Module):
         hp.speaker_embed_size. Embeddings are L2-normed and thus lay in the range [-1, 1].
         """
         if self.hp.normalized_mels and (mels.min() < 0 or mels.max() > 1):
-            raise Exception(f"Mels outside [0, 1]. Min={mels.min()}, Max={mels.max()}")
+            raise Exception(f'Mels outside [0, 1]. Min={mels.min()}, Max={mels.max()}')
 
         # Pass the input through the LSTM layers
         _, (hidden, _) = self.lstm(mels)
@@ -218,7 +217,7 @@ class VoiceEncoder(nn.Module):
         return embeds_x @ embeds_y
 
     def embeds_from_mels(
-        self, mels: Union[Tensor, List[np.ndarray]], mel_lens=None, as_spk=False, batch_size=32, **kwargs
+        self, mels: Tensor | list[np.ndarray], mel_lens=None, as_spk=False, batch_size=32, **kwargs
     ):
         """
         Convenience function for deriving utterance or speaker embeddings from mel spectrograms.
@@ -231,7 +230,7 @@ class VoiceEncoder(nn.Module):
         :returns: embeds as a (B, E) float32 numpy array if <as_spk> is False, else as a (E,) array
         """
         # Load mels in memory and pack them
-        if isinstance(mels, List):
+        if isinstance(mels, list):
             mels = [np.asarray(mel) for mel in mels]
             assert all(m.shape[1] == mels[0].shape[1] for m in mels), "Mels aren't in (B, T, M) format"
             mel_lens = [mel.shape[0] for mel in mels]
@@ -245,11 +244,11 @@ class VoiceEncoder(nn.Module):
 
     def embeds_from_wavs(
         self,
-        wavs: List[np.ndarray],
+        wavs: list[np.ndarray],
         sample_rate,
         as_spk=False,
         batch_size=32,
-        trim_top_db: Optional[float]=20,
+        trim_top_db: float | None=20,
         **kwargs
     ):
         """
@@ -259,15 +258,15 @@ class VoiceEncoder(nn.Module):
         """
         if sample_rate != self.hp.sample_rate:
             wavs = [
-                librosa.resample(wav, orig_sr=sample_rate, target_sr=self.hp.sample_rate, res_type="kaiser_fast")
+                librosa.resample(wav, orig_sr=sample_rate, target_sr=self.hp.sample_rate, res_type='kaiser_fast')
                 for wav in wavs
             ]
 
         if trim_top_db:
             wavs = [librosa.effects.trim(wav, top_db=trim_top_db)[0] for wav in wavs]
 
-        if "rate" not in kwargs:
-            kwargs["rate"] = 1.3  # Resemble's default value.
+        if 'rate' not in kwargs:
+            kwargs['rate'] = 1.3  # Resemble's default value.
 
         mels = [melspectrogram(w, self.hp).T for w in wavs]
 

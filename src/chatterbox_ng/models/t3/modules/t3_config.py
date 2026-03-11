@@ -13,19 +13,19 @@ class T3Config:
         self.speech_tokens_dict_size = 8194
         self.max_speech_tokens = 4096
 
-        self.llama_config_name = "Llama_520M"
-        self.input_pos_emb = "learned"
+        self.llama_config_name = 'Llama_520M'
+        self.input_pos_emb = 'learned'
         self.speech_cond_prompt_len = 150
 
-        self.encoder_type = "voice_encoder"
+        self.encoder_type = 'voice_encoder'
         self.speaker_embed_size = 256
         self.use_perceiver_resampler = True
         self.emotion_adv = True
 
     @property
     def n_channels(self):
-        return LLAMA_CONFIGS[self.llama_config_name]["hidden_size"]
-    
+        return LLAMA_CONFIGS[self.llama_config_name]['hidden_size']
+
     @property
     def is_multilingual(self):
         return self.text_tokens_dict_size == 2454
@@ -34,8 +34,8 @@ class T3Config:
     def english_only(cls):
         """Create configuration for English-only TTS model."""
         return cls(text_tokens_dict_size=704)
-    
-    @classmethod 
+
+    @classmethod
     def multilingual(cls):
         """Create configuration for multilingual TTS model."""
         return cls(text_tokens_dict_size=2454)

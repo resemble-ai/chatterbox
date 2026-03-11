@@ -1,8 +1,7 @@
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
-from torch import nn, Tensor
+from torch import Tensor, nn
 
 from .perceiver import Perceiver
 from .t3_config import T3Config
@@ -16,10 +15,10 @@ class T3Cond:
     """
 
     speaker_emb: Tensor
-    clap_emb: Optional[Tensor] = None
-    cond_prompt_speech_tokens: Optional[Tensor] = None
-    cond_prompt_speech_emb: Optional[Tensor] = None
-    emotion_adv: Optional[Tensor] = 0.5
+    clap_emb: Tensor | None = None
+    cond_prompt_speech_tokens: Tensor | None = None
+    cond_prompt_speech_emb: Tensor | None = None
+    emotion_adv: Tensor | None = 0.5
 
     def to(self, *, device=None, dtype=None):
         "Cast to a device and dtype. Dtype casting is ignored for long/int tensors."
@@ -33,7 +32,7 @@ class T3Cond:
         torch.save(self.__dict__, fpath)
 
     @staticmethod
-    def load(fpath, map_location="cpu"):
+    def load(fpath, map_location='cpu'):
         kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
         return T3Cond(**kwargs)
 
@@ -46,7 +45,7 @@ class T3CondEnc(nn.Module):
     def __init__(self, hp: T3Config):
         super().__init__()
         self.hp = hp
-        if hp.encoder_type == "voice_encoder":
+        if hp.encoder_type == 'voice_encoder':
             self.spkr_enc = nn.Linear(hp.speaker_embed_size, hp.n_channels)
         else:
             raise NotImplementedError(str(hp.encoder_type))
@@ -64,14 +63,14 @@ class T3CondEnc(nn.Module):
     def forward(self, cond: T3Cond):
         # Validate
         assert (cond.cond_prompt_speech_tokens is None) == (cond.cond_prompt_speech_emb is None), \
-            "no embeddings for cond_prompt_speech_tokens"
+            'no embeddings for cond_prompt_speech_tokens'
 
         # Speaker embedding projection
         cond_spkr = self.spkr_enc(cond.speaker_emb.view(-1, self.hp.speaker_embed_size))[:, None]  # (B, 1, dim)
         empty = torch.zeros_like(cond_spkr[:, :0])  # (B, 0, dim)
 
         # TODO CLAP
-        assert cond.clap_emb is None, "clap_embed not implemented"
+        assert cond.clap_emb is None, 'clap_embed not implemented'
         cond_clap = empty  # (B, 0, dim)
 
         # Cond prompt

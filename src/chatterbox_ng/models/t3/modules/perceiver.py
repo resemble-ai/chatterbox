@@ -7,9 +7,10 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
+
 # In recent torch versions, torch.backends.cuda.sdp_kernel is deprecated.
 # Use torch.nn.attention.sdpa_kernel instead.
-from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 
 class RelativePositionBias(nn.Module):
@@ -85,28 +86,28 @@ class AttentionQKV(nn.Module):
         return self.combine_heads(out)
 
     def scaled_dot_product_attention(self, q, k, v, mask=None):
-        sim = torch.einsum("bhlt,bhls->bhts", q, k) * self.scale
+        sim = torch.einsum('bhlt,bhls->bhts', q, k) * self.scale
         if mask is not None:
             sim = sim.masked_fill(mask == 0, float('-inf'))
         attn = torch.softmax(sim, dim=-1)
         attn = self.dropout(attn)
-        return torch.einsum("bhts,bhls->bhlt", attn, v)
+        return torch.einsum('bhts,bhls->bhlt', attn, v)
 
     def flash_attention(self, q, k, v, mask=None):
-        config = self.flash_config if self.flash_config else {}
+        config = self.flash_config or {}
 
-        # Map sdp_kernel flags to sdpa_kernel backends if necessary, 
+        # Map sdp_kernel flags to sdpa_kernel backends if necessary,
         # or just use sdpa_kernel with the same logic if possible.
         # However, sdpa_kernel is a context manager that takes a list of backends.
 
         backends = []
-        if config.get("enable_flash", True):
+        if config.get('enable_flash', True):
             backends.append(SDPBackend.FLASH_ATTENTION)
-        if config.get("enable_math", True):
+        if config.get('enable_math', True):
             backends.append(SDPBackend.MATH)
-        if config.get("enable_mem_efficient", True):
+        if config.get('enable_mem_efficient', True):
             backends.append(SDPBackend.EFFICIENT_ATTENTION)
-        if config.get("enable_cudnn", True):
+        if config.get('enable_cudnn', True):
             backends.append(SDPBackend.CUDNN_ATTENTION)
 
         with sdpa_kernel(backends):
@@ -153,7 +154,7 @@ class AttentionBlock2(nn.Module):
         else:
             assert (
                     channels % num_head_channels == 0
-            ), f"channels {channels} is not divisible by num_head_channels {num_head_channels}"
+            ), f'channels {channels} is not divisible by num_head_channels {num_head_channels}'
             self.num_heads = channels // num_head_channels
 
         self.norm = nn.LayerNorm(channels)

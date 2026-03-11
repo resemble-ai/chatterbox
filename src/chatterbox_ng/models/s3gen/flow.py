@@ -13,16 +13,14 @@
 # limitations under the License.
 import logging
 import random
-from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 import torch
-import torch.nn as nn
-from torch.nn import functional as F
-from .utils.mask import make_pad_mask
-from .configs import CFM_PARAMS
 from omegaconf import DictConfig
+from torch import nn
+from torch.nn import functional as F
 
+from .utils.mask import make_pad_mask
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +34,7 @@ def _repeat_batch_dim(tnsr, B, ndim):
         # repeat batch dim as needed
         if B > 1 and tnsr.size(0) == 1:
             tnsr = tnsr.repeat(B, *([1] * (ndim - 1)))
-        assert tnsr.ndim == ndim, f"Expected {ndim=}, got {tnsr.ndim=}"
+        assert tnsr.ndim == ndim, f'Expected {ndim=}, got {tnsr.ndim=}'
     return tnsr
 
 
@@ -45,7 +43,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
                  input_size: int = 512,
                  output_size: int = 80,
                  spk_embed_dim: int = 192,
-                 output_type: str = "mel",
+                 output_type: str = 'mel',
                  vocab_size: int = 6561,
                  input_frame_rate: int = 25,
                  only_mask_loss: bool = True,
@@ -53,7 +51,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
                  pre_lookahead_len: int = 3,
                  encoder: torch.nn.Module = None,
                  decoder: torch.nn.Module = None,
-                 decoder_conf: Dict = {'in_channels': 240, 'out_channel': 80, 'spk_emb_dim': 80, 'n_spks': 1,
+                 decoder_conf: dict = {'in_channels': 240, 'out_channel': 80, 'spk_emb_dim': 80, 'n_spks': 1,
                                        'cfm_params': DictConfig(
                                            {'sigma_min': 1e-06, 'solver': 'euler', 't_scheduler': 'cosine',
                                             'training_cfg_rate': 0.2, 'inference_cfg_rate': 0.7,
@@ -62,7 +60,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
                                                           'attention_head_dim': 64,
                                                           'n_blocks': 4, 'num_mid_blocks': 12, 'num_heads': 8,
                                                           'act_fn': 'gelu'}},
-                 mel_feat_conf: Dict = {'n_fft': 1024, 'num_mels': 80, 'sampling_rate': 22050,
+                 mel_feat_conf: dict = {'n_fft': 1024, 'num_mels': 80, 'sampling_rate': 22050,
                                         'hop_size': 256, 'win_size': 1024, 'fmin': 0, 'fmax': 8000}):
         super().__init__()
         self.input_size = input_size
@@ -72,7 +70,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         self.vocab_size = vocab_size
         self.output_type = output_type
         self.input_frame_rate = input_frame_rate
-        logging.info(f"input frame rate={self.input_frame_rate}")
+        logging.info(f'input frame rate={self.input_frame_rate}')
         self.input_embedding = nn.Embedding(vocab_size, input_size)
         self.spk_embed_affine_layer = torch.nn.Linear(spk_embed_dim, output_size)
         self.encoder = encoder
@@ -87,7 +85,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
             self,
             batch: dict,
             device: torch.device,
-    ) -> Dict[str, Optional[torch.Tensor]]:
+    ) -> dict[str, torch.Tensor | None]:
         token = batch['speech_token'].to(device)
         token_len = batch['speech_token_len'].to(device)
         feat = batch['speech_feat'].to(device)  # (B, 80, T)
@@ -162,7 +160,7 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
 
         if (token >= self.vocab_size).any():
-            logger.error(f"{token.max()}>{self.vocab_size}\n out-of-range special tokens found in flow, fix inputs!")
+            logger.error(f'{token.max()}>{self.vocab_size}\n out-of-range special tokens found in flow, fix inputs!')
         token = self.input_embedding(token.long()) * mask
 
         # text encode

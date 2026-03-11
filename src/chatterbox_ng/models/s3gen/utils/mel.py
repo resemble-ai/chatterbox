@@ -1,8 +1,9 @@
 """mel-spectrogram extraction in Matcha-TTS"""
 import logging
-from librosa.filters import mel as librosa_mel_fn
-import torch
+
 import numpy as np
+import torch
+from librosa.filters import mel as librosa_mel_fn
 
 logger = logging.getLogger(__name__)
 
@@ -49,16 +50,16 @@ def mel_spectrogram(y, n_fft=1920, num_mels=80, sampling_rate=24000, hop_size=48
     min_val = torch.min(y)
     max_val = torch.max(y)
     if min_val < -1.0 or max_val > 1.0:
-        logger.warning(f"Audio values outside normalized range: min={min_val.item():.4f}, max={max_val.item():.4f}")
+        logger.warning(f'Audio values outside normalized range: min={min_val.item():.4f}, max={max_val.item():.4f}')
 
     global mel_basis, hann_window  # pylint: disable=global-statement,global-variable-not-assigned
-    if f"{str(fmax)}_{str(y.device)}" not in mel_basis:
+    if f'{fmax!s}_{y.device!s}' not in mel_basis:
         mel = librosa_mel_fn(sr=sampling_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax)
-        mel_basis[str(fmax) + "_" + str(y.device)] = torch.from_numpy(mel).float().to(y.device)
+        mel_basis[str(fmax) + '_' + str(y.device)] = torch.from_numpy(mel).float().to(y.device)
         hann_window[str(y.device)] = torch.hann_window(win_size).to(y.device)
 
     y = torch.nn.functional.pad(
-        y.unsqueeze(1), (int((n_fft - hop_size) / 2), int((n_fft - hop_size) / 2)), mode="reflect"
+        y.unsqueeze(1), (int((n_fft - hop_size) / 2), int((n_fft - hop_size) / 2)), mode='reflect'
     )
     y = y.squeeze(1)
 
@@ -70,7 +71,7 @@ def mel_spectrogram(y, n_fft=1920, num_mels=80, sampling_rate=24000, hop_size=48
             win_length=win_size,
             window=hann_window[str(y.device)],
             center=center,
-            pad_mode="reflect",
+            pad_mode='reflect',
             normalized=False,
             onesided=True,
             return_complex=True,
@@ -79,7 +80,7 @@ def mel_spectrogram(y, n_fft=1920, num_mels=80, sampling_rate=24000, hop_size=48
 
     spec = torch.sqrt(spec.pow(2).sum(-1) + (1e-9))
 
-    spec = torch.matmul(mel_basis[str(fmax) + "_" + str(y.device)], spec)
+    spec = torch.matmul(mel_basis[str(fmax) + '_' + str(y.device)], spec)
     spec = spectral_normalize_torch(spec)
 
     return spec

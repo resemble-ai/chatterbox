@@ -1,11 +1,11 @@
 from functools import lru_cache
 
-from scipy import signal
-import numpy as np
 import librosa
+import numpy as np
+from scipy import signal
 
 
-@lru_cache()
+@lru_cache
 def mel_basis(hp):
     assert hp.fmax <= hp.sample_rate // 2
     return librosa.filters.mel(
@@ -40,7 +40,7 @@ def melspectrogram(wav, hp, pad=True):
 
     # Get the mel and convert magnitudes->db
     mel = np.dot(mel_basis(hp), spec_magnitudes)
-    if hp.mel_type == "db":
+    if hp.mel_type == 'db':
         mel = _amp_to_db(mel, hp)
 
     # Normalise the mel from db to 0,1
@@ -60,7 +60,7 @@ def _stft(y, hp, pad=True):
         hop_length=hp.hop_size,
         win_length=hp.win_size,
         center=pad,
-        pad_mode="reflect",
+        pad_mode='reflect',
     )
 
 

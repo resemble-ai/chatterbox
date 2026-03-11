@@ -3,8 +3,8 @@
 import math
 
 import torch
-import torch.nn as nn
 from einops import rearrange
+from torch import nn
 
 
 def sequence_mask(length, max_length=None):
@@ -137,7 +137,7 @@ class RotaryPositionalEmbeddings(nn.Module):
         seq_idx = torch.arange(seq_len, device=x.device).float().to(x.device)
 
         # Calculate the product of position index and $\theta_i$
-        idx_theta = torch.einsum("n,d->nd", seq_idx, theta)
+        idx_theta = torch.einsum('n,d->nd', seq_idx, theta)
 
         # Concatenate so that for row $m$ we have
         # $[m \theta_0, m \theta_1, ..., m \theta_{\frac{d}{2}}, m \theta_0, m \theta_1, ..., m \theta_{\frac{d}{2}}]$
@@ -159,7 +159,7 @@ class RotaryPositionalEmbeddings(nn.Module):
         * `x` is the Tensor at the head of a key or a query with shape `[seq_len, batch_size, n_heads, d]`
         """
         # Cache $\cos$ and $\sin$ values
-        x = rearrange(x, "b h t d -> t b h d")
+        x = rearrange(x, 'b h t d -> t b h d')
 
         self._build_cache(x)
 
@@ -172,7 +172,7 @@ class RotaryPositionalEmbeddings(nn.Module):
 
         x_rope = (x_rope * self.cos_cached[: x.shape[0]]) + (neg_half_x * self.sin_cached[: x.shape[0]])
 
-        return rearrange(torch.cat((x_rope, x_pass), dim=-1), "t b h d -> b h t d")
+        return rearrange(torch.cat((x_rope, x_pass), dim=-1), 't b h d -> b h t d')
 
 
 class MultiHeadAttention(nn.Module):
@@ -228,9 +228,9 @@ class MultiHeadAttention(nn.Module):
 
     def attention(self, query, key, value, mask=None):
         b, d, t_s, t_t = (*key.size(), query.size(2))
-        query = rearrange(query, "b (h c) t-> b h t c", h=self.n_heads)
-        key = rearrange(key, "b (h c) t-> b h t c", h=self.n_heads)
-        value = rearrange(value, "b (h c) t-> b h t c", h=self.n_heads)
+        query = rearrange(query, 'b (h c) t-> b h t c', h=self.n_heads)
+        key = rearrange(key, 'b (h c) t-> b h t c', h=self.n_heads)
+        value = rearrange(value, 'b (h c) t-> b h t c', h=self.n_heads)
 
         query = self.query_rotary_pe(query)
         key = self.key_rotary_pe(key)
@@ -238,7 +238,7 @@ class MultiHeadAttention(nn.Module):
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.k_channels)
 
         if self.proximal_bias:
-            assert t_s == t_t, "Proximal bias is only available for self-attention."
+            assert t_s == t_t, 'Proximal bias is only available for self-attention.'
             scores = scores + self._attention_bias_proximal(t_s).to(device=scores.device, dtype=scores.dtype)
         if mask is not None:
             scores = scores.masked_fill(mask == 0, -1e4)

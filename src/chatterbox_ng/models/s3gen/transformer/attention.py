@@ -17,7 +17,6 @@
 """Multi-Head Attention layer definition."""
 
 import math
-from typing import Tuple
 
 import torch
 from torch import nn
@@ -52,7 +51,7 @@ class MultiHeadedAttention(nn.Module):
 
     def forward_qkv(
         self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Transform query, key and value.
 
         Args:
@@ -134,7 +133,7 @@ class MultiHeadedAttention(nn.Module):
         mask: torch.Tensor = torch.ones((0, 0, 0), dtype=torch.bool),
         pos_emb: torch.Tensor = torch.empty(0),
         cache: torch.Tensor = torch.zeros((0, 0, 0, 0))
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute scaled dot product attention.
 
         Args:
@@ -254,7 +253,7 @@ class RelPositionMultiHeadedAttention(MultiHeadedAttention):
         mask: torch.Tensor = torch.ones((0, 0, 0), dtype=torch.bool),
         pos_emb: torch.Tensor = torch.empty(0),
         cache: torch.Tensor = torch.zeros((0, 0, 0, 0))
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute 'Scaled Dot Product Attention' with rel. positional encoding.
         Args:
             query (torch.Tensor): Query tensor (#batch, time1, size).

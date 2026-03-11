@@ -1,19 +1,18 @@
-import logging
 import json
-
-import torch
+import logging
 from pathlib import Path
 from unicodedata import category, normalize
-from tokenizers import Tokenizer
-from huggingface_hub import hf_hub_download
 
+import torch
+from huggingface_hub import hf_hub_download
+from tokenizers import Tokenizer
 
 # Special tokens
-SOT = "[START]"
-EOT = "[STOP]"
-UNK = "[UNK]"
-SPACE = "[SPACE]"
-SPECIAL_TOKENS = [SOT, EOT, UNK, SPACE, "[PAD]", "[SEP]", "[CLS]", "[MASK]"]
+SOT = '[START]'
+EOT = '[STOP]'
+UNK = '[UNK]'
+SPACE = '[SPACE]'
+SPECIAL_TOKENS = [SOT, EOT, UNK, SPACE, '[PAD]', '[SEP]', '[CLS]', '[MASK]']
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +53,7 @@ class EnTokenizer:
 
 
 # Model repository
-REPO_ID = "ResembleAI/chatterbox"
+REPO_ID = 'ResembleAI/chatterbox'
 
 # Global instances for optional dependencies
 _kakasi = None
@@ -75,23 +74,23 @@ def is_katakana(c: str) -> bool:
 def hiragana_normalize(text: str) -> str:
     """Japanese text normalization: converts kanji to hiragana; katakana remains the same."""
     global _kakasi
-    
+
     try:
         if _kakasi is None:
             import pykakasi
             _kakasi = pykakasi.kakasi()
-        
+
         result = _kakasi.convert(text)
         out = []
-        
+
         for r in result:
             inp = r['orig']
-            hira = r["hira"]
+            hira = r['hira']
 
             # Any kanji in the phrase
             if any([is_kanji(c) for c in inp]):
-                if hira and hira[0] in ["は", "へ"]:  # Safety check for empty hira
-                    hira = " " + hira
+                if hira and hira[0] in ['は', 'へ']:  # Safety check for empty hira
+                    hira = ' ' + hira
                 out.append(hira)
 
             # All katakana
@@ -100,102 +99,102 @@ def hiragana_normalize(text: str) -> str:
 
             else:
                 out.append(inp)
-        
-        normalized_text = "".join(out)
-        
+
+        normalized_text = ''.join(out)
+
         # Decompose Japanese characters for tokenizer compatibility
         import unicodedata
         normalized_text = unicodedata.normalize('NFKD', normalized_text)
-        
+
         return normalized_text
-        
+
     except ImportError:
-        logger.warning("pykakasi not available - Japanese text processing skipped")
+        logger.warning('pykakasi not available - Japanese text processing skipped')
         return text
 
 
 def add_hebrew_diacritics(text: str) -> str:
     """Hebrew text normalization: adds diacritics to Hebrew text."""
     global _dicta
-    
+
     try:
         if _dicta is None:
             from dicta_onnx import Dicta
             _dicta = Dicta()
-        
+
         return _dicta.add_diacritics(text)
-        
+
     except ImportError:
-        logger.warning("dicta_onnx not available - Hebrew text processing skipped")
+        logger.warning('dicta_onnx not available - Hebrew text processing skipped')
         return text
     except Exception as e:
-        logger.warning(f"Hebrew diacritization failed: {e}")
+        logger.warning(f'Hebrew diacritization failed: {e}')
         return text
 
 
 def korean_normalize(text: str) -> str:
     """Korean text normalization: decompose syllables into Jamo for tokenization."""
-    
+
     def decompose_hangul(char):
         """Decompose Korean syllable into Jamo components."""
         if not ('\uac00' <= char <= '\ud7af'):
             return char
-        
+
         # Hangul decomposition formula
         base = ord(char) - 0xAC00
         initial = chr(0x1100 + base // (21 * 28))
         medial = chr(0x1161 + (base % (21 * 28)) // 28)
         final = chr(0x11A7 + base % 28) if base % 28 > 0 else ''
-        
+
         return initial + medial + final
-    
+
     # Decompose syllables and normalize punctuation
-    result = ''.join(decompose_hangul(char) for char in text)    
+    result = ''.join(decompose_hangul(char) for char in text)
     return result.strip()
 
 
 class ChineseCangjieConverter:
     """Converts Chinese characters to Cangjie codes for tokenization."""
-    
+
     def __init__(self, model_dir=None):
         self.word2cj = {}
         self.cj2word = {}
         self.segmenter = None
         self._load_cangjie_mapping(model_dir)
         self._init_segmenter()
-    
+
     def _load_cangjie_mapping(self, model_dir=None):
-        """Load Cangjie mapping from HuggingFace model repository."""        
+        """Load Cangjie mapping from HuggingFace model repository."""
         try:
             cangjie_file = hf_hub_download(
                 repo_id=REPO_ID,
-                filename="Cangjie5_TC.json",
+                filename='Cangjie5_TC.json',
                 cache_dir=model_dir
             )
-            
-            with open(cangjie_file, "r", encoding="utf-8") as fp:
+
+            with open(cangjie_file, encoding='utf-8') as fp:
                 data = json.load(fp)
-            
+
             for entry in data:
-                word, code = entry.split("\t")[:2]
+                word, code = entry.split('\t')[:2]
                 self.word2cj[word] = code
                 if code not in self.cj2word:
                     self.cj2word[code] = [word]
                 else:
                     self.cj2word[code].append(word)
-                    
+
         except Exception as e:
-            logger.warning(f"Could not load Cangjie mapping: {e}")
-    
+            logger.warning(f'Could not load Cangjie mapping: {e}')
+
     def _init_segmenter(self):
         """Initialize pkuseg segmenter."""
         try:
             from spacy_pkuseg import pkuseg
             self.segmenter = pkuseg()
         except ImportError:
-            logger.warning("pkuseg not available - Chinese segmentation will be skipped")
+            logger.warning('pkuseg not available - Chinese segmentation will be skipped')
             self.segmenter = None
-    
+
     def _cangjie_encode(self, glyph: str):
         """Encode a single Chinese glyph to Cangjie code."""
         normed_glyph = glyph
@@ -203,53 +202,53 @@ class ChineseCangjieConverter:
         if code is None:  # e.g. Japanese hiragana
             return None
         index = self.cj2word[code].index(normed_glyph)
-        index = str(index) if index > 0 else ""
+        index = str(index) if index > 0 else ''
         return code + str(index)
-    
 
-    
+
+
     def __call__(self, text):
         """Convert Chinese characters in text to Cangjie tokens."""
         output = []
         if self.segmenter is not None:
             segmented_words = self.segmenter.cut(text)
-            full_text = " ".join(segmented_words)
+            full_text = ' '.join(segmented_words)
         else:
             full_text = text
-        
+
         for t in full_text:
-            if category(t) == "Lo":
+            if category(t) == 'Lo':
                 cangjie = self._cangjie_encode(t)
                 if cangjie is None:
                     output.append(t)
                     continue
                 code = []
                 for c in cangjie:
-                    code.append(f"[cj_{c}]")
-                code.append("[cj_.]")
-                code = "".join(code)
+                    code.append(f'[cj_{c}]')
+                code.append('[cj_.]')
+                code = ''.join(code)
                 output.append(code)
             else:
                 output.append(t)
-        return "".join(output)
+        return ''.join(output)
 
 
 def add_russian_stress(text: str) -> str:
     """Russian text normalization: adds stress marks to Russian text."""
     global _russian_stresser
-    
+
     try:
         if _russian_stresser is None:
             from russian_text_stresser.text_stresser import RussianTextStresser
             _russian_stresser = RussianTextStresser()
-        
+
         return _russian_stresser.stress_text(text)
-        
+
     except ImportError:
-        logger.warning("russian_text_stresser not available - Russian stress labeling skipped")
+        logger.warning('russian_text_stresser not available - Russian stress labeling skipped')
         return text
     except Exception as e:
-        logger.warning(f"Russian stress labeling failed: {e}")
+        logger.warning(f'Russian stress labeling failed: {e}')
         return text
 
 
@@ -273,8 +272,8 @@ class MTLTokenizer:
         if lowercase:
             preprocessed_text = preprocessed_text.lower()
         if nfkd_normalize:
-            preprocessed_text = normalize("NFKD", preprocessed_text)
-        
+            preprocessed_text = normalize('NFKD', preprocessed_text)
+
         return preprocessed_text
 
     def text_to_tokens(self, text: str, language_id: str = None, lowercase: bool = True, nfkd_normalize: bool = True):
@@ -284,7 +283,7 @@ class MTLTokenizer:
 
     def encode(self, txt: str, language_id: str = None, lowercase: bool = True, nfkd_normalize: bool = True):
         txt = self.preprocess_text(txt, language_id=language_id, lowercase=lowercase, nfkd_normalize=nfkd_normalize)
-        
+
         # Language-specific text processing
         if language_id == 'zh':
             txt = self.cangjie_converter(txt)
@@ -296,11 +295,11 @@ class MTLTokenizer:
             txt = korean_normalize(txt)
         elif language_id == 'ru':
             txt = add_russian_stress(txt)
-        
+
         # Prepend language token
         if language_id:
-            txt = f"[{language_id.lower()}]{txt}"
-        
+            txt = f'[{language_id.lower()}]{txt}'
+
         txt = txt.replace(' ', SPACE)
         return self.tokenizer.encode(txt).ids
 

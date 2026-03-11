@@ -1,15 +1,13 @@
-from typing import List, Tuple
 
-import numpy as np
 import librosa
+import numpy as np
 import torch
 import torch.nn.functional as F
-from s3tokenizer.utils import padding
 from s3tokenizer.model_v2 import (
-    S3TokenizerV2,
     ModelConfig,
+    S3TokenizerV2,
 )
-
+from s3tokenizer.utils import padding
 
 # Sampling rate of the inputs to S3TokenizerV2
 S3_SR = 16_000
@@ -26,11 +24,11 @@ class S3Tokenizer(S3TokenizerV2):
     - compute `log_mel_spectrogram` using `_mel_filters` and `window` in `register_buffers`
     """
 
-    ignore_state_dict_missing = ("_mel_filters", "window")
+    ignore_state_dict_missing = ('_mel_filters', 'window')
 
     def __init__(
         self,
-        name: str="speech_tokenizer_v2_25hz",
+        name: str='speech_tokenizer_v2_25hz',
         config: ModelConfig = ModelConfig()
     ):
         super().__init__(name)
@@ -42,16 +40,16 @@ class S3Tokenizer(S3TokenizerV2):
             n_mels=config.n_mels
         )
         self.register_buffer(
-            "_mel_filters",
+            '_mel_filters',
             torch.FloatTensor(_mel_filters),
         )
 
         self.register_buffer(
-            "window",
+            'window',
             torch.hann_window(self.n_fft),
         )
 
-    def pad(self, wavs, sr) -> List[torch.Tensor]:
+    def pad(self, wavs, sr) -> list[torch.Tensor]:
         """
         Given a list of wavs with the same `sample_rate`, pad them so that the length is multiple of 40ms (S3 runs at 25 token/sec).
         """
@@ -69,7 +67,7 @@ class S3Tokenizer(S3TokenizerV2):
             wav = torch.nn.functional.pad(
                 wav,
                 (0, intended_wav_len - wav.shape[-1]),
-                mode="constant",
+                mode='constant',
                 value=0
             )
             processed_wavs.append(wav)
@@ -91,9 +89,9 @@ class S3Tokenizer(S3TokenizerV2):
     def forward(
         self,
         wavs: torch.Tensor,
-        accelerator: 'Accelerator'=None,
+        accelerator: Accelerator=None,
         max_len: int=None,
-    ) -> Tuple[torch.Tensor, torch.LongTensor]:
+    ) -> tuple[torch.Tensor, torch.LongTensor]:
         """
         NOTE: mel-spec has a hop size of 160 points (100 frame/sec).
         FIXME: this class inherits `nn.Module` but doesn't accept `torch.Tensor` and handles a list of wavs one by one, which is unexpected.

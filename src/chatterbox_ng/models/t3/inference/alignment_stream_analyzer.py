@@ -2,10 +2,9 @@
 # Author: John Meade, Jeremy Hsu
 # MIT License
 import logging
-import torch
 from dataclasses import dataclass
-from types import MethodType
 
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +51,7 @@ class AlignmentStreamAnalyzer:
 
         self.complete = False
         self.completed_at = None
-        
+
         # Track generated tokens for repetition detection
         self.generated_tokens = []
 
@@ -84,12 +83,12 @@ class AlignmentStreamAnalyzer:
         target_layer.register_forward_hook(attention_forward_hook)
         if hasattr(tfmr, 'config') and hasattr(tfmr.config, 'output_attentions'):
             self.original_output_attentions = tfmr.config.output_attentions
-            self.original_attn_implementation = getattr(tfmr.config, "_attn_implementation", "eager")
-            
+            self.original_attn_implementation = getattr(tfmr.config, '_attn_implementation', 'eager')
+
             # We must use eager implementation to get attentions.
             # Setting it on the config might not be enough if the model was already initialized with SDPA.
             # However, LlamaAttention will check config._attn_implementation during forward in some versions.
-            tfmr.config._attn_implementation = "eager"
+            tfmr.config._attn_implementation = 'eager'
             tfmr.config.output_attentions = True
 
     def step(self, logits, next_token=None):
@@ -143,7 +142,7 @@ class AlignmentStreamAnalyzer:
 
         # If there are activations in previous tokens after generation has completed, assume this is a repetition error.
         alignment_repetition = self.complete and (A[self.completed_at:, :-5].max(dim=1).values.sum() > 5)
-        
+
         # Track generated tokens for repetition detection
         if next_token is not None:
             # Convert tensor to scalar if needed
@@ -152,22 +151,22 @@ class AlignmentStreamAnalyzer:
             else:
                 token_id = next_token
             self.generated_tokens.append(token_id)
-            
+
             # Keep only last 8 tokens to prevent memory issues
             if len(self.generated_tokens) > 8:
                 self.generated_tokens = self.generated_tokens[-8:]
-            
+
         # Check for excessive token repetition (3x same token in a row)
         token_repetition = (
-            # self.complete and 
+            # self.complete and
             len(self.generated_tokens) >= 3 and
             len(set(self.generated_tokens[-2:])) == 1
         )
-        
+
         if token_repetition:
             repeated_token = self.generated_tokens[-1]
-            logger.warning(f"🚨 Detected 2x repetition of token {repeated_token}")
-            
+            logger.warning(f'🚨 Detected 2x repetition of token {repeated_token}')
+
         # Suppress EoS to prevent early termination
         if cur_text_posn < S - 3 and S > 5:  # Only suppress if text is longer than 5 tokens
             logits[..., self.eos_idx] = -2**15
@@ -175,7 +174,7 @@ class AlignmentStreamAnalyzer:
         # If a bad ending is detected, force emit EOS by modifying logits
         # NOTE: this means logits may be inconsistent with latents!
         if long_tail or alignment_repetition or token_repetition:
-            logger.warning(f"forcing EOS token, {long_tail=}, {alignment_repetition=}, {token_repetition=}")
+            logger.warning(f'forcing EOS token, {long_tail=}, {alignment_repetition=}, {token_repetition=}')
             # (±2**15 is safe for all dtypes >= 16bit)
             logits = -(2**15) * torch.ones_like(logits)
             logits[..., self.eos_idx] = 2**15
