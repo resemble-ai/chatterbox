@@ -394,3 +394,110 @@ class ChatterboxTTS:
         if is_single_input:
             return output_tensors[0]
         return output_tensors
+
+    def generate_speech_tokens(
+        self,
+        text: str,
+        audio_prompt_path: Union[str, List[str]] = None,
+        exaggeration=0.5,
+        cfg_weight=0.5,
+        temperature=0.8,
+        repetition_penalty=1.2,
+        min_p=0.05,
+        top_p=1.0,
+    ) -> torch.Tensor:
+        """
+        Run T3 only — generate speech tokens from text without vocoding.
+
+        Returns a 1-D LongTensor of clean speech tokens on CPU.
+        These can be manipulated (resampled, concatenated) and then
+        passed to :meth:`speech_tokens_to_wav` for vocoding.
+        """
+        if audio_prompt_path:
+            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
+        else:
+            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+
+        if self.conds.t3.speaker_emb.dtype != self.dtype:
+            self.conds = self.conds.to(device=self.device, dtype=self.dtype)
+
+        t3_cond = self.conds.t3
+
+        # Update exaggeration
+        if t3_cond.emotion_adv is not None and t3_cond.emotion_adv.numel() > 0:
+            t3_cond.emotion_adv = exaggeration * torch.ones(1, 1, 1, device=self.device, dtype=self.dtype)
+
+        normed = punc_norm(text)
+        text_tokens = self.tokenizer.text_to_tokens(normed).squeeze(0).unsqueeze(0).to(self.device)
+
+        _t3_cond = t3_cond
+        _text_tokens = text_tokens
+        if cfg_weight > 0.0:
+            _text_tokens = torch.cat([text_tokens, text_tokens], dim=0)
+            _t3_cond = T3Cond(**{
+                k: torch.cat([v, v], dim=0) if torch.is_tensor(v) else v
+                for k, v in t3_cond.__dict__.items()
+            })
+
+        sot = self.t3.hp.start_text_token
+        eot = self.t3.hp.stop_text_token
+        _text_tokens = F.pad(_text_tokens, (1, 0), value=sot)
+        _text_tokens = F.pad(_text_tokens, (0, 1), value=eot)
+
+        with torch.inference_mode():
+            speech_tokens_list = self.t3.inference(
+                t3_cond=_t3_cond,
+                text_tokens=_text_tokens,
+                max_new_tokens=1000,
+                temperature=temperature,
+                cfg_weight=cfg_weight,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
+            )
+
+        raw_tokens = speech_tokens_list[0]  # batch_size=1, take first
+        padded = raw_tokens.unsqueeze(0)
+        clean_list = drop_invalid_tokens(padded)
+        return clean_list[0].cpu()  # 1-D LongTensor on CPU
+
+    def speech_tokens_to_wav(
+        self,
+        speech_tokens: torch.Tensor,
+        apply_watermark: bool = True,
+    ) -> torch.Tensor:
+        """
+        Run S3Gen only — convert speech tokens to a waveform.
+
+        Parameters
+        ----------
+        speech_tokens : torch.Tensor
+            1-D LongTensor of speech token IDs (as returned by
+            :meth:`generate_speech_tokens` or manually constructed).
+        apply_watermark : bool
+            Whether to apply the perth watermark.  Set to False when
+            assembling multiple segments — watermark the final audio once.
+
+        Returns
+        -------
+        torch.Tensor
+            Shape ``(1, num_samples)`` at 24 kHz.
+        """
+        assert self.conds is not None, "Conditioning not prepared"
+        gen_cond = self.conds.gen
+
+        tokens_2d = speech_tokens.unsqueeze(0).to(self.device)      # (1, T)
+        token_lens = torch.tensor([tokens_2d.size(1)], device=self.device)
+
+        with torch.inference_mode():
+            wavs, _ = self.s3gen.inference(
+                speech_tokens=tokens_2d,
+                speech_token_lens=token_lens,
+                ref_dict=gen_cond,
+            )
+
+        audio_length = token_lens[0] * TOKEN_TO_WAV_RATIO
+        trimmed = wavs[0, :audio_length].cpu().float().numpy()
+        if apply_watermark:
+            trimmed = self.watermarker.apply_watermark(trimmed, sample_rate=self.sr)
+        return torch.from_numpy(trimmed).unsqueeze(0)  # (1, N)
