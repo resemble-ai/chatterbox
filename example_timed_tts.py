@@ -1,6 +1,6 @@
 ﻿# example_timed_tts.py
 #
-# Demonstrates timed narration: single T3 pass → token resampling → single S3Gen pass.
+# Demonstrates timed narration: per-group T3 passes → token resampling → single S3Gen pass.
 # Each segment's duration is controlled at the token level (1 token = 40ms).
 
 import os
@@ -52,14 +52,22 @@ for i, est in enumerate(estimates):
     )
 print()
 
-# ── Step 2: Full generation ──────────────────────────────────────────────────
+# ── Step 2: Full generation — EXPRESSIVE narrator settings ───────────────────
+#
+# README tip for expressive/dramatic speech:
+#   - Increase exaggeration to 0.7+ for more pitch variation and emphasis.
+#   - Lower cfg_weight to ~0.3 to compensate for the speed-up that higher
+#     exaggeration causes, giving more deliberate pacing.
+#
+# This is especially important for narration that has exclamations ("Wow!"),
+# rhetorical tone, or comedic delivery.
 
-print("=== Generating (single T3 pass → token resample → single S3Gen pass) ===")
+print("=== Generating — expressive narrator (exaggeration=0.7, cfg_weight=0.3) ===")
 result = timed.generate(
     script,
     audio_prompt_path=AUDIO_PROMPT,
-    exaggeration=0.5,
-    cfg_weight=0.5,
+    exaggeration=0.7,
+    cfg_weight=0.3,
     temperature=0.8,
 )
 
@@ -69,6 +77,23 @@ print(f"Saved {out_path}  ({result.total_duration:.2f}s)")
 print_comfort_report(result.segments)
 
 print("Comfort scores:", [seg.comfort for seg in result.segments])
+print()
+
+# ── Step 3: Comparison — default settings for reference ──────────────────────
+
+print("=== Generating — default settings (exaggeration=0.5, cfg_weight=0.5) ===")
+result_default = timed.generate(
+    script,
+    audio_prompt_path=AUDIO_PROMPT,
+    exaggeration=0.5,
+    cfg_weight=0.5,
+    temperature=0.8,
+)
+
+out_default = os.path.join(OUTPUT_DIR, "timed_narration_default.wav")
+ta.save(out_default, result_default.wav, result_default.sr)
+print(f"Saved {out_default}  ({result_default.total_duration:.2f}s)")
+print_comfort_report(result_default.segments)
 print()
 
 # ── Example with silence gaps ────────────────────────────────────────────────
@@ -81,7 +106,11 @@ script_silence = (
 )
 
 print("=== Script with silence gaps ===")
-result2 = timed.generate(script_silence)
+result2 = timed.generate(
+    script_silence,
+    exaggeration=0.7,
+    cfg_weight=0.3,
+)
 out2 = os.path.join(OUTPUT_DIR, "timed_with_silence.wav")
 ta.save(out2, result2.wav, result2.sr)
 print(f"Saved {out2}")
@@ -94,3 +123,12 @@ print_comfort_report(result2.segments)
 #  0.51–0.65  = mild token dropping (slightly faster)
 #  < 0.15     = extreme — tell Gemini to add more words
 #  > 0.85     = extreme — tell Gemini to shorten text or extend window
+#
+# ── Parameter guide for timed narration ──────────────────────────────────────
+#
+#  exaggeration  cfg_weight  Style
+#  ───────────── ─────────── ─────────────────────────────────────────
+#  0.5           0.5         Neutral / default — good for informational VO
+#  0.7           0.3         Expressive narrator — pitch peaks, emphasis
+#  0.8–1.0       0.2–0.3    Very dramatic — comedy, horror, sports commentary
+#  0.3           0.5         Subdued / calm — documentary, meditation
