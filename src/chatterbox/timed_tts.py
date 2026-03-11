@@ -41,6 +41,9 @@
 #   timed = TimedChatterboxTTS(model)
 #   result = timed.generate("Hello! <2.0> World!", audio_prompt_path="ref.wav")
 #   torchaudio.save("out.wav", result.wav, result.sr)
+import os
+import sys
+import contextlib
 
 import math
 import re
@@ -72,6 +75,18 @@ _SILENCE_FADE_MS = 60
 # ── Timing-tag regex ─────────────────────────────────────────────────────────
 
 _TAG_RE = re.compile(r"<(\d+(?:\.\d+)?)>")
+
+
+@contextlib.contextmanager
+def _suppress_stdout():
+    """Redirect stdout and stderr to devnull — silences tqdm bars and print() calls."""
+    with open(os.devnull, 'w', encoding='utf-8') as devnull:
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = devnull, devnull
+        try:
+            yield
+        finally:
+            sys.stdout, sys.stderr = old_out, old_err
 
 
 # ── Data classes ─────────────────────────────────────────────────────────────
@@ -292,6 +307,7 @@ class TimedChatterboxTTS:
         top_p: float = 1.0,
         *,
         comfort_steepness: float = 3.5,
+        quiet: bool = False,
     ) -> TimedResult:
         """
         Generate time-aligned narration.
@@ -340,14 +356,21 @@ class TimedChatterboxTTS:
 
         for group in groups:
             group_text = " ".join(seg.text for seg in group)
-            logger.info("T3 generating group: %.120s…", group_text)
+            logger.debug("T3 generating group: %.120s…", group_text)
 
-            group_tokens = self.model.generate_speech_tokens(
-                group_text, **t3_kwargs
-            )
+            if quiet:
+                with _suppress_stdout():
+                    group_tokens = self.model.generate_speech_tokens(
+                        group_text, **t3_kwargs
+                    )
+            else:
+                group_tokens = self.model.generate_speech_tokens(
+                    group_text, **t3_kwargs
+                )
+
             # group_tokens: 1-D LongTensor on CPU
             group_total = len(group_tokens)
-            logger.info(
+            logger.debug(
                 "  T3 produced %d tokens (%.2fs natural).",
                 group_total, group_total * SECS_PER_TOKEN,
             )
@@ -407,7 +430,7 @@ class TimedChatterboxTTS:
                     comfort=comfort,
                 )
 
-                logger.info(
+                logger.debug(
                     "  Seg [%s…]: %d→%d tokens (%.2fs→%.2fs) comfort=%.2f",
                     seg.text[:30], len(orig_tokens), len(resampled),
                     natural_dur, actual_dur, comfort,
@@ -426,11 +449,17 @@ class TimedChatterboxTTS:
         all_resampled = torch.cat(
             [speech_seg_data[id(seg)]["resampled"] for seg in speech_segments]
         )
-        logger.info("S3Gen: %d total resampled tokens", len(all_resampled))
+        logger.debug("S3Gen: %d total resampled tokens", len(all_resampled))
 
-        full_wav_tensor = self.model.speech_tokens_to_wav(
-            all_resampled, apply_watermark=False
-        )
+        if quiet:
+            with _suppress_stdout():
+                full_wav_tensor = self.model.speech_tokens_to_wav(
+                    all_resampled, apply_watermark=False
+                )
+        else:
+            full_wav_tensor = self.model.speech_tokens_to_wav(
+                all_resampled, apply_watermark=False
+            )
         full_wav_np = full_wav_tensor.squeeze(0).numpy()
 
         # ── 6. Assemble final audio with absolute positioning ────────────
