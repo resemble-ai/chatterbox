@@ -79,14 +79,19 @@ _TAG_RE = re.compile(r"<(\d+(?:\.\d+)?)>")
 
 @contextlib.contextmanager
 def _suppress_stdout():
-    """Redirect stdout and stderr to devnull — silences tqdm bars and print() calls."""
+    """Redirect stdout/stderr to devnull and silence chatterbox loggers below WARNING."""
     with open(os.devnull, 'w', encoding='utf-8') as devnull:
         old_out, old_err = sys.stdout, sys.stderr
         sys.stdout, sys.stderr = devnull, devnull
+        # Mute chatterbox INFO/DEBUG that goes through the logging system
+        cb_logger = logging.getLogger('chatterbox')
+        old_level = cb_logger.level
+        cb_logger.setLevel(logging.WARNING)
         try:
             yield
         finally:
             sys.stdout, sys.stderr = old_out, old_err
+            cb_logger.setLevel(old_level)
 
 
 # ── Data classes ─────────────────────────────────────────────────────────────
