@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
+
 import torch
 
 '''
@@ -133,7 +135,7 @@ def add_optional_chunk_mask(xs: torch.Tensor,
             # chunk size is either [1, 25] or full context(max_len).
             # Since we use 4 times subsampling and allow up to 1s(100 frames)
             # delay, the maximum frame is 100 / 4 = 25.
-            chunk_size = torch.randint(1, max_len, (1, )).item()
+            chunk_size = torch.randint(1, max_len, (1,)).item()
             num_left_chunks = -1
             if chunk_size > max_len // 2 and enable_full_context:
                 chunk_size = max_len
@@ -142,7 +144,7 @@ def add_optional_chunk_mask(xs: torch.Tensor,
                 if use_dynamic_left_chunk:
                     max_left_chunks = (max_len - 1) // chunk_size
                     num_left_chunks = torch.randint(0, max_left_chunks,
-                                                    (1, )).item()
+                                                    (1,)).item()
         chunk_masks = subsequent_chunk_mask(xs.size(1), chunk_size,
                                             num_left_chunks,
                                             xs.device)  # (L, L)
@@ -159,8 +161,9 @@ def add_optional_chunk_mask(xs: torch.Tensor,
         chunk_masks = masks
     assert chunk_masks.dtype == torch.bool
     if (chunk_masks.sum(dim=-1) == 0).sum().item() != 0:
-        logging.warning('get chunk_masks all false at some timestep, force set to true, make sure they are masked in futuer computation!')
-        chunk_masks[chunk_masks.sum(dim=-1)==0] = True
+        logging.warning(
+            'get chunk_masks all false at some timestep, force set to true, make sure they are masked in futuer computation!')
+        chunk_masks[chunk_masks.sum(dim=-1) == 0] = True
     return chunk_masks
 
 
