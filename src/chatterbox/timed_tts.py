@@ -2,9 +2,23 @@
 #
 # Timed narration for Chatterbox TTS.
 #
-# Generates a SINGLE T3 pass for natural prosody across the full text,
-# then resamples the speech tokens per segment to hit target durations,
-# then runs a SINGLE S3Gen pass for a coherent waveform.
+# Architecture:
+#   - One T3 pass **per silence-separated group** so the model naturally
+#     plans sentence-ending prosody at every pause boundary.
+#   - Token resampling per segment to hit target durations.
+#   - A **single S3Gen pass** on all concatenated resampled tokens so the
+#     vocoder sees one continuous stream → coherent voice, no startup-mute
+#     artifacts between groups.
+#   - Silence gaps are inserted at the waveform level via absolute positioning.
+#
+# Why per-group T3 instead of one giant T3 pass?
+#   When T3 receives "And here we go! Back to action!" as one string, it
+#   generates continuous speech with no prosodic break between the two
+#   sentences.  A proportional token-split then lands mid-phoneme,
+#   creating "And here we go! Ba..." | silence | "...ck to action!".
+#   By giving T3 each group separately, it naturally winds down at "go!"
+#   and starts fresh at "Back" — the split is clean because the token
+#   streams are physically separate.
 #
 # Token resampling (nearest-neighbour on discrete speech tokens) is far
 # cleaner than phase-vocoder stretching on the final audio:
@@ -193,6 +207,27 @@ def _apply_fade_in(audio_np: np.ndarray, sr: int) -> np.ndarray:
     return out
 
 
+# ── Grouping helper ──────────────────────────────────────────────────────────
+
+def _group_by_silence(segments: List[TimedSegment]) -> List[List[TimedSegment]]:
+    """
+    Split the flat segment list into groups of contiguous speech segments.
+    Silence segments act as group separators and are not included in any group.
+    """
+    groups: List[List[TimedSegment]] = []
+    current: List[TimedSegment] = []
+    for seg in segments:
+        if seg.is_silence:
+            if current:
+                groups.append(current)
+                current = []
+        else:
+            current.append(seg)
+    if current:
+        groups.append(current)
+    return groups
+
+
 # ── Main class ───────────────────────────────────────────────────────────────
 
 class TimedChatterboxTTS:
@@ -201,13 +236,15 @@ class TimedChatterboxTTS:
 
     Pipeline:
       1. Parse ``<timestamp>`` tags → segments with target durations.
-      2. **Single T3 pass** on the full stripped text → natural speech tokens.
-      3. Estimate per-segment token boundaries (proportional to text-token count).
-      4. **Resample** each segment's tokens to hit its target duration
-         (1 token = 40 ms, so target_tokens = round(target_dur / 0.04)).
-      5. Concatenate resampled tokens (grouping around silence gaps).
-      6. **S3Gen pass(es)** → coherent waveform(s).
-      7. Assemble final audio with absolute positioning + silence gaps.
+      2. Group contiguous speech segments (silence = group boundary).
+      3. **One T3 pass per group** → natural sentence-ending prosody at
+         every silence boundary.  Within a group, prosody flows naturally.
+      4. Proportional token split within each group → per-segment tokens.
+      5. **Resample** each segment's tokens to hit its target duration.
+      6. Concatenate ALL resampled tokens from all groups.
+      7. **Single S3Gen pass** → one coherent waveform (no startup-mute
+         artifacts between groups).
+      8. Assemble final audio with absolute positioning + silence gaps.
     """
 
     def __init__(self, model: ChatterboxTTS):
@@ -259,7 +296,7 @@ class TimedChatterboxTTS:
         """
         Generate time-aligned narration.
 
-        Single T3 pass → token resampling → single S3Gen pass.
+        Per-group T3 passes → token resampling → single S3Gen pass.
         Silence gaps are handled at the waveform level.
         """
 
@@ -272,17 +309,19 @@ class TimedChatterboxTTS:
         if not speech_segments:
             raise ValueError("All segments empty.")
 
-        # ── 2. Single T3 pass on the full text ──────────────────────────
-        full_text = " ".join(seg.text for seg in speech_segments)
-        logger.info("T3 generating for: %.120s…", full_text)
+        # ── 2. Group contiguous speech segments around silence gaps ──────
+        #
+        # Each group is a run of speech segments with no silence between
+        # them.  Each group gets its own T3 call so the model naturally
+        # plans sentence-ending prosody at silence boundaries.
+        groups = _group_by_silence(segments)
 
         if audio_prompt_path:
             self.model.prepare_conditionals(
                 audio_prompt_path, exaggeration=exaggeration
             )
 
-        all_tokens = self.model.generate_speech_tokens(
-            full_text,
+        t3_kwargs = dict(
             exaggeration=exaggeration,
             cfg_weight=cfg_weight,
             temperature=temperature,
@@ -290,105 +329,105 @@ class TimedChatterboxTTS:
             min_p=min_p,
             top_p=top_p,
         )
-        # all_tokens: 1-D LongTensor on CPU
-        total_tokens = len(all_tokens)
-        logger.info(
-            "T3 produced %d tokens (%.2fs at natural pace).",
-            total_tokens, total_tokens * SECS_PER_TOKEN,
-        )
 
-        # ── 3. Estimate per-segment token boundaries ────────────────────
+        # ── 3. T3 pass per group + proportional split within group ──────
         #
-        # Proportional to text-token counts.
-        text_token_counts = []
-        for seg in speech_segments:
-            normed = punc_norm(seg.text)
-            toks = self.model.tokenizer.text_to_tokens(normed).squeeze(0)
-            text_token_counts.append(max(len(toks), 1))
-
-        total_text_tokens = sum(text_token_counts)
-
-        seg_token_ranges: List[Tuple[int, int]] = []
-        cursor = 0
-        for i, tc in enumerate(text_token_counts):
-            count = round(total_tokens * tc / total_text_tokens)
-            count = max(count, 1)
-            if i == len(text_token_counts) - 1:
-                count = total_tokens - cursor  # give remainder to last
-            seg_token_ranges.append((cursor, cursor + count))
-            cursor += count
-
-        # ── 4. Resample each speech segment's tokens ────────────────────
-        #
-        # Build a mapping: speech_segment → (original_tokens, resampled_tokens)
+        # For each group we:
+        #   a) Join the group's segment texts into one string.
+        #   b) Run T3 → get speech tokens with natural ending prosody.
+        #   c) Proportionally split the group's tokens across its segments.
         speech_seg_data = {}  # id(seg) → dict
-        for seg, (tok_start, tok_end) in zip(speech_segments, seg_token_ranges):
-            orig_tokens = all_tokens[tok_start:tok_end]
-            natural_dur = len(orig_tokens) * SECS_PER_TOKEN
-            target_dur = seg.target_duration
 
-            if target_dur is not None and target_dur > 0:
-                target_token_count = max(1, round(target_dur / SECS_PER_TOKEN))
-                resampled = _resample_tokens(orig_tokens, target_token_count)
-                actual_dur = len(resampled) * SECS_PER_TOKEN
-                comfort = _comfort_score(natural_dur, target_dur, comfort_steepness)
-            else:
-                resampled = orig_tokens
-                actual_dur = natural_dur
-                comfort = 0.5
-
-            speech_seg_data[id(seg)] = dict(
-                orig_tokens=orig_tokens,
-                resampled=resampled,
-                natural_dur=natural_dur,
-                actual_dur=actual_dur,
-                comfort=comfort,
-            )
-
-            logger.info(
-                "  Seg [%s…]: %d→%d tokens (%.2fs→%.2fs) comfort=%.2f",
-                seg.text[:30], len(orig_tokens), len(resampled),
-                natural_dur, actual_dur, comfort,
-            )
-
-        # ── 5. Group contiguous speech segments around silence gaps ──────
-        #
-        # Each "group" is a run of consecutive speech segments with no
-        # silence between them.  Each group gets ONE S3Gen pass.
-        # Silence gaps are inserted at the waveform level (just zeros).
-
-        groups: List[List[TimedSegment]] = []
-        current_group: List[TimedSegment] = []
-
-        for seg in segments:
-            if seg.is_silence:
-                if current_group:
-                    groups.append(current_group)
-                    current_group = []
-            else:
-                current_group.append(seg)
-        if current_group:
-            groups.append(current_group)
-
-        # ── 6. S3Gen pass per group ──────────────────────────────────────
-
-        group_wavs = {}  # id(group[0]) → np.ndarray
         for group in groups:
-            # Concatenate resampled tokens for all segments in this group
-            group_tokens = torch.cat(
-                [speech_seg_data[id(seg)]["resampled"] for seg in group]
-            )
-            logger.info(
-                "S3Gen: %d tokens for group starting at %.2fs",
-                len(group_tokens), group[0].start_time,
-            )
-            wav_tensor = self.model.speech_tokens_to_wav(
-                group_tokens, apply_watermark=False
-            )
-            group_wav_np = wav_tensor.squeeze(0).numpy().astype(np.float32)
-            group_wavs[id(group[0])] = group_wav_np
+            group_text = " ".join(seg.text for seg in group)
+            logger.info("T3 generating group: %.120s…", group_text)
 
-        # ── 7. Assemble final audio with absolute positioning ────────────
+            group_tokens = self.model.generate_speech_tokens(
+                group_text, **t3_kwargs
+            )
+            # group_tokens: 1-D LongTensor on CPU
+            group_total = len(group_tokens)
+            logger.info(
+                "  T3 produced %d tokens (%.2fs natural).",
+                group_total, group_total * SECS_PER_TOKEN,
+            )
+
+            # ── Proportional split within this group ─────────────────
+            text_token_counts = []
+            for seg in group:
+                normed = punc_norm(seg.text)
+                toks = self.model.tokenizer.text_to_tokens(normed).squeeze(0)
+                text_token_counts.append(max(len(toks), 1))
+
+            total_text_tokens = sum(text_token_counts)
+
+            seg_token_ranges: List[Tuple[int, int]] = []
+            cursor = 0
+            for i, tc in enumerate(text_token_counts):
+                count = round(group_total * tc / total_text_tokens)
+                count = max(count, 1)
+                if i == len(text_token_counts) - 1:
+                    count = group_total - cursor  # remainder to last
+                seg_token_ranges.append((cursor, cursor + count))
+                cursor += count
+
+            # ── 4. Resample each segment's tokens ────────────────────
+            for seg, (tok_start, tok_end) in zip(group, seg_token_ranges):
+                orig_tokens = group_tokens[tok_start:tok_end]
+                natural_dur = len(orig_tokens) * SECS_PER_TOKEN
+                target_dur = seg.target_duration
+
+                if target_dur is not None and target_dur > 0:
+                    target_token_count = max(1, round(target_dur / SECS_PER_TOKEN))
+                    comfort = _comfort_score(natural_dur, target_dur, comfort_steepness)
+
+                    # Always resample to hit the target duration.
+                    # The comfort score signals Gemini when the ratio is
+                    # extreme — but a sped-up/slowed-down segment is always
+                    # better than a hard truncation or dead air.
+                    resampled = _resample_tokens(orig_tokens, target_token_count)
+
+                    actual_dur = len(resampled) * SECS_PER_TOKEN
+                else:
+                    resampled = orig_tokens
+                    actual_dur = natural_dur
+                    comfort = 0.5
+
+                speech_seg_data[id(seg)] = dict(
+                    orig_tokens=orig_tokens,
+                    resampled=resampled,
+                    natural_dur=natural_dur,
+                    actual_dur=actual_dur,
+                    comfort=comfort,
+                )
+
+                logger.info(
+                    "  Seg [%s…]: %d→%d tokens (%.2fs→%.2fs) comfort=%.2f",
+                    seg.text[:30], len(orig_tokens), len(resampled),
+                    natural_dur, actual_dur, comfort,
+                )
+
+        # ── 5. Single S3Gen pass on ALL resampled tokens ─────────────────
+        #
+        # Concatenate resampled tokens from ALL groups into one stream.
+        # S3Gen sees one continuous input → one coherent waveform.
+        # This avoids S3Gen's startup trim_fade (~40ms muting) eating
+        # the opening syllable of groups after silence gaps.
+        #
+        # Silence is inserted at the waveform level by placing each
+        # segment's audio slice at its absolute timestamp.
+
+        all_resampled = torch.cat(
+            [speech_seg_data[id(seg)]["resampled"] for seg in speech_segments]
+        )
+        logger.info("S3Gen: %d total resampled tokens", len(all_resampled))
+
+        full_wav_tensor = self.model.speech_tokens_to_wav(
+            all_resampled, apply_watermark=False
+        )
+        full_wav_np = full_wav_tensor.squeeze(0).numpy().astype(np.float32)
+
+        # ── 6. Assemble final audio with absolute positioning ────────────
 
         # Determine which segments border silence (for fades)
         borders_silence_after = set()
@@ -418,43 +457,11 @@ class TimedChatterboxTTS:
         final_wav = np.zeros(total_out_samples, dtype=np.float32)
         segment_results: List[SegmentResult] = []
 
-        # Place each group's audio, slicing per-segment within the group
-        for group in groups:
-            group_audio = group_wavs[id(group[0])]
-            sample_cursor = 0  # position within this group's audio
+        # Slice per-segment from the single S3Gen output and place at
+        # absolute positions.  sample_cursor tracks our position within
+        # the continuous full_wav_np.
+        sample_cursor = 0
 
-            for seg in group:
-                d = speech_seg_data[id(seg)]
-                seg_samples = len(d["resampled"]) * SAMPLES_PER_TOKEN
-                seg_audio = group_audio[sample_cursor:sample_cursor + seg_samples]
-                sample_cursor += seg_samples
-
-                # Apply silence-boundary fades
-                if id(seg) in borders_silence_after:
-                    seg_audio = _apply_fade_out(seg_audio, self.sr)
-                if id(seg) in borders_silence_before:
-                    seg_audio = _apply_fade_in(seg_audio, self.sr)
-
-                # Place at absolute position
-                write_start = int(round(seg.start_time * self.sr))
-                write_end = min(write_start + len(seg_audio), total_out_samples)
-                n = write_end - write_start
-                if n > 0:
-                    final_wav[write_start:write_end] = seg_audio[:n]
-
-                segment_results.append(SegmentResult(
-                    text=seg.text,
-                    start_time=seg.start_time,
-                    end_time=seg.start_time + d["actual_dur"],
-                    target_duration=seg.target_duration,
-                    natural_duration=round(d["natural_dur"], 4),
-                    actual_duration=round(d["actual_dur"], 4),
-                    tokens_original=len(d["orig_tokens"]),
-                    tokens_resampled=len(d["resampled"]),
-                    comfort=round(d["comfort"], 3),
-                ))
-
-        # Add silence segment results
         for seg in segments:
             if seg.is_silence:
                 dur = seg.target_duration or 0.0
@@ -466,6 +473,53 @@ class TimedChatterboxTTS:
                     tokens_original=0, tokens_resampled=0,
                     comfort=0.5,
                 ))
+                continue
+
+            d = speech_seg_data[id(seg)]
+            seg_samples = len(d["resampled"]) * SAMPLES_PER_TOKEN
+            seg_audio = full_wav_np[sample_cursor:sample_cursor + seg_samples]
+            sample_cursor += seg_samples
+
+            # Apply silence-boundary fades
+            if id(seg) in borders_silence_after:
+                seg_audio = _apply_fade_out(seg_audio, self.sr)
+            if id(seg) in borders_silence_before:
+                seg_audio = _apply_fade_in(seg_audio, self.sr)
+
+            # If audio overflows the target window, truncate with fade-out
+            if seg.end_time is not None:
+                max_samples = int(round(seg.target_duration * self.sr))
+                if len(seg_audio) > max_samples and max_samples > 0:
+                    fade_len = min(
+                        int(self.sr * _SILENCE_FADE_MS / 1000),
+                        max_samples
+                    )
+                    seg_audio = seg_audio.copy()
+                    if fade_len > 1:
+                        t = np.linspace(0, np.pi / 2, fade_len, dtype=np.float32)
+                        seg_audio[max_samples - fade_len:max_samples] *= np.cos(t) ** 2
+                    seg_audio = seg_audio[:max_samples]
+
+            # Place at absolute position
+            write_start = int(round(seg.start_time * self.sr))
+            write_end = min(write_start + len(seg_audio), total_out_samples)
+            n = write_end - write_start
+            if n > 0:
+                final_wav[write_start:write_end] = seg_audio[:n]
+
+            actual_dur = len(seg_audio) / self.sr
+
+            segment_results.append(SegmentResult(
+                text=seg.text,
+                start_time=seg.start_time,
+                end_time=seg.start_time + actual_dur,
+                target_duration=seg.target_duration,
+                natural_duration=round(d["natural_dur"], 4),
+                actual_duration=round(actual_dur, 4),
+                tokens_original=len(d["orig_tokens"]),
+                tokens_resampled=len(d["resampled"]),
+                comfort=round(d["comfort"], 3),
+            ))
 
         # Sort results by start_time (speech + silence interleaved)
         segment_results.sort(key=lambda r: r.start_time)
