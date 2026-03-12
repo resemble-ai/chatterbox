@@ -509,12 +509,12 @@ class ChatterboxTTS:
     def generate_speech_tokens_batch(
         self,
         texts: List[str],
-        exaggeration=0.5,
-        cfg_weight=0.5,
-        temperature=0.8,
-        repetition_penalty=1.2,
-        min_p=0.05,
-        top_p=1.0,
+        exaggeration: Union[float, List[float]] = 0.5,
+        cfg_weight: Union[float, List[float]] = 0.5,
+        temperature: Union[float, List[float]] = 0.8,
+        repetition_penalty: float = 1.2,
+        min_p: float = 0.05,
+        top_p: float = 1.0,
         num_return_sequences: int = 1,
     ) -> List[torch.Tensor]:
         """
@@ -522,6 +522,9 @@ class ChatterboxTTS:
 
         With ``num_return_sequences=N``, returns ``len(texts) * N`` tensors:
         consecutive N results per text (text0_v0, text0_v1, …, text1_v0, …).
+
+        ``exaggeration``, ``cfg_weight``, and ``temperature`` accept either a
+        single float (applied uniformly) or a list of floats (one per text).
 
         Unlike :meth:`generate_speech_tokens`, this method does **not**
         mutate ``self.conds`` — it creates local copies for expansion.
@@ -534,6 +537,18 @@ class ChatterboxTTS:
             self.conds = self.conds.to(device=self.device, dtype=self.dtype)
 
         batch_size = len(texts)
+
+        # ── Normalise per-item params to lists ───────────────────────────
+        if isinstance(exaggeration, (int, float)):
+            exaggeration = [float(exaggeration)] * batch_size
+        if isinstance(cfg_weight, (int, float)):
+            cfg_weight = [float(cfg_weight)] * batch_size
+        if isinstance(temperature, (int, float)):
+            temperature = [float(temperature)] * batch_size
+
+        assert len(exaggeration) == batch_size, f"exaggeration list length {len(exaggeration)} != batch_size {batch_size}"
+        assert len(cfg_weight) == batch_size, f"cfg_weight list length {len(cfg_weight)} != batch_size {batch_size}"
+        assert len(temperature) == batch_size, f"temperature list length {len(temperature)} != batch_size {batch_size}"
 
         # ── Local copy of T3 conditioning (never mutate self.conds) ──
         t3_cond = T3Cond(**{
@@ -552,16 +567,11 @@ class ChatterboxTTS:
                 t3_cond.cond_prompt_speech_tokens = (
                     t3_cond.cond_prompt_speech_tokens.expand(batch_size, -1)
                 )
-            if t3_cond.emotion_adv is not None:
-                t3_cond.emotion_adv = t3_cond.emotion_adv.expand(
-                    batch_size, -1, -1
-                )
 
-        # Set exaggeration
-        if t3_cond.emotion_adv is not None and t3_cond.emotion_adv.numel() > 0:
-            t3_cond.emotion_adv = exaggeration * torch.ones(
-                batch_size, 1, 1, device=self.device, dtype=self.dtype
-            )
+        # ── Per-item emotion_adv from exaggeration list ──────────────
+        t3_cond.emotion_adv = torch.tensor(
+            exaggeration, device=self.device, dtype=self.dtype
+        ).view(batch_size, 1, 1)
 
         # Tokenize + pad
         normed = [punc_norm(t) for t in texts]
@@ -569,6 +579,10 @@ class ChatterboxTTS:
         text_tokens = torch.nn.utils.rnn.pad_sequence(
             tokenized, batch_first=True, padding_value=0
         ).to(self.device)
+
+        # ── Build per-item cfg_weight / temperature tensors ──────────
+        cfg_weight_t = torch.tensor(cfg_weight, device=self.device, dtype=self.dtype)
+        temperature_t = torch.tensor(temperature, device=self.device, dtype=self.dtype)
 
         # num_return_sequences expansion
         if num_return_sequences > 1:
@@ -580,9 +594,12 @@ class ChatterboxTTS:
                 if torch.is_tensor(v) else v
                 for k, v in t3_cond.__dict__.items()
             })
+            cfg_weight_t = cfg_weight_t.repeat_interleave(num_return_sequences)
+            temperature_t = temperature_t.repeat_interleave(num_return_sequences)
 
-        # CFG duplication
-        if cfg_weight > 0.0:
+        # CFG duplication — needed if ANY item uses CFG
+        _any_cfg = bool(cfg_weight_t.max().item() > 0)
+        if _any_cfg:
             text_tokens = torch.cat([text_tokens, text_tokens], dim=0)
             t3_cond = T3Cond(**{
                 k: torch.cat([v, v], dim=0) if torch.is_tensor(v) else v
@@ -594,13 +611,14 @@ class ChatterboxTTS:
         text_tokens = F.pad(text_tokens, (1, 0), value=sot)
         text_tokens = F.pad(text_tokens, (0, 1), value=eot)
 
+        # Pass per-item tensors to T3 — it handles (B_orig,1) broadcasting
         with torch.inference_mode():
             speech_tokens_list = self.t3.inference(
                 t3_cond=t3_cond,
                 text_tokens=text_tokens,
                 max_new_tokens=1000,
-                temperature=temperature,
-                cfg_weight=cfg_weight,
+                temperature=temperature_t,
+                cfg_weight=cfg_weight_t if _any_cfg else 0.0,
                 repetition_penalty=repetition_penalty,
                 min_p=min_p,
                 top_p=top_p,

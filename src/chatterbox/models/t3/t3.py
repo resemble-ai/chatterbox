@@ -257,10 +257,16 @@ class T3(nn.Module):
         _ensure_BOT_EOT(text_tokens, self.hp)
         text_tokens = torch.atleast_2d(text_tokens).to(dtype=torch.long, device=self.device)
         
-        # Determine original batch size (B_orig) before CFG duplication
+        # Determine original batch size (B_orig) before CFG duplication.
+        # cfg_weight may be a scalar OR a (B_orig,) / (B_orig,1) tensor
+        # for per-item control.  _use_cfg is True when ANY item needs CFG.
         B_total = text_tokens.size(0)
-        if cfg_weight > 0.0:
-            # Inputs are expected to be already duplicated if CFG is used (handled in ChatterboxTTS.generate)
+        if torch.is_tensor(cfg_weight):
+            _use_cfg = bool(cfg_weight.max().item() > 0)
+        else:
+            _use_cfg = cfg_weight > 0.0
+
+        if _use_cfg:
             if B_total % 2 != 0:
                  raise ValueError("Batch size must be even when using CFG due to input duplication.")
             B_orig = B_total // 2
@@ -282,7 +288,7 @@ class T3(nn.Module):
             t3_cond=t3_cond,
             text_tokens=text_tokens,
             speech_tokens=initial_speech_tokens,
-            cfg_weight=cfg_weight,
+            cfg_weight=_use_cfg,
         )
 
         # Initialize the Huggingface backend if not already done
@@ -355,7 +361,22 @@ class T3(nn.Module):
 
         # [PERF] Pre-hoist tensors that would cause GPU/CPU sync if created inside the loop
         _stop_token_t = torch.tensor(self.hp.stop_speech_token, device=device, dtype=torch.long)
-        _cfg_weight_t = torch.as_tensor(cfg_weight, device=device, dtype=embeds.dtype) if cfg_weight > 0.0 else None
+
+        # cfg_weight → (B_orig, 1) tensor for per-item broadcasting
+        if _use_cfg:
+            if torch.is_tensor(cfg_weight):
+                _cfg_weight_t = cfg_weight.to(device=device, dtype=embeds.dtype).reshape(B_orig, 1)
+            else:
+                _cfg_weight_t = torch.full((B_orig, 1), cfg_weight, device=device, dtype=embeds.dtype)
+        else:
+            _cfg_weight_t = None
+
+        # temperature → (B_orig, 1) tensor for per-item broadcasting
+        if torch.is_tensor(temperature):
+            _temperature_t = temperature.to(device=device, dtype=embeds.dtype).reshape(B_orig, 1)
+        else:
+            _temperature_t = torch.full((B_orig, 1), temperature, device=device, dtype=embeds.dtype)
+
         if self.hp.input_pos_emb == "learned":
             _pos_indices = torch.arange(len_initial_speech, len_initial_speech + max_new_tokens, device=device, dtype=torch.long)
 
@@ -364,7 +385,7 @@ class T3(nn.Module):
             logits_step = output.logits[:, -1, :] # (B_total, V)
                             
             # --- CFG combination ---
-            if cfg_weight > 0.0:
+            if _use_cfg:
                 # Split the logits (B_total, V) into conditional and unconditional parts
                 cond, uncond = torch.split(logits_step, B_orig, dim=0)
                 logits = cond + _cfg_weight_t * (cond - uncond) # (B_orig, V)
@@ -386,9 +407,8 @@ class T3(nn.Module):
             # Apply repetition penalty
             logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B_orig, V)
             
-            # Apply temperature scaling.
-            if temperature != 1.0:
-                logits = logits / temperature
+            # Apply temperature scaling (tensor broadcasts per-item).
+            logits = logits / _temperature_t
                 
             # Apply min_p and top_p filtering
             logits = min_p_warper(ids_for_proc, logits)
@@ -431,7 +451,7 @@ class T3(nn.Module):
                 next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(_pos_indices[i])
 
             # For CFG, duplicate the embeddings for the full batch (B_total)
-            if cfg_weight > 0.0:
+            if _use_cfg:
                 # Unconditional part uses the same embeddings as the conditional part for the next step input
                 next_token_embed = torch.cat([next_token_embed, next_token_embed], dim=0)
 

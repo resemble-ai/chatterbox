@@ -73,8 +73,9 @@ AUDIO_PROMPT = "C:/_myDrive/repos/auto-vlog/assets/audio_sample1.wav"   # ← re
 #   - ~2-3× faster than calling generate() 6 times sequentially
 
 texts_batch = [
-    "This is the first sentence <2.000>to be synthesized in a batch.",
-    "This is the second one.<1.500>"
+    "This is the first sentence to be synthesized in a batch.",
+    "This is the second one.",
+    "And the dramatic third! Wow! It is so long that it lasts much, much longer than the preceding sentences! Check it for glitches.",
 ]
 
 num_variants = 3
@@ -84,13 +85,15 @@ print(f"\n=== Batched generation: {len(texts_batch)} scripts × {num_variants} v
 # Prepare conditioning once (shared across all scripts + variants)
 model.prepare_conditionals(AUDIO_PROMPT, exaggeration=0.7)
 
+
 batch_results = timed.generate_batch(
     texts_batch,
-    exaggeration=0.7,
-    cfg_weight=0.3,
-    temperature=0.8,
-    num_return_sequences=num_variants,
+    exaggeration=[0.5, 0.7, 0.9],    # calm → expressive → very dramatic
+    cfg_weight=[0.5, 0.3, 0.2],       # tight → loose → very loose guidance
+    temperature=[0.7, 0.8, 0.9],      # conservative → creative sampling
+    num_return_sequences=3,
 )
+
 
 # batch_results: List[List[TimedResult]]
 #   batch_results[script_idx][variant_idx].wav  → (1, N) tensor
@@ -111,31 +114,31 @@ for s_idx, variant_list in enumerate(batch_results):
         print(f"  Script {s_idx+1} v{v_idx+1}: {scores}")
 
 
-# ════
-# PART 3 — Batched with silence gaps
-# ════
+# # ════
+# # PART 3 — Batched with silence gaps
+# # ════
 
-scripts_with_silence = [
-    "And here we go! <2.000> <4.000> Back to action! <6.000> The end.",
-    "A quiet <1.500> <3.000> then sudden excitement! <4.500> Wow!",
-]
+# scripts_with_silence = [
+#     "And here we go! <2.000> <4.000> Back to action! <6.000> The end.",
+#     "A quiet <1.500> <3.000> then sudden excitement! <4.500> Wow!",
+# ]
 
-print(f"\n=== Batched with silence gaps: {len(scripts_with_silence)} scripts × 2 variants ===")
+# print(f"\n=== Batched with silence gaps: {len(scripts_with_silence)} scripts × 2 variants ===")
 
-batch_results2 = timed.generate_batch(
-    scripts_with_silence,
-    exaggeration=0.7,
-    cfg_weight=0.3,
-    num_return_sequences=2,
-)
+# batch_results2 = timed.generate_batch(
+#     scripts_with_silence,
+#     exaggeration=0.7,
+#     cfg_weight=0.3,
+#     num_return_sequences=2,
+# )
 
-for s_idx, variant_list in enumerate(batch_results2):
-    for v_idx, result in enumerate(variant_list):
-        fname = f"batch_silence_s{s_idx+1}_v{v_idx+1}.wav"
-        fpath = os.path.join(OUTPUT_DIR, fname)
-        ta.save(fpath, result.wav, result.sr)
-        print(f"\n  Script {s_idx+1}, Variant {v_idx+1}: {fpath}")
-        print_comfort_report(result.segments)
+# for s_idx, variant_list in enumerate(batch_results2):
+#     for v_idx, result in enumerate(variant_list):
+#         fname = f"batch_silence_s{s_idx+1}_v{v_idx+1}.wav"
+#         fpath = os.path.join(OUTPUT_DIR, fname)
+#         ta.save(fpath, result.wav, result.sr)
+#         print(f"\n  Script {s_idx+1}, Variant {v_idx+1}: {fpath}")
+#         print_comfort_report(result.segments)
 
 
 # ════
