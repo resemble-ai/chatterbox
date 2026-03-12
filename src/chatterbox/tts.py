@@ -503,3 +503,172 @@ class ChatterboxTTS:
         if apply_watermark:
             trimmed = self.watermarker.apply_watermark(trimmed, sample_rate=self.sr)
         return torch.from_numpy(trimmed).unsqueeze(0)  # (1, N)
+
+    # ── Batched token generation ────────────────────────────────────────
+
+    def generate_speech_tokens_batch(
+        self,
+        texts: List[str],
+        exaggeration=0.5,
+        cfg_weight=0.5,
+        temperature=0.8,
+        repetition_penalty=1.2,
+        min_p=0.05,
+        top_p=1.0,
+        num_return_sequences: int = 1,
+    ) -> List[torch.Tensor]:
+        """
+        Run T3 on a batch of texts — returns one 1-D LongTensor per item.
+
+        With ``num_return_sequences=N``, returns ``len(texts) * N`` tensors:
+        consecutive N results per text (text0_v0, text0_v1, …, text1_v0, …).
+
+        Unlike :meth:`generate_speech_tokens`, this method does **not**
+        mutate ``self.conds`` — it creates local copies for expansion.
+        """
+        assert self.conds is not None, (
+            "Call prepare_conditionals() first."
+        )
+
+        if self.conds.t3.speaker_emb.dtype != self.dtype:
+            self.conds = self.conds.to(device=self.device, dtype=self.dtype)
+
+        batch_size = len(texts)
+
+        # ── Local copy of T3 conditioning (never mutate self.conds) ──
+        t3_cond = T3Cond(**{
+            k: v.clone() if torch.is_tensor(v) else v
+            for k, v in self.conds.t3.__dict__.items()
+        })
+
+        # Expand from bs=1 → batch_size
+        if t3_cond.speaker_emb.size(0) == 1 and batch_size > 1:
+            t3_cond.speaker_emb = t3_cond.speaker_emb.expand(batch_size, -1, -1)
+            if t3_cond.cond_prompt_speech_emb is not None:
+                t3_cond.cond_prompt_speech_emb = (
+                    t3_cond.cond_prompt_speech_emb.expand(batch_size, -1, -1)
+                )
+            if t3_cond.cond_prompt_speech_tokens is not None:
+                t3_cond.cond_prompt_speech_tokens = (
+                    t3_cond.cond_prompt_speech_tokens.expand(batch_size, -1)
+                )
+            if t3_cond.emotion_adv is not None:
+                t3_cond.emotion_adv = t3_cond.emotion_adv.expand(
+                    batch_size, -1, -1
+                )
+
+        # Set exaggeration
+        if t3_cond.emotion_adv is not None and t3_cond.emotion_adv.numel() > 0:
+            t3_cond.emotion_adv = exaggeration * torch.ones(
+                batch_size, 1, 1, device=self.device, dtype=self.dtype
+            )
+
+        # Tokenize + pad
+        normed = [punc_norm(t) for t in texts]
+        tokenized = [self.tokenizer.text_to_tokens(t).squeeze(0) for t in normed]
+        text_tokens = torch.nn.utils.rnn.pad_sequence(
+            tokenized, batch_first=True, padding_value=0
+        ).to(self.device)
+
+        # num_return_sequences expansion
+        if num_return_sequences > 1:
+            text_tokens = text_tokens.repeat_interleave(
+                num_return_sequences, dim=0
+            )
+            t3_cond = T3Cond(**{
+                k: v.repeat_interleave(num_return_sequences, dim=0)
+                if torch.is_tensor(v) else v
+                for k, v in t3_cond.__dict__.items()
+            })
+
+        # CFG duplication
+        if cfg_weight > 0.0:
+            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)
+            t3_cond = T3Cond(**{
+                k: torch.cat([v, v], dim=0) if torch.is_tensor(v) else v
+                for k, v in t3_cond.__dict__.items()
+            })
+
+        sot = self.t3.hp.start_text_token
+        eot = self.t3.hp.stop_text_token
+        text_tokens = F.pad(text_tokens, (1, 0), value=sot)
+        text_tokens = F.pad(text_tokens, (0, 1), value=eot)
+
+        with torch.inference_mode():
+            speech_tokens_list = self.t3.inference(
+                t3_cond=t3_cond,
+                text_tokens=text_tokens,
+                max_new_tokens=1000,
+                temperature=temperature,
+                cfg_weight=cfg_weight,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
+            )
+
+        padded = torch.nn.utils.rnn.pad_sequence(
+            speech_tokens_list, batch_first=True,
+            padding_value=self.t3.hp.stop_speech_token,
+        )
+        clean_list = drop_invalid_tokens(padded)
+        return [t.cpu() for t in clean_list]
+
+    # ── Batched vocoding ─────────────────────────────────────────────
+
+    def speech_tokens_to_wav_batch(
+        self,
+        token_list: List[torch.Tensor],
+        apply_watermark: bool = True,
+    ) -> List[torch.Tensor]:
+        """
+        Vocode a list of variable-length 1-D token tensors in one S3Gen pass.
+
+        Returns a list of ``(1, num_samples)`` tensors, one per input.
+        Does **not** mutate ``self.conds``.
+        """
+        assert self.conds is not None, "Conditioning not prepared"
+
+        batch_size = len(token_list)
+        if batch_size == 0:
+            return []
+
+        # ── Local copy of gen_cond, expanded to batch_size ──
+        gen_cond = {}
+        for k, v in self.conds.gen.items():
+            if torch.is_tensor(v):
+                if v.size(0) == 1 and batch_size > 1:
+                    if k.endswith("_len"):
+                        gen_cond[k] = v.expand(batch_size)
+                    else:
+                        gen_cond[k] = v.expand(batch_size, *v.shape[1:])
+                else:
+                    gen_cond[k] = v
+            else:
+                gen_cond[k] = v
+
+        # Pad token sequences
+        tokens_padded = torch.nn.utils.rnn.pad_sequence(
+            token_list, batch_first=True, padding_value=0
+        ).to(self.device)
+        token_lens = torch.tensor(
+            [len(t) for t in token_list], device=self.device
+        )
+
+        with torch.inference_mode():
+            wavs, _ = self.s3gen.inference(
+                speech_tokens=tokens_padded,
+                speech_token_lens=token_lens,
+                ref_dict=gen_cond,
+            )
+
+        audio_lengths = token_lens * TOKEN_TO_WAV_RATIO
+        results = []
+        for i, wav in enumerate(wavs):
+            trimmed = wav[:audio_lengths[i]].cpu().float().numpy()
+            if apply_watermark:
+                trimmed = self.watermarker.apply_watermark(
+                    trimmed, sample_rate=self.sr
+                )
+            results.append(torch.from_numpy(trimmed).unsqueeze(0))
+
+        return results
