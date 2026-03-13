@@ -565,9 +565,10 @@ class TimedChatterboxTTS:
         segment_results.sort(key=lambda r: r.start_time)
 
         # Apply watermark once on the complete assembled audio
-        final_wav = self.model.watermarker.apply_watermark(
-            final_wav, sample_rate=self.sr
-        )
+        if self.model.apply_watermark:
+            final_wav = self.model.watermarker.apply_watermark(
+                final_wav, sample_rate=self.sr
+            )
 
         final_tensor = torch.from_numpy(final_wav).unsqueeze(0)
         return TimedResult(
@@ -949,9 +950,10 @@ class TimedChatterboxTTS:
                 segment_results.sort(key=lambda r: r.start_time)
  
                 # Apply watermark once on the complete assembled audio
-                final_wav = self.model.watermarker.apply_watermark(
-                    final_wav, sample_rate=self.sr
-                )
+                if self.model.apply_watermark:
+                    final_wav = self.model.watermarker.apply_watermark(
+                        final_wav, sample_rate=self.sr
+                    )
  
                 variant_results.append(TimedResult(
                     wav=torch.from_numpy(final_wav).unsqueeze(0),

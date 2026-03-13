@@ -127,6 +127,7 @@ class ChatterboxTTS:
         device: str,
         conds: Conditionals = None,
         dtype: torch.dtype = torch.float32, # Add dtype tracking
+        apply_watermark=True
     ):
         self.sr = S3GEN_SR
         self.t3 = t3
@@ -137,6 +138,7 @@ class ChatterboxTTS:
         self.conds = conds
         self.dtype = dtype # Store the dtype
         self.watermarker = perth.PerthImplicitWatermarker()
+        self.apply_watermark = apply_watermark
 
     @classmethod
     def from_local(cls, ckpt_dir, device, dtype=torch.float32, compile_model=False) -> 'ChatterboxTTS':
@@ -381,7 +383,7 @@ class ChatterboxTTS:
             for i, wav in enumerate(wavs):
                 # Ensure output is FP32 for watermarking/saving compatibility
                 trimmed_wav = wav[:audio_lengths[i]].cpu().float().numpy()
-                watermarked_wav = self.watermarker.apply_watermark(trimmed_wav, sample_rate=self.sr)
+                watermarked_wav = self.watermarker.apply_watermark(trimmed_wav, sample_rate=self.sr) if self.apply_watermark else trimmed_wav
                 output_tensors.append(torch.from_numpy(watermarked_wav).unsqueeze(0))
 
         if num_return_sequences > 1:
@@ -500,7 +502,7 @@ class ChatterboxTTS:
 
         audio_length = num_tokens * TOKEN_TO_WAV_RATIO
         trimmed = wavs[0, :audio_length].cpu().float().numpy()
-        if apply_watermark:
+        if apply_watermark and self.apply_watermark:
             trimmed = self.watermarker.apply_watermark(trimmed, sample_rate=self.sr)
         return torch.from_numpy(trimmed).unsqueeze(0)  # (1, N)
 
