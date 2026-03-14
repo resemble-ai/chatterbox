@@ -141,7 +141,7 @@ class ChatterboxTTS:
         self.apply_watermark = apply_watermark
 
     @classmethod
-    def from_local(cls, ckpt_dir, device, dtype=torch.float32, compile_model=False) -> 'ChatterboxTTS':
+    def from_local(cls, ckpt_dir, device, dtype=torch.float32, compile_model=False, apply_watermark=True) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
 
         # Handle device mapping and enforce FP32 on non-CUDA devices
@@ -203,10 +203,10 @@ class ChatterboxTTS:
             # Load and cast conditionals using the updated .to() method
             conds = Conditionals.load(builtin_voice, map_location=map_location).to(device=device, dtype=dtype)
 
-        return cls(t3, s3gen, ve, tokenizer, device, conds=conds, dtype=dtype)
+        return cls(t3, s3gen, ve, tokenizer, device, conds=conds, dtype=dtype, apply_watermark=apply_watermark)
 
     @classmethod
-    def from_pretrained(cls, device, use_bf16=True, compile_model=False) -> 'ChatterboxTTS':
+    def from_pretrained(cls, device, use_bf16=True, compile_model=False, apply_watermark=True) -> 'ChatterboxTTS':
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -229,7 +229,7 @@ class ChatterboxTTS:
         for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 
-        return cls.from_local(Path(local_path).parent, device, dtype=dtype, compile_model=compile_model)
+        return cls.from_local(Path(local_path).parent, device, dtype=dtype, compile_model=compile_model, apply_watermark=apply_watermark)
 
     def prepare_conditionals(self, wav_fpaths: Union[str, List[str]], exaggeration=0.5):
         if isinstance(wav_fpaths, str):
