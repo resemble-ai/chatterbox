@@ -7,3 +7,4 @@ S3GEN_SR = 24000
 # 1 mel frame -> 480 audio samples (hop_size in hifigan)
 # Total: 2 * 480 = 960
 TOKEN_TO_WAV_RATIO = 960
+TOKEN_MEL_RATIO = 2        # each speech token -> 2 mel frames in the flow model

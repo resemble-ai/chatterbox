@@ -506,6 +506,148 @@ class ChatterboxTTS:
             trimmed = self.watermarker.apply_watermark(trimmed, sample_rate=self.sr)
         return torch.from_numpy(trimmed).unsqueeze(0)  # (1, N)
 
+    # ── Mel-level methods (for timed TTS) ──────────────────────────────
+
+    def speech_tokens_to_mel(
+        self,
+        speech_tokens: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Run S3Gen flow model only — tokens to mel spectrogram.
+
+        Returns shape ``(1, 80, num_tokens * 2)`` on GPU.
+        """
+        assert self.conds is not None, "Conditioning not prepared"
+        gen_cond = self.conds.gen
+
+        tokens_2d = speech_tokens.unsqueeze(0).to(self.device)
+        num_tokens = tokens_2d.size(1)
+        token_lens = torch.tensor([num_tokens], device=self.device)
+
+        with torch.inference_mode():
+            mel = self.s3gen.flow_inference(
+                speech_tokens=tokens_2d,
+                speech_token_lens=token_lens,
+                ref_dict=gen_cond,
+                finalize=True,
+            )
+        return mel  # (1, 80, mel_frames)
+
+    def mel_to_wav(
+        self,
+        mel: torch.Tensor,
+        apply_trim_fade: bool = True,
+    ) -> torch.Tensor:
+        """
+        Run S3Gen HiFi-GAN only — mel spectrogram to waveform.
+
+        Parameters
+        ----------
+        mel : torch.Tensor
+            Shape ``(1, 80, mel_frames)``.
+
+        Returns shape ``(1, num_samples)`` at 24 kHz.
+        """
+        expected_samples = mel.size(2) * (TOKEN_TO_WAV_RATIO // 2)
+
+        with torch.inference_mode():
+            wavs, _ = self.s3gen.hift_inference(mel)
+
+        wavs = wavs.clone()
+        if apply_trim_fade:
+            trim_len = min(len(self.s3gen.trim_fade), wavs.shape[1])
+            wavs[:, :trim_len] *= self.s3gen.trim_fade[:trim_len]
+
+        trimmed = wavs[0, :expected_samples].cpu().float()
+        return trimmed.unsqueeze(0)  # (1, N)
+
+    def speech_tokens_to_mel_batch(
+        self,
+        token_list: List[torch.Tensor],
+    ) -> List[torch.Tensor]:
+        """
+        Batched flow: list of 1-D token tensors → list of ``(80, mel_frames)`` mels.
+        Does **not** mutate ``self.conds``.
+        """
+        assert self.conds is not None, "Conditioning not prepared"
+
+        batch_size = len(token_list)
+        if batch_size == 0:
+            return []
+
+        # Local copy of gen_cond, expanded to batch_size
+        gen_cond = {}
+        for k, v in self.conds.gen.items():
+            if torch.is_tensor(v):
+                if v.size(0) == 1 and batch_size > 1:
+                    if k.endswith("_len"):
+                        gen_cond[k] = v.expand(batch_size)
+                    else:
+                        gen_cond[k] = v.expand(batch_size, *v.shape[1:])
+                else:
+                    gen_cond[k] = v
+            else:
+                gen_cond[k] = v
+
+        tokens_padded = torch.nn.utils.rnn.pad_sequence(
+            token_list, batch_first=True, padding_value=0
+        ).to(self.device)
+        token_lens = torch.tensor(
+            [len(t) for t in token_list], device=self.device
+        )
+
+        with torch.inference_mode():
+            mels = self.s3gen.flow_inference(
+                speech_tokens=tokens_padded,
+                speech_token_lens=token_lens,
+                ref_dict=gen_cond,
+                finalize=True,
+            )
+
+        # mels: (B, 80, max_mel_frames) — trim each to actual length
+        results = []
+        for i in range(batch_size):
+            mel_frames = token_lens[i].item() * 2  # TOKEN_MEL_RATIO = 2
+            results.append(mels[i, :, :mel_frames])  # (80, mel_frames)
+        return results
+
+    def mel_to_wav_batch(
+        self,
+        mel_list: List[torch.Tensor],
+        apply_trim_fade: bool = True,
+    ) -> List[torch.Tensor]:
+        """
+        Batched HiFi-GAN: list of ``(80, mel_frames)`` mels → list of ``(1, N)`` wavs.
+        """
+        batch_size = len(mel_list)
+        if batch_size == 0:
+            return []
+
+        mel_lens = [m.size(1) for m in mel_list]
+        max_mel = max(mel_lens)
+
+        # Pad mels to uniform length: (B, 80, max_mel)
+        padded = torch.zeros(batch_size, mel_list[0].size(0), max_mel,
+                             device=mel_list[0].device, dtype=mel_list[0].dtype)
+        for i, m in enumerate(mel_list):
+            padded[i, :, :m.size(1)] = m
+
+        with torch.inference_mode():
+            wavs, _ = self.s3gen.hift_inference(padded)
+
+        wavs = wavs.clone()
+        if apply_trim_fade:
+            trim_len = min(len(self.s3gen.trim_fade), wavs.shape[1])
+            wavs[:, :trim_len] *= self.s3gen.trim_fade[:trim_len]
+
+        samples_per_mel = TOKEN_TO_WAV_RATIO // 2  # 480
+        results = []
+        for i in range(batch_size):
+            expected = mel_lens[i] * samples_per_mel
+            trimmed = wavs[i, :expected].cpu().float()
+            results.append(trimmed.unsqueeze(0))
+        return results
+
     # ── Batched token generation ────────────────────────────────────────
 
     def generate_speech_tokens_batch(

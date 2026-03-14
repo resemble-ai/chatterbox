@@ -55,7 +55,7 @@ import numpy as np
 import torch
 
 from .tts import ChatterboxTTS, punc_norm
-from .models.s3gen.const import S3GEN_SR, TOKEN_TO_WAV_RATIO
+from .models.s3gen.const import S3GEN_SR, TOKEN_TO_WAV_RATIO, TOKEN_MEL_RATIO
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,9 @@ logger = logging.getLogger(__name__)
 
 SECS_PER_TOKEN = TOKEN_TO_WAV_RATIO / S3GEN_SR    # 0.04 s
 SAMPLES_PER_TOKEN = TOKEN_TO_WAV_RATIO             # 960
+MEL_FRAMES_PER_TOKEN = TOKEN_MEL_RATIO             # 2
+SAMPLES_PER_MEL_FRAME = TOKEN_TO_WAV_RATIO // TOKEN_MEL_RATIO  # 480
+MEL_FRAMES_PER_SEC = S3GEN_SR / SAMPLES_PER_MEL_FRAME          # 50.0
 
 # Comfort estimation heuristic: average speech tokens per text token.
 _AVG_SPEECH_TOKENS_PER_TEXT_TOKEN = 2.1
@@ -203,6 +206,32 @@ def _resample_tokens(tokens: torch.Tensor, target_len: int) -> torch.Tensor:
         return tokens
     indices = torch.linspace(0, n - 1, target_len).round().long()
     return tokens[indices]
+
+
+# ── Mel-level resampling ─────────────────────────────────────────────────────
+
+def _resample_mel(mel: torch.Tensor, target_mel_frames: int) -> torch.Tensor:
+    """
+    Smoothly resize a mel spectrogram slice along the time axis.
+
+    mel : shape ``(channels, mel_frames)``
+    Returns ``(channels, target_mel_frames)``.
+
+    Linear interpolation on continuous mel values produces smooth
+    time-stretching — no discrete-token artifacts.
+    """
+    n = mel.size(1)
+    if n == 0 or target_mel_frames <= 0:
+        return mel[:, :0]
+    if target_mel_frames == n:
+        return mel
+    out = torch.nn.functional.interpolate(
+        mel.unsqueeze(0),                     # (1, 80, n)
+        size=target_mel_frames,
+        mode='linear',
+        align_corners=False,
+    )
+    return out.squeeze(0)                     # (80, target_mel_frames)
 
 
 # ── Fade helpers (for silence-gap boundaries in final waveform) ──────────────
@@ -405,65 +434,79 @@ class TimedChatterboxTTS:
                 seg_token_ranges.append((cursor, cursor + count))
                 cursor += count
 
-            # ── 4. Resample each segment's tokens ────────────────────
+            # ── 4. Compute comfort + target mel frames per segment ───
             for seg, (tok_start, tok_end) in zip(group, seg_token_ranges):
                 orig_tokens = group_tokens[tok_start:tok_end]
                 natural_dur = len(orig_tokens) * SECS_PER_TOKEN
                 target_dur = seg.target_duration
 
                 if target_dur is not None and target_dur > 0:
-                    target_token_count = max(1, round(target_dur / SECS_PER_TOKEN))
                     comfort = _comfort_score(natural_dur, target_dur, comfort_steepness)
-
-                    # Always resample to hit the target duration.
-                    # The comfort score signals Gemini when the ratio is
-                    # extreme — but a sped-up/slowed-down segment is always
-                    # better than a hard truncation or dead air.
-                    resampled = _resample_tokens(orig_tokens, target_token_count)
-
-                    actual_dur = len(resampled) * SECS_PER_TOKEN
+                    stretched_mel_frames = max(1, round(target_dur * MEL_FRAMES_PER_SEC))
+                    actual_dur = stretched_mel_frames / MEL_FRAMES_PER_SEC
                 else:
-                    resampled = orig_tokens
-                    actual_dur = natural_dur
                     comfort = 0.5
+                    stretched_mel_frames = len(orig_tokens) * MEL_FRAMES_PER_TOKEN
+                    actual_dur = natural_dur
 
                 speech_seg_data[id(seg)] = dict(
                     orig_tokens=orig_tokens,
-                    resampled=resampled,
                     natural_dur=natural_dur,
                     actual_dur=actual_dur,
                     comfort=comfort,
+                    stretched_mel_frames=stretched_mel_frames,
                 )
 
                 logger.debug(
-                    "  Seg [%s…]: %d→%d tokens (%.2fs→%.2fs) comfort=%.2f",
-                    seg.text[:30], len(orig_tokens), len(resampled),
+                    "  Seg [%s…]: %d tokens (%.2fs→%.2fs) comfort=%.2f",
+                    seg.text[:30], len(orig_tokens),
                     natural_dur, actual_dur, comfort,
                 )
 
-        # ── 5. Single S3Gen pass on ALL resampled tokens ─────────────────
+        # ── 5. Flow on natural tokens → mel → interpolate → HiFi-GAN ────
         #
-        # Concatenate resampled tokens from ALL groups into one stream.
-        # S3Gen sees one continuous input → one coherent waveform.
-        # This avoids S3Gen's startup trim_fade (~40ms muting) eating
-        # the opening syllable of groups after silence gaps.
-        #
-        # Silence is inserted at the waveform level by placing each
-        # segment's audio slice at its absolute timestamp.
+        # Run the flow model on the NATURAL (un-resampled) token stream
+        # so it produces a clean mel spectrogram.  Then do time-stretching
+        # at the mel level (linear interpolation on continuous floats) —
+        # no discrete-token artifacts.  Finally one HiFi-GAN pass on the
+        # concatenated stretched mel → one coherent waveform.
 
-        all_resampled = torch.cat(
-            [speech_seg_data[id(seg)]["resampled"] for seg in speech_segments]
+        all_natural = torch.cat(
+            [speech_seg_data[id(seg)]["orig_tokens"] for seg in speech_segments]
         )
-        logger.debug("S3Gen: %d total resampled tokens", len(all_resampled))
+        logger.debug("Flow: %d natural tokens → mel", len(all_natural))
 
         if quiet:
             with _suppress_stdout():
-                full_wav_tensor = self.model.speech_tokens_to_wav(
-                    all_resampled, apply_watermark=False
+                full_mel = self.model.speech_tokens_to_mel(all_natural)
+        else:
+            full_mel = self.model.speech_tokens_to_mel(all_natural)
+
+        full_mel = full_mel.squeeze(0)  # (80, total_mel_frames)
+
+        # Slice mel per segment, interpolate to target, concatenate
+        mel_cursor = 0
+        stretched_mel_slices = []
+
+        for seg in speech_segments:
+            d = speech_seg_data[id(seg)]
+            natural_mel_frames = len(d["orig_tokens"]) * MEL_FRAMES_PER_TOKEN
+            mel_slice = full_mel[:, mel_cursor:mel_cursor + natural_mel_frames]
+            mel_cursor += natural_mel_frames
+            stretched = _resample_mel(mel_slice, d["stretched_mel_frames"])
+            stretched_mel_slices.append(stretched)
+
+        all_stretched_mel = torch.cat(stretched_mel_slices, dim=1)  # (80, T)
+        logger.debug("HiFi-GAN: %d stretched mel frames", all_stretched_mel.size(1))
+
+        if quiet:
+            with _suppress_stdout():
+                full_wav_tensor = self.model.mel_to_wav(
+                    all_stretched_mel.unsqueeze(0)
                 )
         else:
-            full_wav_tensor = self.model.speech_tokens_to_wav(
-                all_resampled, apply_watermark=False
+            full_wav_tensor = self.model.mel_to_wav(
+                all_stretched_mel.unsqueeze(0)
             )
         full_wav_np = full_wav_tensor.squeeze(0).numpy()
 
@@ -516,7 +559,7 @@ class TimedChatterboxTTS:
                 continue
 
             d = speech_seg_data[id(seg)]
-            seg_samples = len(d["resampled"]) * SAMPLES_PER_TOKEN
+            seg_samples = d["stretched_mel_frames"] * SAMPLES_PER_MEL_FRAME
             seg_audio = full_wav_np[sample_cursor:sample_cursor + seg_samples]
             sample_cursor += seg_samples
 
@@ -557,7 +600,7 @@ class TimedChatterboxTTS:
                 natural_duration=round(d["natural_dur"], 4),
                 actual_duration=round(actual_dur, 4),
                 tokens_original=len(d["orig_tokens"]),
-                tokens_resampled=len(d["resampled"]),
+                tokens_resampled=d["stretched_mel_frames"] // MEL_FRAMES_PER_TOKEN,
                 comfort=round(d["comfort"], 3),
             ))
 
@@ -778,58 +821,90 @@ class TimedChatterboxTTS:
                         target_dur = seg.target_duration
  
                         if target_dur is not None and target_dur > 0:
-                            target_token_count = max(
-                                1, round(target_dur / SECS_PER_TOKEN)
-                            )
                             comfort = _comfort_score(
                                 natural_dur, target_dur, comfort_steepness
                             )
-                            resampled = _resample_tokens(
-                                orig_tokens, target_token_count
+                            stretched_mel_frames = max(
+                                1, round(target_dur * MEL_FRAMES_PER_SEC)
                             )
-                            actual_dur = len(resampled) * SECS_PER_TOKEN
+                            actual_dur = stretched_mel_frames / MEL_FRAMES_PER_SEC
                         else:
-                            resampled = orig_tokens
-                            actual_dur = natural_dur
                             comfort = 0.5
- 
+                            stretched_mel_frames = (
+                                len(orig_tokens) * MEL_FRAMES_PER_TOKEN
+                            )
+                            actual_dur = natural_dur
+
                         seg_data[id(seg)] = dict(
                             orig_tokens=orig_tokens,
-                            resampled=resampled,
                             natural_dur=natural_dur,
                             actual_dur=actual_dur,
                             comfort=comfort,
+                            stretched_mel_frames=stretched_mel_frames,
                         )
  
                 sv_streams[s_idx][v_idx] = torch.cat(
-                    [seg_data[id(seg)]["resampled"] for seg in speech_segs]
+                    [seg_data[id(seg)]["orig_tokens"] for seg in speech_segs]
                 )
                 sv_seg_data[s_idx][v_idx] = seg_data
  
-        # ── 6. Single batched S3Gen call ──────────────────────────────────
+        # ── 6. Batched flow → mel interpolation → batched HiFi-GAN ──────
         flat_streams: List[torch.Tensor] = []
         flat_sv_index: List[Tuple[int, int]] = []
         for s_idx in range(n_scripts):
             for v_idx in range(N):
                 flat_streams.append(sv_streams[s_idx][v_idx])
                 flat_sv_index.append((s_idx, v_idx))
- 
+
         logger.debug(
-            "Batched S3Gen: %d streams (max %d tokens)",
+            "Batched flow: %d streams (max %d tokens)",
             len(flat_streams),
             max(len(s) for s in flat_streams),
         )
- 
+
+        # 6a. Batched flow: natural tokens → mel per (script, variant)
         if quiet:
             with _suppress_stdout():
-                wav_list = self.model.speech_tokens_to_wav_batch(
-                    flat_streams, apply_watermark=False
+                mel_list = self.model.speech_tokens_to_mel_batch(flat_streams)
+        else:
+            mel_list = self.model.speech_tokens_to_mel_batch(flat_streams)
+
+        # 6b. Per-(script, variant) mel slicing + interpolation
+        stretched_mel_list: List[torch.Tensor] = []
+        for flat_idx, (s_idx, v_idx) in enumerate(flat_sv_index):
+            segments = all_segments[s_idx]
+            speech_segs = [s for s in segments if not s.is_silence]
+            seg_data = sv_seg_data[s_idx][v_idx]
+            full_mel = mel_list[flat_idx]  # (80, mel_frames)
+
+            mel_cursor = 0
+            slices = []
+            for seg in speech_segs:
+                d = seg_data[id(seg)]
+                nat_mel = len(d["orig_tokens"]) * MEL_FRAMES_PER_TOKEN
+                mel_slice = full_mel[:, mel_cursor:mel_cursor + nat_mel]
+                mel_cursor += nat_mel
+                slices.append(_resample_mel(mel_slice, d["stretched_mel_frames"]))
+
+            stretched_mel_list.append(torch.cat(slices, dim=1))
+
+        # 6c. Batched HiFi-GAN: stretched mels → wavs
+        logger.debug(
+            "Batched HiFi-GAN: %d streams (max %d mel frames)",
+            len(stretched_mel_list),
+            max(m.size(1) for m in stretched_mel_list),
+        )
+
+        if quiet:
+            with _suppress_stdout():
+                wav_list = self.model.mel_to_wav_batch(
+                    stretched_mel_list, apply_trim_fade=True
                 )
         else:
-            wav_list = self.model.speech_tokens_to_wav_batch(
-                flat_streams, apply_watermark=False
+            wav_list = self.model.mel_to_wav_batch(
+                stretched_mel_list, apply_trim_fade=True
             )
- 
+
         sv_full_wav: List[List[Optional[np.ndarray]]] = [
             [None] * N for _ in range(n_scripts)
         ]
@@ -895,7 +970,7 @@ class TimedChatterboxTTS:
                         continue
  
                     d = seg_data[id(seg)]
-                    seg_samples = len(d["resampled"]) * SAMPLES_PER_TOKEN
+                    seg_samples = d["stretched_mel_frames"] * SAMPLES_PER_MEL_FRAME
                     seg_audio = full_wav_np[sample_cursor:sample_cursor + seg_samples]
                     sample_cursor += seg_samples
  
@@ -942,7 +1017,7 @@ class TimedChatterboxTTS:
                         natural_duration=round(d["natural_dur"], 4),
                         actual_duration=round(actual_dur, 4),
                         tokens_original=len(d["orig_tokens"]),
-                        tokens_resampled=len(d["resampled"]),
+                        tokens_resampled=d["stretched_mel_frames"] // MEL_FRAMES_PER_TOKEN,
                         comfort=round(d["comfort"], 3),
                     ))
  
