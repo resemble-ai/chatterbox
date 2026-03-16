@@ -56,6 +56,7 @@ import torch
 
 from .tts import ChatterboxTTS, punc_norm
 from .models.s3gen.const import S3GEN_SR, TOKEN_TO_WAV_RATIO, TOKEN_MEL_RATIO
+from .word_timestamps import extract_word_timestamps, rescale_timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,7 @@ class SegmentResult:
     tokens_original: int
     tokens_resampled: int
     comfort: float              # 0.0 = too slow … 0.5 = natural … 1.0 = garbled
+    word_timestamps: Optional[List[dict]] = None   # per-word timing
 
 
 @dataclass
@@ -449,12 +451,21 @@ class TimedChatterboxTTS:
                     stretched_mel_frames = len(orig_tokens) * MEL_FRAMES_PER_TOKEN
                     actual_dur = natural_dur
 
+                # Word-level timestamps at natural pace (offset=0, rescaled later)
+                _wts = extract_word_timestamps(
+                    self.model.tokenizer,
+                    seg.text,
+                    len(orig_tokens),
+                    time_offset=0.0,
+                )
+
                 speech_seg_data[id(seg)] = dict(
                     orig_tokens=orig_tokens,
                     natural_dur=natural_dur,
                     actual_dur=actual_dur,
                     comfort=comfort,
                     stretched_mel_frames=stretched_mel_frames,
+                    word_timestamps=_wts,
                 )
 
                 logger.debug(
@@ -592,6 +603,16 @@ class TimedChatterboxTTS:
 
             actual_dur = len(seg_audio) / self.sr
 
+            # Rescale: natural pace → actual (stretched) pace,
+            # shift to absolute position in final audio.
+            _raw_wts = d.get("word_timestamps", [])
+            _final_wts = rescale_timestamps(
+                _raw_wts,
+                natural_duration=d["natural_dur"],
+                actual_duration=actual_dur,
+                absolute_offset=seg.start_time,
+            ) if _raw_wts else None
+
             segment_results.append(SegmentResult(
                 text=seg.text,
                 start_time=seg.start_time,
@@ -602,6 +623,7 @@ class TimedChatterboxTTS:
                 tokens_original=len(d["orig_tokens"]),
                 tokens_resampled=d["stretched_mel_frames"] // MEL_FRAMES_PER_TOKEN,
                 comfort=round(d["comfort"], 3),
+                word_timestamps=_final_wts,
             ))
 
         # Sort results by start_time (speech + silence interleaved)
@@ -835,12 +857,20 @@ class TimedChatterboxTTS:
                             )
                             actual_dur = natural_dur
 
+                        _wts = extract_word_timestamps(
+                            self.model.tokenizer,
+                            seg.text,
+                            len(orig_tokens),
+                            time_offset=0.0,
+                        )
+
                         seg_data[id(seg)] = dict(
                             orig_tokens=orig_tokens,
                             natural_dur=natural_dur,
                             actual_dur=actual_dur,
                             comfort=comfort,
                             stretched_mel_frames=stretched_mel_frames,
+                            word_timestamps=_wts,
                         )
  
                 sv_streams[s_idx][v_idx] = torch.cat(
@@ -1009,6 +1039,15 @@ class TimedChatterboxTTS:
                         final_wav[write_start:write_end] = seg_audio[:n]
  
                     actual_dur = len(seg_audio) / self.sr
+
+                    _raw_wts = d.get("word_timestamps", [])
+                    _final_wts = rescale_timestamps(
+                        _raw_wts,
+                        natural_duration=d["natural_dur"],
+                        actual_duration=actual_dur,
+                        absolute_offset=seg.start_time,
+                    ) if _raw_wts else None
+
                     segment_results.append(SegmentResult(
                         text=seg.text,
                         start_time=seg.start_time,
@@ -1019,6 +1058,7 @@ class TimedChatterboxTTS:
                         tokens_original=len(d["orig_tokens"]),
                         tokens_resampled=d["stretched_mel_frames"] // MEL_FRAMES_PER_TOKEN,
                         comfort=round(d["comfort"], 3),
+                        word_timestamps=_final_wts,
                     ))
  
                 # Sort results by start_time (speech + silence interleaved)

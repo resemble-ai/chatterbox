@@ -7,6 +7,7 @@
 
 import os
 import torch
+import json
 import torchaudio as ta
 
 from chatterbox.tts import ChatterboxTTS
@@ -101,10 +102,32 @@ batch_results = timed.generate_batch(
 
 for s_idx, variant_list in enumerate(batch_results):
     for v_idx, result in enumerate(variant_list):
-        fname = f"batch_script{s_idx+1}_variant{v_idx+1}.wav"
-        fpath = os.path.join(OUTPUT_DIR, fname)
-        ta.save(fpath, result.wav, result.sr)
-        print(f"\n  Script {s_idx+1}, Variant {v_idx+1}: {fpath}  ({result.total_duration:.2f}s)")
+        base = f"batch_script{s_idx+1}_variant{v_idx+1}"
+
+        # Save WAV
+        wav_path = os.path.join(OUTPUT_DIR, f"{base}.wav")
+        ta.save(wav_path, result.wav, result.sr)
+
+        # Save word timestamps JSON alongside the WAV
+        all_words = []
+        for seg in result.segments:
+            if seg.word_timestamps:
+                all_words.extend(seg.word_timestamps)
+
+        if all_words:
+            json_path = os.path.join(OUTPUT_DIR, f"{base}.json")
+            with open(json_path, 'w') as f:
+                json.dump({
+                    "total_duration": result.total_duration,
+                    "words": all_words,
+                    "segments": [
+                        {"text": seg.text, "start": seg.start_time,
+                         "end": seg.end_time, "comfort": seg.comfort}
+                        for seg in result.segments
+                    ],
+                }, f, indent=2)
+
+        print(f"\n  Script {s_idx+1}, Variant {v_idx+1}: {wav_path}  ({result.total_duration:.2f}s)")
         print_comfort_report(result.segments)
 
 print("\nComfort scores per variant:")
