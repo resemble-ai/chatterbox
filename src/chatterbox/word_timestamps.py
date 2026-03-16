@@ -23,7 +23,6 @@ from dataclasses import dataclass, asdict
 from typing import List, Optional
 
 from .models.s3gen.const import S3GEN_SR, TOKEN_TO_WAV_RATIO
-from .models.tokenizers import SPACE
 from .tts import punc_norm
 
 SECS_PER_TOKEN = TOKEN_TO_WAV_RATIO / S3GEN_SR  # 0.04s = 40ms
