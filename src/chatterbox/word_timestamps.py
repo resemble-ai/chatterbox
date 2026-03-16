@@ -41,13 +41,11 @@ class WordTimestamp:
 
 def _count_word_tokens(tokenizer, word: str) -> int:
     """
-    Count text tokens for a single word using the raw HuggingFace
-    Tokenizer.encode() with [SPACE] replacement.
-
-    Does NOT include inter-word [SPACE] tokens � see module docstring.
+    Count text tokens for a single word via the public encode() API.
+    Does NOT include inter-word [SPACE] tokens — see module docstring.
+    Works with both EnTokenizer and MTLTokenizer.
     """
-    processed = word.replace(' ', SPACE)
-    return max(len(tokenizer.tokenizer.encode(processed).ids), 1)
+    return max(len(tokenizer.encode(word)), 1)
 
 
 def _split_words(text: str) -> List[str]:
