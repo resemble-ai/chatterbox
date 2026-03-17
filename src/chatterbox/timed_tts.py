@@ -78,6 +78,20 @@ _SILENCE_FADE_MS = 60
 
 # ── Timing-tag regex ─────────────────────────────────────────────────────────
 
+# Catches malformed M.SS.mmm timestamps that Gemini sometimes produces
+# (e.g. <0.01.500> meaning 1.5s) and converts them to plain seconds.
+_MALFORMED_TAG_RE = re.compile(r"<(\d+)[.:](\d{2})[.:](\d{3})>")
+
+def _fix_malformed_tags(text: str) -> str:
+    """Convert <M.SS.mmm> tags to <seconds.mmm> before parsing."""
+    def _repl(m):
+        minutes = int(m.group(1))
+        seconds = int(m.group(2))
+        millis = int(m.group(3))
+        total = minutes * 60 + seconds + millis / 1000.0
+        return f"<{total:.3f}>"
+    return _MALFORMED_TAG_RE.sub(_repl, text)
+
 _TAG_RE = re.compile(r"<(\d+(?:\.\d+)?)>")
 
 
@@ -151,6 +165,7 @@ def parse_timed_text(raw: str) -> List[TimedSegment]:
     Empty text between adjacent tags becomes a silence gap.
     The last segment (after the final tag) is open-ended.
     """
+    raw = _fix_malformed_tags(raw)
     parts = _TAG_RE.split(raw)
     segments: List[TimedSegment] = []
     cursor = 0.0
@@ -644,6 +659,227 @@ class TimedChatterboxTTS:
         )
 
     # ── Batched generation ─────────────────────────────────────────────
+
+
+    def _distribute_and_resample_tokens(
+        self, groups: List[List[TimedSegment]],
+        speech_segs: List[TimedSegment],
+        group_tokens_fn,  # callable(local_g_idx) -> torch.Tensor
+        comfort_steepness: float,
+    ) -> Tuple[dict, torch.Tensor]:
+        """
+        Proportionally splits group-level tokens into per-segment data,
+        computes comfort scores and stretched mel frames.
+ 
+        Returns (seg_data, concatenated_token_stream).
+        """
+        seg_data = {}
+ 
+        for local_g_idx, group in enumerate(groups):
+            group_tokens = group_tokens_fn(local_g_idx)
+            group_total = len(group_tokens)
+ 
+            # Proportional split within group
+            text_token_counts = []
+            for seg in group:
+                normed = punc_norm(seg.text)
+                toks = self.model.tokenizer.text_to_tokens(
+                    normed
+                ).squeeze(0)
+                text_token_counts.append(max(len(toks), 1))
+ 
+            total_text_tokens = sum(text_token_counts)
+            n_segs = len(text_token_counts)
+            cursor = 0
+ 
+            for i, (seg, tc) in enumerate(
+                zip(group, text_token_counts)
+            ):
+                if i == n_segs - 1:
+                    count = group_total - cursor
+                else:
+                    count = round(
+                        group_total * tc / total_text_tokens
+                    )
+                    count = max(count, 1)
+                    # Don't consume so many tokens that later
+                    # segments starve.
+                    remaining_after = n_segs - 1 - i
+                    count = min(
+                        count,
+                        group_total - cursor - remaining_after,
+                    )
+                    count = max(count, 1)
+ 
+                orig_tokens = group_tokens[cursor : cursor + count]
+                cursor += count
+ 
+                natural_dur = len(orig_tokens) * SECS_PER_TOKEN
+                target_dur = seg.target_duration
+ 
+                if target_dur is not None and target_dur > 0:
+                    comfort = _comfort_score(
+                        natural_dur, target_dur, comfort_steepness
+                    )
+                    stretched_mel_frames = max(
+                        1, round(target_dur * MEL_FRAMES_PER_SEC)
+                    )
+                    actual_dur = stretched_mel_frames / MEL_FRAMES_PER_SEC
+                else:
+                    comfort = 0.5
+                    stretched_mel_frames = (
+                        len(orig_tokens) * MEL_FRAMES_PER_TOKEN
+                    )
+                    actual_dur = natural_dur
+ 
+                _wts = extract_word_timestamps(
+                    self.model.tokenizer,
+                    seg.text,
+                    len(orig_tokens),
+                    time_offset=0.0,
+                )
+ 
+                seg_data[id(seg)] = dict(
+                    orig_tokens=orig_tokens,
+                    natural_dur=natural_dur,
+                    actual_dur=actual_dur,
+                    comfort=comfort,
+                    stretched_mel_frames=stretched_mel_frames,
+                    word_timestamps=_wts,
+                )
+ 
+        stream = torch.cat(
+            [seg_data[id(seg)]["orig_tokens"] for seg in speech_segs]
+        )
+        return seg_data, stream
+ 
+ 
+    def _assemble_variant_waveform(
+        self, segments: List[TimedSegment],
+        seg_data: dict,
+        full_wav_np: np.ndarray,
+        borders_silence_after: set,
+        borders_silence_before: set,
+    ) -> TimedResult:
+        """
+        Slices per-segment audio from the continuous waveform, applies fades,
+        places at absolute positions, and returns a TimedResult.
+        """
+        # Calculate total output length
+        last_seg = segments[-1]
+        if last_seg.is_silence:
+            total_out_samples = int(round(
+                (last_seg.end_time or last_seg.start_time) * self.sr
+            ))
+        elif last_seg.end_time is not None:
+            total_out_samples = int(round(last_seg.end_time * self.sr))
+        else:
+            d = seg_data[id(last_seg)]
+            total_out_samples = (
+                int(round(last_seg.start_time * self.sr))
+                + int(round(d["actual_dur"] * self.sr))
+            )
+ 
+        final_wav = np.zeros(total_out_samples, dtype=np.float32)
+        segment_results: List[SegmentResult] = []
+ 
+        # Slice per-segment from the single S3Gen output and place
+        # at absolute positions.  sample_cursor tracks our position
+        # within the continuous full_wav_np.
+        sample_cursor = 0
+ 
+        for seg in segments:
+            if seg.is_silence:
+                dur = seg.target_duration or 0.0
+                segment_results.append(SegmentResult(
+                    text="", start_time=seg.start_time,
+                    end_time=seg.end_time or seg.start_time,
+                    target_duration=seg.target_duration,
+                    natural_duration=0.0, actual_duration=dur,
+                    tokens_original=0, tokens_resampled=0,
+                    comfort=0.5,
+                ))
+                continue
+ 
+            d = seg_data[id(seg)]
+            seg_samples = d["stretched_mel_frames"] * SAMPLES_PER_MEL_FRAME
+            seg_audio = full_wav_np[sample_cursor:sample_cursor + seg_samples]
+            sample_cursor += seg_samples
+ 
+            # Apply silence-boundary fades
+            if id(seg) in borders_silence_after:
+                seg_audio = _apply_fade_out(seg_audio, self.sr)
+            if id(seg) in borders_silence_before:
+                seg_audio = _apply_fade_in(seg_audio, self.sr)
+ 
+            # If audio overflows the target window, truncate with
+            # fade-out
+            if seg.end_time is not None:
+                max_samples = int(round(seg.target_duration * self.sr))
+                if len(seg_audio) > max_samples and max_samples > 0:
+                    fade_len = min(
+                        int(self.sr * _SILENCE_FADE_MS / 1000),
+                        max_samples,
+                    )
+                    seg_audio = seg_audio.copy()
+                    if fade_len > 1:
+                        t = np.linspace(
+                            0, np.pi / 2, fade_len, dtype=np.float32
+                        )
+                        seg_audio[max_samples - fade_len:max_samples] *= (
+                            np.cos(t) ** 2
+                        )
+                    seg_audio = seg_audio[:max_samples]
+ 
+            # Place at absolute position
+            write_start = int(round(seg.start_time * self.sr))
+            write_end = min(
+                write_start + len(seg_audio), total_out_samples
+            )
+            n = write_end - write_start
+            if n > 0:
+                final_wav[write_start:write_end] = seg_audio[:n]
+ 
+            actual_dur = len(seg_audio) / self.sr
+ 
+            _raw_wts = d["word_timestamps"]
+            _final_wts = rescale_timestamps(
+                _raw_wts,
+                natural_duration=d["natural_dur"],
+                actual_duration=actual_dur,
+                absolute_offset=seg.start_time,
+            ) if _raw_wts else None
+ 
+            segment_results.append(SegmentResult(
+                text=seg.text,
+                start_time=seg.start_time,
+                end_time=seg.start_time + actual_dur,
+                target_duration=seg.target_duration,
+                natural_duration=round(d["natural_dur"], 4),
+                actual_duration=round(actual_dur, 4),
+                tokens_original=len(d["orig_tokens"]),
+                tokens_resampled=d["stretched_mel_frames"] // MEL_FRAMES_PER_TOKEN,
+                comfort=round(d["comfort"], 3),
+                word_timestamps=_final_wts,
+            ))
+ 
+        # Sort results by start_time (speech + silence interleaved)
+        segment_results.sort(key=lambda r: r.start_time)
+ 
+        # Apply watermark once on the complete assembled audio
+        if self.model.apply_watermark:
+            final_wav = self.model.watermarker.apply_watermark(
+                final_wav, sample_rate=self.sr
+            )
+ 
+        return TimedResult(
+            wav=torch.from_numpy(final_wav).unsqueeze(0),
+            sr=self.sr,
+            segments=segment_results,
+            total_duration=round(len(final_wav) / self.sr, 4),
+        )
+
+ 
  
     def generate_batch(
         self,
@@ -774,9 +1010,6 @@ class TimedChatterboxTTS:
  
         # ── 5. Distribute tokens back + resample ─────────────────────────
  
-        def _get_group_tokens(flat_g_idx: int, v_idx: int) -> torch.Tensor:
-            return all_group_tokens[flat_g_idx * N + v_idx]
- 
         # Map script_idx -> list of flat group indices
         script_flat_indices: List[List[int]] = [[] for _ in range(n_scripts)]
         for flat_idx, (s_idx, _g_idx) in enumerate(group_origin):
@@ -797,85 +1030,13 @@ class TimedChatterboxTTS:
             flat_indices = script_flat_indices[s_idx]
  
             for v_idx in range(N):
-                seg_data = {}
+                def _get_tokens(local_g_idx, _fi=flat_indices, _v=v_idx):
+                    return all_group_tokens[_fi[local_g_idx] * N + _v]
  
-                for local_g_idx, group in enumerate(groups):
-                    flat_g_idx = flat_indices[local_g_idx]
-                    group_tokens = _get_group_tokens(flat_g_idx, v_idx)
-                    group_total = len(group_tokens)
- 
-                    # Proportional split within group
-                    text_token_counts = []
-                    for seg in group:
-                        normed = punc_norm(seg.text)
-                        toks = self.model.tokenizer.text_to_tokens(
-                            normed
-                        ).squeeze(0)
-                        text_token_counts.append(max(len(toks), 1))
- 
-                    total_text_tokens = sum(text_token_counts)
-                    n_segs = len(text_token_counts)
-                    cursor = 0
- 
-                    for i, (seg, tc) in enumerate(
-                        zip(group, text_token_counts)
-                    ):
-                        if i == n_segs - 1:
-                            count = group_total - cursor
-                        else:
-                            count = round(
-                                group_total * tc / total_text_tokens
-                            )
-                            count = max(count, 1)
-                            # Don't consume so many tokens that later
-                            # segments starve.
-                            remaining_after = n_segs - 1 - i
-                            count = min(
-                                count,
-                                group_total - cursor - remaining_after,
-                            )
-                            count = max(count, 1)
- 
-                        orig_tokens = group_tokens[cursor : cursor + count]
-                        cursor += count
- 
-                        natural_dur = len(orig_tokens) * SECS_PER_TOKEN
-                        target_dur = seg.target_duration
- 
-                        if target_dur is not None and target_dur > 0:
-                            comfort = _comfort_score(
-                                natural_dur, target_dur, comfort_steepness
-                            )
-                            stretched_mel_frames = max(
-                                1, round(target_dur * MEL_FRAMES_PER_SEC)
-                            )
-                            actual_dur = stretched_mel_frames / MEL_FRAMES_PER_SEC
-                        else:
-                            comfort = 0.5
-                            stretched_mel_frames = (
-                                len(orig_tokens) * MEL_FRAMES_PER_TOKEN
-                            )
-                            actual_dur = natural_dur
-
-                        _wts = extract_word_timestamps(
-                            self.model.tokenizer,
-                            seg.text,
-                            len(orig_tokens),
-                            time_offset=0.0,
-                        )
-
-                        seg_data[id(seg)] = dict(
-                            orig_tokens=orig_tokens,
-                            natural_dur=natural_dur,
-                            actual_dur=actual_dur,
-                            comfort=comfort,
-                            stretched_mel_frames=stretched_mel_frames,
-                            word_timestamps=_wts,
-                        )
- 
-                sv_streams[s_idx][v_idx] = torch.cat(
-                    [seg_data[id(seg)]["orig_tokens"] for seg in speech_segs]
+                seg_data, stream = self._distribute_and_resample_tokens(
+                    groups, speech_segs, _get_tokens, comfort_steepness
                 )
+                sv_streams[s_idx][v_idx] = stream
                 sv_seg_data[s_idx][v_idx] = seg_data
  
         # ── 6. Batched flow → mel interpolation → batched HiFi-GAN ──────
@@ -885,20 +1046,20 @@ class TimedChatterboxTTS:
             for v_idx in range(N):
                 flat_streams.append(sv_streams[s_idx][v_idx])
                 flat_sv_index.append((s_idx, v_idx))
-
+ 
         logger.debug(
             "Batched flow: %d streams (max %d tokens)",
             len(flat_streams),
             max(len(s) for s in flat_streams),
         )
-
+ 
         # 6a. Batched flow: natural tokens → mel per (script, variant)
         if quiet:
             with _suppress_stdout():
                 mel_list = self.model.speech_tokens_to_mel_batch(flat_streams)
         else:
             mel_list = self.model.speech_tokens_to_mel_batch(flat_streams)
-
+ 
         # 6b. Per-(script, variant) mel slicing + interpolation
         stretched_mel_list: List[torch.Tensor] = []
         for flat_idx, (s_idx, v_idx) in enumerate(flat_sv_index):
@@ -906,7 +1067,7 @@ class TimedChatterboxTTS:
             speech_segs = [s for s in segments if not s.is_silence]
             seg_data = sv_seg_data[s_idx][v_idx]
             full_mel = mel_list[flat_idx]  # (80, mel_frames)
-
+ 
             mel_cursor = 0
             slices = []
             for seg in speech_segs:
@@ -915,16 +1076,16 @@ class TimedChatterboxTTS:
                 mel_slice = full_mel[:, mel_cursor:mel_cursor + nat_mel]
                 mel_cursor += nat_mel
                 slices.append(_resample_mel(mel_slice, d["stretched_mel_frames"]))
-
+ 
             stretched_mel_list.append(torch.cat(slices, dim=1))
-
+ 
         # 6c. Batched HiFi-GAN: stretched mels → wavs
         logger.debug(
             "Batched HiFi-GAN: %d streams (max %d mel frames)",
             len(stretched_mel_list),
             max(m.size(1) for m in stretched_mel_list),
         )
-
+ 
         if quiet:
             with _suppress_stdout():
                 wav_list = self.model.mel_to_wav_batch(
@@ -934,7 +1095,7 @@ class TimedChatterboxTTS:
             wav_list = self.model.mel_to_wav_batch(
                 stretched_mel_list, apply_trim_fade=True
             )
-
+ 
         sv_full_wav: List[List[Optional[np.ndarray]]] = [
             [None] * N for _ in range(n_scripts)
         ]
@@ -946,10 +1107,9 @@ class TimedChatterboxTTS:
  
         for s_idx in range(n_scripts):
             segments = all_segments[s_idx]
-            speech_segs = [s for s in segments if not s.is_silence]
             variant_results: List[TimedResult] = []
  
-            # Determine which segments border silence (for fades)
+            # Precompute silence borders once per script (segments don't change across variants)
             borders_silence_after = set()
             borders_silence_before = set()
             for idx, seg in enumerate(segments):
@@ -963,118 +1123,9 @@ class TimedChatterboxTTS:
                 seg_data = sv_seg_data[s_idx][v_idx]
                 full_wav_np = sv_full_wav[s_idx][v_idx]
  
-                # Calculate total output length
-                last_seg = segments[-1]
-                if last_seg.is_silence:
-                    total_out_samples = int(round(
-                        (last_seg.end_time or last_seg.start_time) * self.sr
-                    ))
-                elif last_seg.end_time is not None:
-                    total_out_samples = int(round(last_seg.end_time * self.sr))
-                else:
-                    d = seg_data[id(last_seg)]
-                    total_out_samples = (
-                        int(round(last_seg.start_time * self.sr))
-                        + int(round(d["actual_dur"] * self.sr))
-                    )
- 
-                final_wav = np.zeros(total_out_samples, dtype=np.float32)
-                segment_results: List[SegmentResult] = []
- 
-                # Slice per-segment from the single S3Gen output and place
-                # at absolute positions.  sample_cursor tracks our position
-                # within the continuous full_wav_np.
-                sample_cursor = 0
- 
-                for seg in segments:
-                    if seg.is_silence:
-                        dur = seg.target_duration or 0.0
-                        segment_results.append(SegmentResult(
-                            text="", start_time=seg.start_time,
-                            end_time=seg.end_time or seg.start_time,
-                            target_duration=seg.target_duration,
-                            natural_duration=0.0, actual_duration=dur,
-                            tokens_original=0, tokens_resampled=0,
-                            comfort=0.5,
-                        ))
-                        continue
- 
-                    d = seg_data[id(seg)]
-                    seg_samples = d["stretched_mel_frames"] * SAMPLES_PER_MEL_FRAME
-                    seg_audio = full_wav_np[sample_cursor:sample_cursor + seg_samples]
-                    sample_cursor += seg_samples
- 
-                    # Apply silence-boundary fades
-                    if id(seg) in borders_silence_after:
-                        seg_audio = _apply_fade_out(seg_audio, self.sr)
-                    if id(seg) in borders_silence_before:
-                        seg_audio = _apply_fade_in(seg_audio, self.sr)
- 
-                    # If audio overflows the target window, truncate with
-                    # fade-out
-                    if seg.end_time is not None:
-                        max_samples = int(round(seg.target_duration * self.sr))
-                        if len(seg_audio) > max_samples and max_samples > 0:
-                            fade_len = min(
-                                int(self.sr * _SILENCE_FADE_MS / 1000),
-                                max_samples,
-                            )
-                            seg_audio = seg_audio.copy()
-                            if fade_len > 1:
-                                t = np.linspace(
-                                    0, np.pi / 2, fade_len, dtype=np.float32
-                                )
-                                seg_audio[max_samples - fade_len:max_samples] *= (
-                                    np.cos(t) ** 2
-                                )
-                            seg_audio = seg_audio[:max_samples]
- 
-                    # Place at absolute position
-                    write_start = int(round(seg.start_time * self.sr))
-                    write_end = min(
-                        write_start + len(seg_audio), total_out_samples
-                    )
-                    n = write_end - write_start
-                    if n > 0:
-                        final_wav[write_start:write_end] = seg_audio[:n]
- 
-                    actual_dur = len(seg_audio) / self.sr
-
-                    _raw_wts = d.get("word_timestamps", [])
-                    _final_wts = rescale_timestamps(
-                        _raw_wts,
-                        natural_duration=d["natural_dur"],
-                        actual_duration=actual_dur,
-                        absolute_offset=seg.start_time,
-                    ) if _raw_wts else None
-
-                    segment_results.append(SegmentResult(
-                        text=seg.text,
-                        start_time=seg.start_time,
-                        end_time=seg.start_time + actual_dur,
-                        target_duration=seg.target_duration,
-                        natural_duration=round(d["natural_dur"], 4),
-                        actual_duration=round(actual_dur, 4),
-                        tokens_original=len(d["orig_tokens"]),
-                        tokens_resampled=d["stretched_mel_frames"] // MEL_FRAMES_PER_TOKEN,
-                        comfort=round(d["comfort"], 3),
-                        word_timestamps=_final_wts,
-                    ))
- 
-                # Sort results by start_time (speech + silence interleaved)
-                segment_results.sort(key=lambda r: r.start_time)
- 
-                # Apply watermark once on the complete assembled audio
-                if self.model.apply_watermark:
-                    final_wav = self.model.watermarker.apply_watermark(
-                        final_wav, sample_rate=self.sr
-                    )
- 
-                variant_results.append(TimedResult(
-                    wav=torch.from_numpy(final_wav).unsqueeze(0),
-                    sr=self.sr,
-                    segments=segment_results,
-                    total_duration=round(len(final_wav) / self.sr, 4),
+                variant_results.append(self._assemble_variant_waveform(
+                    segments, seg_data, full_wav_np,
+                    borders_silence_after, borders_silence_before,
                 ))
  
             all_results.append(variant_results)
