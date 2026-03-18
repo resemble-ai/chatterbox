@@ -21,7 +21,7 @@ def load_model():
     return model
 
 
-def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num, cfgw):
+def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num, cfgw, min_p, top_p, repetition_penalty):
     if model is None:
         model = ChatterboxTTS.from_pretrained(DEVICE)
 
@@ -34,6 +34,9 @@ def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num
         exaggeration=exaggeration,
         temperature=temperature,
         cfg_weight=cfgw,
+        min_p=min_p,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
     )
     return (model.sr, wav.squeeze(0).numpy())
 
@@ -55,6 +58,9 @@ with gr.Blocks() as demo:
             with gr.Accordion("More options", open=False):
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")
                 temp = gr.Slider(0.05, 5, step=.05, label="temperature", value=.8)
+                min_p = gr.Slider(0.00, 1.00, step=0.01, label="min_p || Newer Sampler. Recommend 0.02 > 0.1. Handles Higher Temperatures better. 0.00 Disables", value=0.05)
+                top_p = gr.Slider(0.00, 1.00, step=0.01, label="top_p || Original Sampler. 1.0 Disables(recommended). Original 0.8", value=1.00)
+                repetition_penalty = gr.Slider(1.00, 2.00, step=0.1, label="repetition_penalty", value=1.2)
 
             run_btn = gr.Button("Generate", variant="primary")
 
@@ -73,6 +79,9 @@ with gr.Blocks() as demo:
             temp,
             seed_num,
             cfg_weight,
+            min_p,
+            top_p,
+            repetition_penalty,
         ],
         outputs=audio_output,
     )
