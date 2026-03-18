@@ -84,6 +84,9 @@ class AlignmentStreamAnalyzer:
         target_layer.register_forward_hook(attention_forward_hook)
         if hasattr(tfmr, 'config') and hasattr(tfmr.config, 'output_attentions'):
             self.original_output_attentions = tfmr.config.output_attentions
+            self.original_attn_implementation = getattr(tfmr.config, '_attn_implementation', None)
+            if getattr(tfmr.config, '_attn_implementation', None) == 'sdpa':
+                tfmr.config._attn_implementation = 'eager'
             tfmr.config.output_attentions = True
 
     def step(self, logits, next_token=None):
