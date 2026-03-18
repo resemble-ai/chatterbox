@@ -99,7 +99,12 @@ class Conditionals:
     def load(cls, fpath, map_location="cpu"):
         if isinstance(map_location, str):
             map_location = torch.device(map_location)
-        kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
+        # Use weights_only=True if available (PyTorch >= 1.13.0)
+        try:
+            kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
+        except TypeError:
+            # Fallback for older PyTorch versions
+            kwargs = torch.load(fpath, map_location=map_location)
         return cls(T3Cond(**kwargs['t3']), kwargs['gen'])
 
 
