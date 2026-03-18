@@ -1,6 +1,6 @@
 # CoRal Chatterbox TTS
 
-A fork of [Resemble AI's Chatterbox TTS](https://github.com/resemble-ai/chatterbox), extended by the [Alexandra Institute](https://www.alexandra.dk/) as part of the [CoRal project]([https://coral.alexandra.dk/](https://huggingface.co/CoRal-project)) with a finetuning framework targeted towards Danish language support, though it can easily be adapted for other languages.
+A fork of [Resemble AI's Chatterbox TTS](https://github.com/resemble-ai/chatterbox), extended by the [Alexandra Institute](https://www.alexandra.dk/) as part of the [CoRal project](https://huggingface.co/CoRal-project) with a finetuning framework targeted towards Danish language support, though it can easily be adapted for other languages.
 
 The finetuning framework supports all three Chatterbox model variants (base, multilingual, turbo). The original Chatterbox inference code is preserved as-is under `src/chatterbox/`. Finetuning scripts inspired by [stlohrey's chatterbox-finetuning](https://github.com/stlohrey/chatterbox-finetuning).
 
