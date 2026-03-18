@@ -1,15 +1,14 @@
 import random
+
+import gradio as gr
 import numpy as np
 import torch
-import gradio as gr
+
 from chatterbox.tts_turbo import ChatterboxTurboTTS
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-EVENT_TAGS = [
-    "[clear throat]", "[sigh]", "[shush]", "[cough]", "[groan]",
-    "[sniff]", "[gasp]", "[chuckle]", "[laugh]"
-]
+EVENT_TAGS = ["[clear throat]", "[sigh]", "[shush]", "[cough]", "[groan]", "[sniff]", "[gasp]", "[chuckle]", "[laugh]"]
 
 # --- REFINED CSS ---
 # 1. tag-container: Forces the row to wrap items instead of scrolling. Removes borders/backgrounds.
@@ -80,18 +79,7 @@ def load_model():
     return model
 
 
-def generate(
-        model,
-        text,
-        audio_prompt_path,
-        temperature,
-        seed_num,
-        min_p,
-        top_p,
-        top_k,
-        repetition_penalty,
-        norm_loudness
-):
+def generate(model, text, audio_prompt_path, temperature, seed_num, min_p, top_p, top_k, repetition_penalty, norm_loudness):
     if model is None:
         model = ChatterboxTurboTTS.from_pretrained(DEVICE)
 
@@ -122,7 +110,7 @@ with gr.Blocks(title="Chatterbox Turbo", css=CUSTOM_CSS) as demo:
                 value="Oh, that's hilarious! [chuckle] Um anyway, we do have a new model in store. It's the SkyNet T-800 series and it's got basically everything. Including AI integration with ChatGPT and um all that jazz. Would you like me to get some prices for you?",
                 label="Text to synthesize (max chars 300)",
                 max_lines=5,
-                elem_id="main_textbox"
+                elem_id="main_textbox",
             )
 
             # --- Event Tags ---
@@ -132,18 +120,13 @@ with gr.Blocks(title="Chatterbox Turbo", css=CUSTOM_CSS) as demo:
                     # elem_classes targets the button specifically
                     btn = gr.Button(tag, elem_classes=["tag-btn"])
 
-                    btn.click(
-                        fn=None,
-                        inputs=[btn, text],
-                        outputs=text,
-                        js=INSERT_TAG_JS
-                    )
+                    btn.click(fn=None, inputs=[btn, text], outputs=text, js=INSERT_TAG_JS)
 
             ref_wav = gr.Audio(
                 sources=["upload", "microphone"],
                 type="filepath",
                 label="Reference Audio File",
-                value="https://storage.googleapis.com/chatterbox-demo-samples/prompts/female_random_podcast.wav"
+                value="https://storage.googleapis.com/chatterbox-demo-samples/prompts/female_random_podcast.wav",
             )
 
             run_btn = gr.Button("Generate ⚡", variant="primary")
@@ -153,7 +136,7 @@ with gr.Blocks(title="Chatterbox Turbo", css=CUSTOM_CSS) as demo:
 
             with gr.Accordion("Advanced Options", open=False):
                 seed_num = gr.Number(value=0, label="Random seed (0 for random)")
-                temp = gr.Slider(0.05, 2.0, step=.05, label="Temperature", value=0.8)
+                temp = gr.Slider(0.05, 2.0, step=0.05, label="Temperature", value=0.8)
                 top_p = gr.Slider(0.00, 1.00, step=0.01, label="Top P", value=0.95)
                 top_k = gr.Slider(0, 1000, step=10, label="Top K", value=1000)
                 repetition_penalty = gr.Slider(1.00, 2.00, step=0.05, label="Repetition Penalty", value=1.2)

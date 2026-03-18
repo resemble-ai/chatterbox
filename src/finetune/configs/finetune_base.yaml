@@ -1,0 +1,71 @@
+
+# PRETRAIN FOR FINETUNING ON DANISH
+
+# # Model and Dataset
+# local_hf_dataset: 
+datasets: 
+  dataset1:
+    id: 
+    split: null
+    text_column: text
+    audio_column: audio
+    language: da
+    filter: true # True if no pre-embeddings
+  dataset2:
+    id: 
+    split: null
+    text_column: text
+    audio_column: audio
+    language: da
+    filter: false # False if pre-embeddings
+dataset_cache_dir: 
+stream_dataset: false
+filter_dataset: true
+audio_prompt_duration_s: 3.1
+min_seconds_per_example: 3.0
+max_seconds_per_example: 30.0
+
+# Model arguments
+#local_model_dir: ./path/to/local/model
+output_dir: ./base_finetune
+model_variant: "base"
+
+# WandB Configuration
+run_name:
+wandb_project: 
+
+# Training Configuration
+num_train_epochs: 1
+per_device_train_batch_size: 6
+gradient_accumulation_steps: 4
+learning_rate: 3.0e-5
+warmup_steps: 100
+fp16: true
+bf16: false
+gradient_checkpointing: false
+resume_from_checkpoint: false
+max_grad_norm: 1.0  # Explicit gradient clipping for stability
+dataloader_drop_last: true  # Ensure consistent batch sizes
+
+# Evaluation and Logging
+eval_split_size: 0.001
+eval_strategy: steps
+eval_steps: 2000
+logging_steps: 200
+per_device_eval_batch_size: 2  # Smaller eval batch size for stability
+eval_accumulation_steps: 1  # Process eval batches one at a time
+
+# Saving Configuration
+save_strategy: steps
+save_steps: 5000
+save_total_limit: 4
+
+# Data Processing
+text_column_name: text
+audio_column_name: audio
+dataloader_pin_memory: false
+
+# Training Control
+do_train: true
+do_eval: true
+eval_on_start: true

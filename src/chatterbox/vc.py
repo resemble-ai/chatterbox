@@ -26,7 +26,7 @@ class ChatterboxVC:
         self.sr = S3GEN_SR
         self.s3gen = s3gen
         self.device = device
-        self.watermarker = perth.PerthImplicitWatermarker()
+        self.watermarker = perth.PerthImplicitWatermarker(device=device)
         if ref_dict is None:
             self.ref_dict = None
         else:

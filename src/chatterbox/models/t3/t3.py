@@ -218,10 +218,70 @@ class T3(nn.Module):
         mask_speech = torch.arange(len_speech, device=device)[None] >= speech_token_lens[:, None]  # (B, len_speech)
         masked_text = text_tokens.masked_fill(mask_text, IGNORE_ID)
         masked_speech = speech_tokens.masked_fill(mask_speech, IGNORE_ID)
+
         loss_text = F.cross_entropy(out.text_logits, masked_text, ignore_index=IGNORE_ID)
         loss_speech = F.cross_entropy(out.speech_logits, masked_speech, ignore_index=IGNORE_ID)
 
         return loss_text, loss_speech
+    
+    def loss_new(
+        self,
+        *,
+        t3_cond: T3Cond,
+        text_tokens: torch.LongTensor,        # (B, S_text_padded), includes BOS & EOS
+        text_token_lens: torch.LongTensor,    # (B,), actual lengths including BOS & EOS
+        speech_tokens: torch.LongTensor,      # (B, S_speech_padded), includes BOS & EOS
+        speech_token_lens: torch.LongTensor,  # (B,), actual lengths including BOS & EOS
+        labels_text: torch.LongTensor,        # (B, S_text_padded-1), already masked with –100
+        labels_speech: torch.LongTensor       # (B, S_speech_padded-1), already masked with –100
+    ):
+        """
+        Compute text and speech cross-entropy using pre-masked labels from the collator.
+        Assumes:
+        - labels_text[t] corresponds to predicting text_tokens[:, 1:] with –100 where ignored
+        - labels_speech[t] corresponds to predicting speech_tokens[:, 1:] with –100 where ignored
+        """
+
+        # 1) Run model to get logits
+        out = self.forward(
+            t3_cond=t3_cond,
+            text_tokens=text_tokens,
+            text_token_lens=text_token_lens,
+            speech_tokens=speech_tokens,
+            speech_token_lens=speech_token_lens,
+            training=True,
+        )
+        # out.text_logits: (B, S_text_padded, V_text)
+        # out.speech_logits: (B, S_speech_padded, V_speech)
+        device = out.text_logits.device
+        IGNORE_ID = -100
+
+        # --- Text Loss (use labels_text directly) ---
+        # Align logits: predict t₁..EOS from inputs [BOS, t₁..]
+        logits_for_text = out.text_logits[:, :-1, :].contiguous()  # (B, S_text_padded-1, V_text)
+        # labels_text already has shape (B, S_text_padded-1) with –100 where masked
+        if logits_for_text.size(1) == 0:
+            loss_text = torch.tensor(0.0, device=device, requires_grad=self.training)
+        else:
+            loss_text = F.cross_entropy(
+                logits_for_text.transpose(1, 2),  # (B, V_text, S_text_padded-1)
+                labels_text,                      # (B, S_text_padded-1), ignore_index=–100
+                ignore_index=IGNORE_ID
+            )
+
+        # --- Speech Loss (use labels_speech directly) ---
+        logits_for_speech = out.speech_logits[:, :-1, :].contiguous()  # (B, S_speech_padded-1, V_speech)
+        # labels_speech already has shape (B, S_speech_padded-1) with –100 where masked
+        if logits_for_speech.size(1) == 0:
+            loss_speech = torch.tensor(0.0, device=device, requires_grad=self.training)
+        else:
+            loss_speech = F.cross_entropy(
+                logits_for_speech.transpose(1, 2),  # (B, V_speech, S_speech_padded-1)
+                labels_speech,                      # (B, S_speech_padded-1), ignore_index=–100
+                ignore_index=IGNORE_ID
+            )
+
+        return loss_text, loss_speech, out.speech_logits
 
     @torch.inference_mode()
     def inference(
@@ -331,7 +391,6 @@ class T3(nn.Module):
         predicted = []  # To store the predicted tokens
 
         # Instantiate the logits processors.
-        top_p_warper = TopPLogitsWarper(top_p=top_p)
         min_p_warper = MinPLogitsWarper(min_p=min_p)
         top_p_warper = TopPLogitsWarper(top_p=top_p)
         repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))

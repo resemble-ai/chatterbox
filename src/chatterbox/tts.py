@@ -14,6 +14,7 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from .utils import resolve_device
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -123,17 +124,12 @@ class ChatterboxTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
-        self.watermarker = perth.PerthImplicitWatermarker()
+        self.watermarker = perth.PerthImplicitWatermarker(device=device)
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
+    def from_local(cls, ckpt_dir, device=None) -> 'ChatterboxTTS':
+        device = resolve_device(device)
         ckpt_dir = Path(ckpt_dir)
-
-        # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
-        if device in ["cpu", "mps"]:
-            map_location = torch.device('cpu')
-        else:
-            map_location = None
 
         ve = VoiceEncoder()
         ve.load_state_dict(
@@ -160,19 +156,13 @@ class ChatterboxTTS:
 
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
+            conds = Conditionals.load(builtin_voice).to(device)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTTS':
-        # Check if MPS is available on macOS
-        if device == "mps" and not torch.backends.mps.is_available():
-            if not torch.backends.mps.is_built():
-                print("MPS not available because the current PyTorch install was not built with MPS enabled.")
-            else:
-                print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
-            device = "cpu"
+    def from_pretrained(cls, device=None) -> 'ChatterboxTTS':
+        device = resolve_device(device)
 
         for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
