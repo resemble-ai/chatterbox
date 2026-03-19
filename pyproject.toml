@@ -26,6 +26,12 @@ dependencies = [
     "omegaconf"
 ]
 
+[project.optional-dependencies]
+cuda = [
+    "torch==2.6.0",
+    "torchaudio==2.6.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/resemble-ai/chatterbox"
 Repository = "https://github.com/resemble-ai/chatterbox"
