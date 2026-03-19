@@ -1,3 +1,16 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+hf_cache/
+.DS_Store
+*.log
 .vscode
 
 # Pylance
