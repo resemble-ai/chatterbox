@@ -64,6 +64,26 @@ class AlignmentStreamAnalyzer:
             self.last_aligned_attns += [None]
             self._add_attention_spy(tfmr, i, layer_idx, head_idx)
 
+    def reset(self, text_tokens_slice):
+        """
+        Resets the internal state for a new utterance.
+        """
+        self.text_tokens_slice = (i, j) = text_tokens_slice
+        self.alignment = torch.zeros(0, j-i)
+        self.curr_frame_pos = 0
+        self.text_position = 0
+
+        self.started = False
+        self.started_at = None
+
+        self.complete = False
+        self.completed_at = None
+
+        # Track generated tokens for repetition detection
+        self.generated_tokens = []
+
+        self.last_aligned_attns = [None] * len(LLAMA_ALIGNED_HEADS)
+
     def _add_attention_spy(self, tfmr, buffer_idx, layer_idx, head_idx):
         """
         Adds a forward hook to a specific attention layer to collect outputs.
