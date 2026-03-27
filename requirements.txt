@@ -1,0 +1,46 @@
+# requirements-nvidia.txt (For NVIDIA GPU Installation with CUDA 12.x drivers)
+# This file ensures a compatible set of CUDA-enabled torch packages are installed.
+
+# Use the official PyTorch package index for CUDA 12.4 wheels.
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+# Pinning a compatible set of torch-related libraries.
+torch==2.6.0
+torchvision==0.21.0
+torchaudio==2.6.0
+
+# --- Core Application Dependencies ---
+
+# Official Chatterbox TTS (multilingual)
+# Installed from local source via `pip install -e .` in Dockerfile
+
+# Core Web Framework
+fastapi
+uvicorn[standard]
+
+# Other ML & Audio Libraries
+numpy>=1.24.0,<1.26.0  # Align with chatterbox-tts dependency
+soundfile  # Requires libsndfile system library
+librosa
+safetensors
+descript-audio-codec
+
+# Configuration & Utilities
+PyYAML
+python-multipart
+requests
+Jinja2
+watchdog
+aiofiles
+unidecode
+inflect
+tqdm
+hf_transfer                     # Speed up file transfers
+
+# Audio Post-processing
+pydub
+audiotsm
+praat-parselmouth
+openai>=1.0.0
+motor
+python-dotenv>=1.0.0
