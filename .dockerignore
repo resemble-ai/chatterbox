@@ -1,0 +1,12 @@
+.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+*.egg-info/
+.git/
+.github/
+*.png
+*.jpg
+gradio_*.py
+multilingual_app.py
+example_*.py
