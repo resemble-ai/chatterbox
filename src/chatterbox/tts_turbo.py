@@ -2,8 +2,10 @@ import os
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Generator, Optional, Tuple
 
 import librosa
+import numpy as np
 import torch
 import perth
 import pyloudnorm as ln
@@ -24,6 +26,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 REPO_ID = "ResembleAI/chatterbox-turbo"
+
+
+@dataclass
+class StreamingMetrics:
+    """Metrics for streaming TTS generation"""
+    latency_to_first_chunk: Optional[float] = None
+    rtf: Optional[float] = None
+    total_generation_time: Optional[float] = None
+    total_audio_duration: Optional[float] = None
+    chunk_count: int = 0
 
 
 def punc_norm(text: str) -> str:
@@ -294,3 +306,136 @@ class ChatterboxTurboTTS:
         wav = wav.squeeze(0).detach().cpu().numpy()
         watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
         return torch.from_numpy(watermarked_wav).unsqueeze(0)
+
+    def _process_token_chunk(
+        self,
+        token_chunk: torch.Tensor,
+        all_tokens_so_far: list,
+        context_window: int,
+        start_time: float,
+        metrics: StreamingMetrics,
+        fade_duration: float = 0.02,
+    ) -> Tuple[Optional[torch.Tensor], float]:
+        """
+        Decode a speech token chunk to audio via S3Gen (MeanFlow, n_cfm_timesteps=2).
+        Uses context overlap for smooth chunk boundaries.
+        """
+        import time
+
+        if all_tokens_so_far is not None:
+            context = all_tokens_so_far[-context_window:] if all_tokens_so_far.numel() > context_window else all_tokens_so_far
+            tokens_to_decode = torch.cat([context, token_chunk], dim=-1)
+            context_length = context.numel()
+        else:
+            tokens_to_decode = token_chunk
+            context_length = 0
+
+        clean = tokens_to_decode[tokens_to_decode < 6561].to(self.device)
+        if clean.numel() == 0:
+            return None, 0.0
+
+        wav, _ = self.s3gen.inference(
+            speech_tokens=clean,
+            ref_dict=self.conds.gen,
+            n_cfm_timesteps=2,  # MeanFlow
+        )
+        wav = wav.squeeze(0).detach().cpu().numpy()
+
+        if context_length > 0:
+            samples_per_token = len(wav) / len(clean)
+            skip = int(context_length * samples_per_token)
+            audio_chunk = wav[skip:]
+        else:
+            audio_chunk = wav
+
+        if len(audio_chunk) == 0:
+            return None, 0.0
+
+        fade_samples = min(int(fade_duration * self.sr), len(audio_chunk))
+        if fade_samples > 0:
+            audio_chunk[:fade_samples] *= np.linspace(0.0, 1.0, fade_samples, dtype=audio_chunk.dtype)
+
+        audio_duration = len(audio_chunk) / self.sr
+
+        if metrics.chunk_count == 0:
+            metrics.latency_to_first_chunk = time.time() - start_time
+
+        metrics.chunk_count += 1
+
+        watermarked = self.watermarker.apply_watermark(audio_chunk, sample_rate=self.sr)
+        return torch.from_numpy(watermarked).unsqueeze(0), audio_duration
+
+    def generate_stream(
+        self,
+        text: str,
+        audio_prompt_path: Optional[str] = None,
+        temperature: float = 0.8,
+        top_k: int = 1000,
+        top_p: float = 0.95,
+        repetition_penalty: float = 1.2,
+        norm_loudness: bool = True,
+        chunk_size: int = 25,
+        context_window: int = 50,
+        fade_duration: float = 0.02,
+    ) -> Generator[Tuple[torch.Tensor, StreamingMetrics], None, None]:
+        """
+        Streaming Turbo TTS: yields (audio_chunk, metrics) as tokens are generated.
+        No CFG or emotion control (not supported by Turbo). MeanFlow S3Gen (2 timesteps).
+        chunk_size=25 ≈ 1 second of audio per chunk.
+        """
+        import time
+
+        start_time = time.time()
+        metrics = StreamingMetrics()
+
+        if audio_prompt_path:
+            self.prepare_conditionals(audio_prompt_path, norm_loudness=norm_loudness)
+        else:
+            assert self.conds is not None, "Please call prepare_conditionals() first or pass audio_prompt_path"
+
+        text = punc_norm(text)
+        text_tokens = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+        text_tokens = text_tokens.input_ids.to(self.device)
+
+        total_audio = 0.0
+        all_tokens = None
+        last_chunk = None
+
+        with torch.inference_mode():
+            for token_chunk in self.t3.inference_turbo_stream(
+                t3_cond=self.conds.t3,
+                text_tokens=text_tokens,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                chunk_size=chunk_size,
+            ):
+                token_chunk = token_chunk[0]  # unbatch
+                last_chunk = token_chunk
+
+                audio, duration = self._process_token_chunk(
+                    token_chunk, all_tokens, context_window, start_time, metrics, fade_duration
+                )
+
+                if audio is not None:
+                    total_audio += duration
+                    yield audio, metrics
+
+                all_tokens = token_chunk if all_tokens is None else torch.cat([all_tokens, token_chunk], dim=-1)
+
+            # Append silence tokens to the final chunk and decode remainder
+            if last_chunk is not None:
+                silence = torch.tensor([S3GEN_SIL, S3GEN_SIL, S3GEN_SIL], dtype=torch.long, device=self.device)
+                final_tokens = torch.cat([last_chunk, silence])
+                audio, duration = self._process_token_chunk(
+                    final_tokens, all_tokens, context_window, start_time, metrics, fade_duration
+                )
+                if audio is not None:
+                    total_audio += duration
+                    yield audio, metrics
+
+        metrics.total_generation_time = time.time() - start_time
+        metrics.total_audio_duration = total_audio
+        if total_audio > 0:
+            metrics.rtf = metrics.total_generation_time / total_audio

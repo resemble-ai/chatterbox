@@ -488,3 +488,90 @@ class T3(nn.Module):
             all_tokens = all_tokens[:, :-1]
 
         return all_tokens
+
+    @torch.inference_mode()
+    def inference_turbo_stream(
+        self,
+        t3_cond,
+        text_tokens,
+        temperature: float = 0.8,
+        top_k: int = 1000,
+        top_p: float = 0.95,
+        repetition_penalty: float = 1.2,
+        max_gen_len: int = 1000,
+        chunk_size: int = 25,
+    ):
+        """
+        Streaming variant of inference_turbo(). Yields speech token chunks of `chunk_size`
+        as they are produced. No CFG (batch=1). S3 token rate is 25 tokens/sec.
+        """
+        from typing import Generator
+        logits_processors = LogitsProcessorList()
+        if temperature > 0 and temperature != 1.0:
+            logits_processors.append(TemperatureLogitsWarper(temperature))
+        if top_k > 0:
+            logits_processors.append(TopKLogitsWarper(top_k))
+        if top_p < 1.0:
+            logits_processors.append(TopPLogitsWarper(top_p))
+        if repetition_penalty != 1.0:
+            logits_processors.append(RepetitionPenaltyLogitsProcessor(repetition_penalty))
+
+        speech_start_token = self.hp.start_speech_token * torch.ones_like(text_tokens[:, :1])
+        embeds, _ = self.prepare_input_embeds(
+            t3_cond=t3_cond,
+            text_tokens=text_tokens,
+            speech_tokens=speech_start_token,
+            cfg_weight=0.0,
+        )
+
+        generated_speech_tokens = []
+        chunk_buffer = []
+
+        llm_outputs = self.tfmr(inputs_embeds=embeds, use_cache=True)
+        hidden_states = llm_outputs[0]
+        past_key_values = llm_outputs.past_key_values
+
+        speech_logits = self.speech_head(hidden_states[:, -1:])
+        processed_logits = logits_processors(speech_start_token, speech_logits[:, -1, :])
+        probs = F.softmax(processed_logits, dim=-1)
+        next_speech_token = torch.multinomial(probs, num_samples=1)
+
+        generated_speech_tokens.append(next_speech_token)
+        chunk_buffer.append(next_speech_token)
+        current_speech_token = next_speech_token
+
+        for _ in range(max_gen_len - 1):
+            current_speech_embed = self.speech_emb(current_speech_token)
+            llm_outputs = self.tfmr(
+                inputs_embeds=current_speech_embed,
+                past_key_values=past_key_values,
+                use_cache=True,
+            )
+            hidden_states = llm_outputs[0]
+            past_key_values = llm_outputs.past_key_values
+            speech_logits = self.speech_head(hidden_states)
+
+            input_ids = torch.cat(generated_speech_tokens, dim=1)
+            processed_logits = logits_processors(input_ids, speech_logits[:, -1, :])
+            if torch.all(processed_logits == -float("inf")):
+                if chunk_buffer:
+                    yield torch.cat(chunk_buffer, dim=1)
+                break
+
+            probs = F.softmax(processed_logits, dim=-1)
+            next_speech_token = torch.multinomial(probs, num_samples=1)
+
+            generated_speech_tokens.append(next_speech_token)
+            chunk_buffer.append(next_speech_token)
+            current_speech_token = next_speech_token
+
+            if torch.all(next_speech_token == self.hp.stop_speech_token):
+                # Flush buffer on EOS (don't include EOS token itself)
+                chunk_buffer.pop()  # remove EOS
+                if chunk_buffer:
+                    yield torch.cat(chunk_buffer, dim=1)
+                break
+
+            if len(chunk_buffer) >= chunk_size:
+                yield torch.cat(chunk_buffer, dim=1)
+                chunk_buffer = []

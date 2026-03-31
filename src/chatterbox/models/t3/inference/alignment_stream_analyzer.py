@@ -156,9 +156,9 @@ class AlignmentStreamAnalyzer:
             
         # Check for excessive token repetition (3x same token in a row)
         token_repetition = (
-            # self.complete and 
+            # self.complete and
             len(self.generated_tokens) >= 3 and
-            len(set(self.generated_tokens[-2:])) == 1
+            len(set(self.generated_tokens[-3:])) == 1
         )
         
         if token_repetition:
