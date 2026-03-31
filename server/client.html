@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chatterbox Streaming TTS</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, sans-serif;
+    background: #0f0f13;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.3rem; color: #fff; }
+  .subtitle { color: #888; font-size: 0.9rem; margin-bottom: 2rem; }
+
+  .card {
+    background: #1a1a22;
+    border: 1px solid #2a2a38;
+    border-radius: 12px;
+    padding: 1.5rem;
+    width: 100%;
+    max-width: 720px;
+    margin-bottom: 1.5rem;
+  }
+
+  label { display: block; font-size: 0.8rem; color: #999; margin-bottom: 0.3rem; }
+  textarea, select, input[type=text], input[type=range], input[type=number] {
+    width: 100%;
+    background: #12121a;
+    border: 1px solid #2a2a38;
+    color: #e0e0e0;
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+    font-size: 0.95rem;
+    outline: none;
+  }
+  textarea { resize: vertical; min-height: 90px; }
+  textarea:focus, select:focus, input[type=text]:focus, input[type=number]:focus { border-color: #5a5aff; }
+
+  /* Voice upload */
+  .voice-row { display: flex; gap: 0.6rem; align-items: flex-end; margin-top: 0.8rem; flex-wrap: wrap; }
+  .voice-select-wrap { flex: 1; min-width: 150px; }
+  input[type=file] { display: none; }
+  .btn-sm {
+    padding: 0.5rem 0.9rem;
+    background: #2a2a38;
+    color: #ccc;
+    border: 1px solid #3a3a55;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+  }
+  .btn-sm:hover { background: #3a3a55; color: #fff; }
+  .btn-sm.danger { border-color: #6a3030; color: #ff9a9a; }
+  .btn-sm.danger:hover { background: #4a2020; }
+  .voice-status { font-size: 0.78rem; color: #666; margin-top: 0.3rem; min-height: 1em; }
+
+  /* Section separator */
+  .section-title {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #555;
+    margin-top: 1.2rem;
+    margin-bottom: 0.6rem;
+    border-top: 1px solid #2a2a38;
+    padding-top: 0.8rem;
+  }
+
+  .row { display: flex; gap: 1rem; margin-top: 1rem; flex-wrap: wrap; }
+  .col { flex: 1; min-width: 130px; }
+  .col-sm { flex: 0 0 110px; }
+
+  .slider-row { display: flex; align-items: center; gap: 0.6rem; }
+  input[type=range] {
+    padding: 0;
+    height: 4px;
+    cursor: pointer;
+    accent-color: #5a5aff;
+  }
+  .val-label { font-size: 0.85rem; color: #aaa; min-width: 2.5rem; text-align: right; }
+
+  button {
+    margin-top: 1.2rem;
+    width: 100%;
+    padding: 0.8rem;
+    background: #5a5aff;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: #7070ff; }
+  button:disabled { background: #3a3a55; cursor: not-allowed; }
+  button.stop { background: #c04040; }
+  button.stop:hover { background: #e05050; }
+
+  /* Metrics bar */
+  .metrics {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: #999;
+  }
+  .metric { display: flex; flex-direction: column; gap: 0.1rem; }
+  .metric .key { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: #666; }
+  .metric .val { color: #c0c0ff; font-variant-numeric: tabular-nums; }
+
+  /* Chunk timeline */
+  .timeline-wrap { margin-top: 1rem; }
+  .timeline-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: #666; margin-bottom: 0.3rem; }
+  .timeline {
+    height: 8px;
+    background: #12121a;
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  .timeline-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #4040cc, #5a5aff);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+  }
+  .chunk-dots {
+    display: flex;
+    gap: 3px;
+    flex-wrap: wrap;
+    margin-top: 0.4rem;
+    min-height: 14px;
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #5a5aff;
+    opacity: 0;
+    animation: pop 0.2s forwards;
+  }
+  @keyframes pop {
+    0% { transform: scale(0); opacity: 0; }
+    60% { transform: scale(1.3); opacity: 1; }
+    100% { transform: scale(1); opacity: 0.7; }
+  }
+
+  /* Status */
+  .status { font-size: 0.85rem; color: #888; margin-top: 0.8rem; min-height: 1.2em; }
+  .status.active { color: #7aff7a; }
+  .status.error { color: #ff7a7a; }
+
+  audio { width: 100%; margin-top: 1rem; }
+</style>
+</head>
+<body>
+
+<h1>Chatterbox Streaming TTS</h1>
+<p class="subtitle">Audio starts playing before the model finishes generating</p>
+
+<div class="card">
+  <label>Text</label>
+  <textarea id="text" placeholder="Enter text to synthesize…">In the beginning, the universe was created. This has made a lot of people very angry and been widely regarded as a bad move. Many races believed that this was a mistake, and that perhaps the universe should be run on more democratic principles.</textarea>
+
+  <div class="row">
+    <div class="col">
+      <label>Model</label>
+      <select id="model">
+        <option value="multilingual" selected>Multilingual</option>
+        <option value="base">Base (English)</option>
+        <option value="turbo">Turbo (English, fast)</option>
+      </select>
+    </div>
+    <div class="col" id="lang-col">
+      <label>Language</label>
+      <select id="language_id">
+        <option value="en" selected>English</option>
+      </select>
+    </div>
+    <div class="col-sm">
+      <label>Chunk size</label>
+      <input type="text" id="chunk_size" value="25" style="text-align:center;">
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col">
+      <label>Exaggeration <span id="exag-val" class="val-label">0.5</span></label>
+      <div class="slider-row">
+        <input type="range" id="exaggeration" min="0" max="2" step="0.05" value="0.5">
+      </div>
+    </div>
+    <div class="col">
+      <label>CFG weight <span id="cfg-val" class="val-label">0.5</span></label>
+      <div class="slider-row">
+        <input type="range" id="cfg_weight" min="0" max="1" step="0.05" value="0.5">
+      </div>
+    </div>
+    <div class="col">
+      <label>Temperature <span id="temp-val" class="val-label">0.8</span></label>
+      <div class="slider-row">
+        <input type="range" id="temperature" min="0.1" max="2" step="0.05" value="0.8">
+      </div>
+    </div>
+  </div>
+
+  <div class="row" id="turbo-hidden" style="display:none">
+    <!-- turbo hides exaggeration/cfg (not supported) -->
+  </div>
+
+  <!-- Reference voice for cloning -->
+  <div class="section-title">Reference Voice (optional — for voice cloning)</div>
+  <div class="voice-row">
+    <div class="voice-select-wrap">
+      <label>Uploaded voices</label>
+      <select id="speaker-select">
+        <option value="">— default voice —</option>
+      </select>
+    </div>
+    <div>
+      <label>&nbsp;</label>
+      <input type="file" id="voice-file-input" accept="audio/*">
+      <button type="button" class="btn-sm" onclick="el('voice-file-input').click()">Upload audio…</button>
+    </div>
+    <div>
+      <label>&nbsp;</label>
+      <button type="button" class="btn-sm danger" id="btn-remove-speaker" style="display:none" onclick="removeSpeaker()">Remove</button>
+    </div>
+  </div>
+  <div class="voice-status" id="voice-status"></div>
+
+  <!-- Sentence splitting -->
+  <div class="section-title">Sentence Splitting</div>
+  <div class="row" style="align-items:flex-end; margin-top:0">
+    <div class="col-sm" style="flex:0 0 auto; display:flex; align-items:center; gap:0.5rem; padding-bottom:0.1rem;">
+      <input type="checkbox" id="sentence_split" style="width:auto; padding:0; accent-color:#5a5aff;">
+      <label for="sentence_split" style="margin:0; cursor:pointer;">Enable</label>
+    </div>
+    <div class="col" id="split-controls" style="display:none">
+      <label>Min chars</label>
+      <input type="number" id="min_chars" value="100" min="20" max="500" style="text-align:center;">
+    </div>
+    <div class="col" id="split-controls2" style="display:none">
+      <label>Max chars</label>
+      <input type="number" id="max_chars" value="250" min="50" max="1000" style="text-align:center;">
+    </div>
+    <div class="col" id="split-controls3" style="display:none; flex:0 0 auto; align-items:center; gap:0.5rem; padding-bottom:0.1rem;">
+      <input type="checkbox" id="first_sentence_half" checked style="width:auto; padding:0; accent-color:#5a5aff;">
+      <label for="first_sentence_half" style="margin:0; cursor:pointer; font-size:0.8rem; color:#999;">Halve first sentence limits</label>
+    </div>
+  </div>
+
+  <button id="btn-generate">Generate & Stream</button>
+  <button id="btn-stop" class="stop" style="display:none">Stop</button>
+
+  <div class="status" id="status"></div>
+</div>
+
+<!-- Metrics -->
+<div class="card" id="metrics-card" style="display:none">
+  <div class="metrics">
+    <div class="metric"><span class="key">Time to first audio</span><span class="val" id="m-ttfa">—</span></div>
+    <div class="metric"><span class="key">RTF</span><span class="val" id="m-rtf">—</span></div>
+    <div class="metric"><span class="key">Chunks received</span><span class="val" id="m-chunks">0</span></div>
+    <div class="metric"><span class="key">Audio duration</span><span class="val" id="m-duration">—</span></div>
+    <div class="metric"><span class="key">Generation time</span><span class="val" id="m-gentime">—</span></div>
+  </div>
+
+  <div class="timeline-wrap">
+    <div class="timeline-label">Chunk arrival</div>
+    <div class="chunk-dots" id="chunk-dots"></div>
+  </div>
+</div>
+
+<!-- Playback -->
+<div class="card" id="playback-card" style="display:none">
+  <label>Full audio (assembled after generation)</label>
+  <audio id="audio-out" controls></audio>
+</div>
+
+<script>
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const SAMPLE_RATE = 24000;
+
+function el(id) { return document.getElementById(id); }
+function setStatus(msg, cls = '') {
+  const s = el('status');
+  s.textContent = msg;
+  s.className = 'status ' + cls;
+}
+
+// Slider labels
+['exaggeration', 'cfg_weight', 'temperature'].forEach(id => {
+  const prefix = { exaggeration: 'exag', cfg_weight: 'cfg', temperature: 'temp' }[id];
+  const inp = el(id);
+  const lbl = el(prefix + '-val');
+  inp.addEventListener('input', () => { lbl.textContent = parseFloat(inp.value).toFixed(2); });
+});
+
+// Language dropdown — populated from /languages
+async function loadLanguages() {
+  try {
+    const resp = await fetch('/languages');
+    const langs = await resp.json();
+    const sel = el('language_id');
+    sel.innerHTML = '';
+    for (const [code, name] of Object.entries(langs)) {
+      const opt = document.createElement('option');
+      opt.value = code;
+      opt.textContent = name;
+      if (code === 'en') opt.selected = true;
+      sel.appendChild(opt);
+    }
+  } catch (e) { /* server may not be up yet */ }
+}
+loadLanguages();
+
+// ─── Speaker / voice cloning ─────────────────────────────────────────────────
+
+function addSpeakerOption(audioId, name, select = true) {
+  const sel = el('speaker-select');
+  const opt = document.createElement('option');
+  opt.value = audioId;
+  opt.textContent = name;
+  sel.appendChild(opt);
+  if (select) {
+    sel.value = audioId;
+    el('btn-remove-speaker').style.display = '';
+    el('voice-status').textContent = `✓ "${name}" selected`;
+  }
+}
+
+async function loadSpeakers() {
+  try {
+    const resp = await fetch('/speakers');
+    const speakers = await resp.json();
+    for (const { audio_id, name } of speakers) {
+      addSpeakerOption(audio_id, name, false);
+    }
+  } catch (e) { /* server may not be up yet */ }
+}
+loadSpeakers();
+
+el('speaker-select').addEventListener('change', () => {
+  const val = el('speaker-select').value;
+  el('btn-remove-speaker').style.display = val ? '' : 'none';
+  el('voice-status').textContent = val ? `✓ "${el('speaker-select').selectedOptions[0].textContent}" selected` : '';
+});
+
+el('voice-file-input').addEventListener('change', async () => {
+  const file = el('voice-file-input').files[0];
+  if (!file) return;
+  el('voice-status').textContent = `Uploading "${file.name}"…`;
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const resp = await fetch('/upload-audio', { method: 'POST', body: formData });
+    if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
+    const { audio_id, name } = await resp.json();
+    addSpeakerOption(audio_id, name, true);
+  } catch (e) {
+    el('voice-status').textContent = `❌ ${e.message}`;
+  }
+  // Reset file input so same file can be re-uploaded
+  el('voice-file-input').value = '';
+});
+
+async function removeSpeaker() {
+  const sel = el('speaker-select');
+  const audioId = sel.value;
+  if (!audioId) return;
+  const name = sel.selectedOptions[0].textContent;
+  try {
+    await fetch(`/speakers/${audioId}`, { method: 'DELETE' });
+    sel.selectedOptions[0].remove();
+    sel.value = '';
+    el('btn-remove-speaker').style.display = 'none';
+    el('voice-status').textContent = `Removed "${name}"`;
+  } catch (e) {
+    el('voice-status').textContent = `❌ ${e.message}`;
+  }
+}
+
+// Sentence split controls visibility
+el('sentence_split').addEventListener('change', () => {
+  const on = el('sentence_split').checked;
+  el('split-controls').style.display = on ? '' : 'none';
+  el('split-controls2').style.display = on ? '' : 'none';
+  el('split-controls3').style.display = on ? 'flex' : 'none';
+});
+
+// Hide/show language & exaggeration/cfg based on model
+el('model').addEventListener('change', () => {
+  const m = el('model').value;
+  el('lang-col').style.display = (m === 'multilingual') ? '' : 'none';
+});
+
+// ─── Web Audio scheduling ────────────────────────────────────────────────────
+
+let audioCtx = null;
+let nextStartTime = 0;
+let allChunks = [];    // Float32Array[] for assembling final audio
+let abortCtrl = null;
+let generationStart = 0;
+let firstChunkPlayed = false;
+
+function ensureAudioCtx() {
+  if (!audioCtx || audioCtx.state === 'closed') {
+    audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    nextStartTime = 0;
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function scheduleChunk(float32Array) {
+  ensureAudioCtx();
+
+  const buf = audioCtx.createBuffer(1, float32Array.length, SAMPLE_RATE);
+  buf.copyToChannel(float32Array, 0);
+
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(audioCtx.destination);
+
+  // Schedule to play right after the previous chunk ends
+  const when = Math.max(audioCtx.currentTime + 0.01, nextStartTime);
+  src.start(when);
+  nextStartTime = when + buf.duration;
+
+  if (!firstChunkPlayed) {
+    firstChunkPlayed = true;
+    const ttfa = (Date.now() - generationStart) / 1000;
+    el('m-ttfa').textContent = ttfa.toFixed(3) + 's';
+    setStatus('🔊 Playing…', 'active');
+  }
+}
+
+// ─── Binary frame parser ─────────────────────────────────────────────────────
+
+class FrameParser {
+  constructor(onChunk, onEnd, onError) {
+    this.buf = new Uint8Array(0);
+    this.onChunk = onChunk;
+    this.onEnd = onEnd;
+    this.onError = onError;
+  }
+
+  push(bytes) {
+    // Append incoming bytes to internal buffer
+    const merged = new Uint8Array(this.buf.length + bytes.length);
+    merged.set(this.buf);
+    merged.set(bytes, this.buf.length);
+    this.buf = merged;
+
+    // Parse as many complete frames as possible
+    while (this.buf.length >= 4) {
+      const view = new DataView(this.buf.buffer, this.buf.byteOffset);
+      const sampleCount = view.getInt32(0, true);  // little-endian
+
+      if (sampleCount === 0) {
+        // End-of-stream sentinel
+        this.onEnd();
+        return;
+      }
+
+      if (sampleCount === -1) {
+        // Error frame: 4-byte msg length + UTF-8 message
+        if (this.buf.length < 8) break;
+        const msgLen = view.getInt32(4, true);
+        if (this.buf.length < 8 + msgLen) break;
+        const msgBytes = this.buf.slice(8, 8 + msgLen);
+        this.onError(new TextDecoder().decode(msgBytes));
+        return;
+      }
+
+      const frameBytes = 4 + sampleCount * 4;
+      if (this.buf.length < frameBytes) break;
+
+      // Extract the float32 samples
+      const samples = new Float32Array(
+        this.buf.buffer,
+        this.buf.byteOffset + 4,
+        sampleCount
+      ).slice();  // .slice() to copy (avoids shared buffer issues)
+
+      this.buf = this.buf.slice(frameBytes);
+      this.onChunk(samples);
+    }
+  }
+}
+
+// ─── Generate ────────────────────────────────────────────────────────────────
+
+let chunkCount = 0;
+let totalSamples = 0;
+
+async function generate() {
+  const text = el('text').value.trim();
+  if (!text) return;
+
+  // Reset state
+  allChunks = [];
+  chunkCount = 0;
+  totalSamples = 0;
+  firstChunkPlayed = false;
+  el('chunk-dots').innerHTML = '';
+  el('m-chunks').textContent = '0';
+  el('m-ttfa').textContent = '—';
+  el('m-rtf').textContent = '—';
+  el('m-duration').textContent = '—';
+  el('m-gentime').textContent = '—';
+  el('metrics-card').style.display = '';
+  el('playback-card').style.display = 'none';
+  el('btn-generate').disabled = true;
+  el('btn-stop').style.display = '';
+  setStatus('⏳ Connecting…');
+  generationStart = Date.now();
+
+  ensureAudioCtx();
+  nextStartTime = 0;
+
+  abortCtrl = new AbortController();
+
+  const speakerAudioId = el('speaker-select').value || null;
+  const useSplit = el('sentence_split').checked;
+
+  const req = {
+    text,
+    model: el('model').value,
+    language_id: el('language_id').value,
+    audio_id: speakerAudioId,
+    exaggeration: parseFloat(el('exaggeration').value),
+    cfg_weight: parseFloat(el('cfg_weight').value),
+    temperature: parseFloat(el('temperature').value),
+    chunk_size: parseInt(el('chunk_size').value) || 25,
+    repetition_penalty: 1.2,
+    min_p: 0.05,
+    top_p: 1.0,
+    top_k: 1000,
+    sentence_split: useSplit,
+    min_chars: parseInt(el('min_chars').value) || 100,
+    max_chars: parseInt(el('max_chars').value) || 250,
+    first_sentence_half: el('first_sentence_half').checked,
+  };
+
+  const parser = new FrameParser(
+    // onChunk
+    (samples) => {
+      chunkCount++;
+      totalSamples += samples.length;
+      allChunks.push(samples);
+      scheduleChunk(samples);
+
+      // Update metrics UI
+      el('m-chunks').textContent = chunkCount;
+      const duration = totalSamples / SAMPLE_RATE;
+      el('m-duration').textContent = duration.toFixed(2) + 's';
+      const elapsed = (Date.now() - generationStart) / 1000;
+      el('m-gentime').textContent = elapsed.toFixed(2) + 's';
+      if (duration > 0) {
+        el('m-rtf').textContent = (elapsed / duration).toFixed(3);
+      }
+
+      // Add a dot to the timeline
+      const dot = document.createElement('div');
+      dot.className = 'dot';
+      el('chunk-dots').appendChild(dot);
+    },
+    // onEnd
+    () => {
+      const elapsed = (Date.now() - generationStart) / 1000;
+      const duration = totalSamples / SAMPLE_RATE;
+      el('m-gentime').textContent = elapsed.toFixed(2) + 's';
+      if (duration > 0) el('m-rtf').textContent = (elapsed / duration).toFixed(3);
+      setStatus(`✅ Done — ${chunkCount} chunks, ${duration.toFixed(2)}s audio`);
+      finishPlayback();
+    },
+    // onError
+    (msg) => {
+      setStatus('❌ Error: ' + msg, 'error');
+      finishPlayback();
+    }
+  );
+
+  try {
+    const resp = await fetch('/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+      signal: abortCtrl.signal,
+    });
+
+    if (!resp.ok) {
+      throw new Error(`Server error ${resp.status}`);
+    }
+
+    setStatus('⚙️ Generating…', 'active');
+    const reader = resp.body.getReader();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parser.push(value);
+    }
+
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      setStatus('❌ ' + e.message, 'error');
+    } else {
+      setStatus('Stopped.');
+    }
+    finishPlayback();
+  }
+}
+
+function finishPlayback() {
+  el('btn-generate').disabled = false;
+  el('btn-stop').style.display = 'none';
+  abortCtrl = null;
+
+  // Assemble full audio for the <audio> element
+  if (allChunks.length > 0) {
+    const merged = mergeFloat32(allChunks);
+    const wavBlob = encodeWav(merged, SAMPLE_RATE);
+    const url = URL.createObjectURL(wavBlob);
+    const audio = el('audio-out');
+    audio.src = url;
+    el('playback-card').style.display = '';
+  }
+}
+
+function stop() {
+  if (abortCtrl) { abortCtrl.abort(); abortCtrl = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  setStatus('Stopped.');
+  el('btn-generate').disabled = false;
+  el('btn-stop').style.display = 'none';
+}
+
+el('btn-generate').addEventListener('click', generate);
+el('btn-stop').addEventListener('click', stop);
+
+// ─── WAV encoder ─────────────────────────────────────────────────────────────
+
+function mergeFloat32(arrays) {
+  let total = arrays.reduce((s, a) => s + a.length, 0);
+  const out = new Float32Array(total);
+  let off = 0;
+  for (const a of arrays) { out.set(a, off); off += a.length; }
+  return out;
+}
+
+function encodeWav(samples, sampleRate) {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const bytesPerSample = bitsPerSample / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataLength = samples.length * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataLength);
+  const view = new DataView(buffer);
+
+  function writeStr(off, str) {
+    for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i));
+  }
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataLength, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);  // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeStr(36, 'data');
+  view.setUint32(40, dataLength, true);
+
+  // Convert float32 → int16
+  let off = 44;
+  for (let i = 0; i < samples.length; i++, off += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+</script>
+</body>
+</html>
