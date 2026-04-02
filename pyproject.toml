@@ -27,7 +27,6 @@ dependencies = [
     "safetensors==0.5.3",
     "spacy-pkuseg",
     "pykakasi==2.3.0",
-    "gradio==6.8.0",
     "russian-text-stresser @ git+https://github.com/Vuizur/add-stress-to-epub",
     "auto-editor>=27.0.0",
     "pyloudnorm",
@@ -44,6 +43,11 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.optional-dependencies]
+demo = [
+    "gradio==6.8.0",
+]
 
 [dependency-groups]
 dev = [
