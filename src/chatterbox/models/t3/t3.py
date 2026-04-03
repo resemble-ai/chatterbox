@@ -447,9 +447,13 @@ class T3(nn.Module):
         speech_hidden = hidden_states[:, -1:]
         speech_logits = self.speech_head(speech_hidden)
 
+        greedy = (temperature == 0.0)
         processed_logits = logits_processors(speech_start_token, speech_logits[:, -1, :])
-        probs = F.softmax(processed_logits, dim=-1)
-        next_speech_token = torch.multinomial(probs, num_samples=1)
+        if greedy:
+            next_speech_token = processed_logits.argmax(dim=-1, keepdim=True)
+        else:
+            probs = F.softmax(processed_logits, dim=-1)
+            next_speech_token = torch.multinomial(probs, num_samples=1)
 
         generated_speech_tokens.append(next_speech_token)
         current_speech_token = next_speech_token
@@ -473,8 +477,11 @@ class T3(nn.Module):
                 print("Warning: All logits are -inf")
                 break
 
-            probs = F.softmax(processed_logits, dim=-1)
-            next_speech_token = torch.multinomial(probs, num_samples=1)
+            if greedy:
+                next_speech_token = processed_logits.argmax(dim=-1, keepdim=True)
+            else:
+                probs = F.softmax(processed_logits, dim=-1)
+                next_speech_token = torch.multinomial(probs, num_samples=1)
 
             generated_speech_tokens.append(next_speech_token)
             current_speech_token = next_speech_token
@@ -531,10 +538,14 @@ class T3(nn.Module):
         hidden_states = llm_outputs[0]
         past_key_values = llm_outputs.past_key_values
 
+        greedy = (temperature == 0.0)
         speech_logits = self.speech_head(hidden_states[:, -1:])
         processed_logits = logits_processors(speech_start_token, speech_logits[:, -1, :])
-        probs = F.softmax(processed_logits, dim=-1)
-        next_speech_token = torch.multinomial(probs, num_samples=1)
+        if greedy:
+            next_speech_token = processed_logits.argmax(dim=-1, keepdim=True)
+        else:
+            probs = F.softmax(processed_logits, dim=-1)
+            next_speech_token = torch.multinomial(probs, num_samples=1)
 
         generated_speech_tokens.append(next_speech_token)
         chunk_buffer.append(next_speech_token)
@@ -558,8 +569,11 @@ class T3(nn.Module):
                     yield torch.cat(chunk_buffer, dim=1)
                 break
 
-            probs = F.softmax(processed_logits, dim=-1)
-            next_speech_token = torch.multinomial(probs, num_samples=1)
+            if greedy:
+                next_speech_token = processed_logits.argmax(dim=-1, keepdim=True)
+            else:
+                probs = F.softmax(processed_logits, dim=-1)
+                next_speech_token = torch.multinomial(probs, num_samples=1)
 
             generated_speech_tokens.append(next_speech_token)
             chunk_buffer.append(next_speech_token)

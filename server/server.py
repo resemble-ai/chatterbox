@@ -522,6 +522,8 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--debug", action="store_true",
                         help="Enable verbose debug logging (sentence split steps, etc.)")
+    parser.add_argument("--warmup", action="store_true",
+                        help="Run a short dummy synthesis after loading to trigger CUDA kernel JIT compilation")
     args = parser.parse_args()
 
     DEBUG = args.debug
@@ -531,6 +533,13 @@ if __name__ == "__main__":
     device = get_device(args.device)
     print(f"Pre-loading '{args.model}' on {device}…")
     load_model(args.model, device)
+
+    if args.warmup:
+        print("Warming up (triggering CUDA kernel JIT compilation)…")
+        _warmup_req = GenerateRequest(text="ok", model=args.model, device=args.device)
+        for _ in audio_stream(_warmup_req, None):
+            pass
+        print("Warmup complete.")
 
     print(f"\n🎙  Chatterbox streaming server running at http://{args.host}:{args.port}")
     print(f"   Open http://{args.host}:{args.port} in your browser")

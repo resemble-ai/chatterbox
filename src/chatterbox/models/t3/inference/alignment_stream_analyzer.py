@@ -136,10 +136,12 @@ class AlignmentStreamAnalyzer:
         last_text_token_duration = A[15:, -3:].sum()
 
         # Activations for the final token that last too long are likely hallucinations.
-        long_tail = self.complete and (A[self.completed_at:, -3:].sum(dim=0).max() >= 5) # 200ms
+        long_tail = self.complete and S >= 3 and (A[self.completed_at:, -3:].sum(dim=0).max() >= 5) # 200ms
 
         # If there are activations in previous tokens after generation has completed, assume this is a repetition error.
-        alignment_repetition = self.complete and (A[self.completed_at:, :-5].max(dim=1).values.sum() > 5)
+        # Guard S > 5: A[:, :-5] produces an empty tensor when the alignment matrix has fewer than 5 columns
+        # (short inputs), and max() on an empty reduction dim raises IndexError.
+        alignment_repetition = self.complete and S > 5 and (A[self.completed_at:, :-5].max(dim=1).values.sum() > 5)
         
         # Track generated tokens for repetition detection
         if next_token is not None:

@@ -379,13 +379,15 @@ class ChatterboxTTS:
 
             ids_for_proc = generated_ids[:1, ...]
             logits = rep_pen(ids_for_proc, logits)
-            if temperature != 1.0:
-                logits = logits / temperature
-            logits = min_p_warper(ids_for_proc, logits)
-            logits = top_p_warper(ids_for_proc, logits)
-
-            probs = torch.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
+            if temperature == 0.0:
+                next_token = logits.argmax(dim=-1, keepdim=True)
+            else:
+                if temperature != 1.0:
+                    logits = logits / temperature
+                logits = min_p_warper(ids_for_proc, logits)
+                logits = top_p_warper(ids_for_proc, logits)
+                probs = torch.softmax(logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
 
             chunk_buffer.append(next_token)
             generated_ids = torch.cat([generated_ids, next_token], dim=1)
