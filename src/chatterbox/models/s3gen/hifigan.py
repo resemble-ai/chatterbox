@@ -414,7 +414,7 @@ class HiFTGenerator(nn.Module):
     def decode(self, x: torch.Tensor, s: torch.Tensor = torch.zeros(1, 1, 0)) -> torch.Tensor:
         # torch.stft only supports float32/float64; cast back to model dtype afterwards
         s_stft_real, s_stft_imag = self._stft(s.squeeze(1).float())
-        s_stft = torch.cat([s_stft_real, s_stft_imag], dim=1).to(x.dtype)
+        s_stft = torch.cat([s_stft_real, s_stft_imag], dim=1).to(self.conv_pre.weight.dtype)
 
         x = self.conv_pre(x)
         for i in range(self.num_upsamples):
@@ -464,6 +464,9 @@ class HiFTGenerator(nn.Module):
 
     @torch.inference_mode()
     def inference(self, speech_feat: torch.Tensor, cache_source: torch.Tensor = torch.zeros(1, 1, 0)) -> torch.Tensor:
+        # Cast to model dtype at the boundary — upstream flow model may produce float32
+        # even when weights are fp16/bf16.
+        speech_feat = speech_feat.to(self.conv_pre.weight.dtype)
         # mel->f0
         f0 = self.f0_predictor(speech_feat)
         # f0->source
