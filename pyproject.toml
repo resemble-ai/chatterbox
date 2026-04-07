@@ -24,13 +24,15 @@ dependencies = [
     "resemble-perth @ git+https://github.com/resemble-ai/Perth.git@master",
     "conformer==0.3.2",
     "safetensors==0.5.3",
+    "num2words>=0.5.14",
+    "nltk",
     "pyloudnorm",
     "omegaconf",
-    "gradio==5.44.1",
 ]
 
 [project.optional-dependencies]
 finetune = [
+    "gradio==6.8.0",
     "datasets[audio]>=4.0.0",
     "accelerator>=2024.9.13",
     "accelerate>=1.8.1",
@@ -56,3 +58,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = []
