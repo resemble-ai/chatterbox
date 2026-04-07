@@ -1,6 +1,6 @@
 import os
 
-import torchaudio as ta
+import soundfile as sf
 
 from chatterbox import ChatterboxInference
 
@@ -22,7 +22,7 @@ wav = inference.generate(
     sentence_split=True,
     inter_sentence_silence_ms=100,
 )
-ta.save("example-1.wav", wav, inference.sr)
+sf.write("example-1.wav", wav.squeeze().numpy(), inference.sr)
 
 # Example 1b: same model with CUDA graph acceleration (~2x faster on CUDA)
 # Falls back to generate() automatically on CPU / MPS.
@@ -33,7 +33,7 @@ wav = inference.generate_fast(
     sentence_split=True,
     inter_sentence_silence_ms=100,
 )
-ta.save("example-1-fast.wav", wav, inference.sr)
+sf.write("example-1-fast.wav", wav.squeeze().numpy(), inference.sr)
 
 
 # Example 2: default upstream turbo model (English)
@@ -51,7 +51,7 @@ wav = turbo_inference.generate(
     temperature=0.8,
     top_p=0.95,
 )
-ta.save("example-2.wav", wav, turbo_inference.sr)
+sf.write("example-2.wav", wav.squeeze().numpy(), turbo_inference.sr)
 
 
 # Example 3: local checkpoint directory
@@ -61,7 +61,7 @@ ta.save("example-2.wav", wav, turbo_inference.sr)
 #     language="da",
 # )
 # wav = local_inference.generate(text_da, language_id="da")
-# ta.save("example-local.wav", wav, local_inference.sr)
+# sf.write("example-local.wav", wav.squeeze().numpy(), local_inference.sr)
 
 
 # Optional: synthesize with a reference voice
@@ -76,4 +76,4 @@ if os.path.exists(AUDIO_PROMPT_PATH):
         inter_sentence_silence_ms=100,
         exaggeration=0.5,
     )
-    ta.save("example-3.wav", wav, inference.sr)
+    sf.write("example-3.wav", wav.squeeze().numpy(), inference.sr)

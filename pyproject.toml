@@ -28,6 +28,7 @@ dependencies = [
     "nltk",
     "pyloudnorm",
     "omegaconf",
+    "soundfile",
 ]
 
 [project.optional-dependencies]
