@@ -16,10 +16,12 @@ All three models are supported: `base`, `multilingual`, and `turbo`.
 
 ```bash
 cd /path/to/chatterbox
-python server/server.py [--model base|multilingual|turbo] [--device auto|cuda|cpu|mps] [--port 8000] [--host 127.0.0.1] [--debug]
+python server/server.py [--model base|multilingual|turbo] [--device auto|cuda|cpu|mps] [--dtype fp16|bf16|fp32] [--port 8000] [--host 127.0.0.1] [--debug]
 ```
 
 The server pre-loads the requested model on startup.  Only one model is kept in memory at a time; switching models evicts the previous one to free VRAM.
+
+Use `--dtype bf16` or `--dtype fp16` to halve VRAM usage and significantly improve throughput on CUDA GPUs (both are supported on Ampere and newer).  `bf16` is the safer default — it has the same numeric range as fp32 and avoids the overflow risk of fp16.  Omitting `--dtype` keeps the weights in their saved precision (fp32).
 
 ## Endpoints
 
@@ -45,6 +47,7 @@ Accepts a JSON body (`GenerateRequest`) and streams binary audio frames back via
 | `text` | — | Text to synthesize |
 | `model` | `multilingual` | `base` \| `multilingual` \| `turbo` |
 | `device` | `auto` | `auto` \| `cuda` \| `cpu` \| `mps` |
+| `dtype` | `null` | `fp16` \| `bf16` \| `fp32` \| `null` (server default). fp16/bf16 halve VRAM and improve throughput on CUDA GPUs |
 | `language_id` | `en` | BCP-47 code (multilingual only) |
 | `audio_id` | `null` | ID returned by `POST /upload-audio` |
 | `exaggeration` | `0.5` | Emotion exaggeration (base/multilingual) |
