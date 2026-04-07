@@ -1,20 +1,330 @@
-MIT License
+SOFTWARE - LICENSE TO USE
 
-Copyright (c) 2026 Alexandra Instituttet
+The Software (as defined below) is made available to You by Alexandra Instituttet A/S,
+Åbogade 34, 8200 Aarhus N, Denmark and may be utilised solely in accordance with the
+license terms stipulated in this document.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this
-software and associated documentation files (the "Software"), to deal in the Software
-without restriction, including without limitation the rights to use, copy, modify,
-merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to the following
-conditions:
+The license is based on "AI PUBS OPEN RAIL-S LICENSE", a copy of which is attached
+hereto with the following additions:
 
-The above copyright notice and this permission notice shall be included in all copies
-or substantial portions of the Software.
+1. The license is governed by the laws of the Kingdom of Denmark
+2. Any dispute arising out of or in connection herewith, including any disputes regarding
+   the existence, validity or termination of the license, shall be first referred to
+   mediation administered by the Danish Institute of Arbitration in accordance with the
+   Rules on Mediation adopted by the Board of the Danish Institute of Arbitration. If
+   the mediation proceedings are terminated without a settlement, the dispute shall be
+   finally settled by arbitration administered by the Danish Institute of Arbitration in
+   accordance with the Rules of Arbitration adopted by the Board of the Danish Institute
+   of Arbitration. The arbitral tribunal shall be composed of three arbitrators. The
+   place of arbitration shall be Aarhus, Denmark. The language to be used in the
+   arbitral proceedings shall be the English language.
+3. If, at any time, the compilation, storage, utilisation, or processing of the Software,
+   Complementary Material, or Data (all as defined below) constitute violation of
+   applicable laws, regardless of anything to the contrary in these conditions, the
+   license shall automatically become null and void without any liability for the
+   Licensor whatsoever.
+4. Supplementing Attachment A to the AI PUBS OPEN RAIL-S LICENSE, You additionally agree
+   not to use the Software or its Derivatives:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
-INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
-CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
-THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+   (a) To impersonate any person or entity or otherwise misrepresent its affiliation
+       with a person or entity, including (but not limited to) the creation of synthetic
+       speech (i) emulating a specific natural person or (ii) which is found to be
+       similar to a specific natural person's speech (regardless of whether the identity
+       of such natural person is known at the time of the creation);  or
+   (b) To detect or infer aspects and/or features of an identity of any natural persons,
+       such as name, family name, address, gender, sexual orientation, race, religion,
+       age, location (at any geographical level), skin color, society or political
+       affiliations, employment status and/or employment history, and health and medical
+       conditions.
+
+
+
+AI PUBS OPEN RAIL-M LICENSE
+
+
+Section I: PREAMBLE
+
+This OpenRAIL License is generally applicable to the Artifact(s)
+identified above.
+
+For valuable consideration, You and Licensor agree as follows:
+
+NOW THEREFORE, You and Licensor agree as follows:
+
+1. Definitions
+
+(a) “Application” refers to a sequence of instructions or statements
+    written in machine code language, including object code (that is the
+    product of a compiler), binary code (data using a two-symbol system)
+    or an intermediate language (such as register transfer language).
+
+(b) “Artifact” refers to a software application (in either binary or
+    source code format), Model, and/or Source Code, in accordance with
+    what is specified above as the “Licensed Artifact”.
+
+(c) ”Contribution” means any work, including any modifications or
+    additions to an Artifact, that is intentionally submitted to
+    Licensor for inclusion or incorporation in the Artifact directly or
+    indirectly by the rights owner. For the purposes of this definition,
+    “submitted” means any form of electronic, verbal, or written
+    communication sent to the Licensor or its representatives, including
+    but not limited to communication on electronic mailing lists, source
+    code control systems, and issue tracking systems that are managed
+    by, or on behalf of, the Licensor for the purpose of discussing,
+    sharing and improving the Artifact, but excluding communication that
+    is conspicuously marked or otherwise designated in writing by the
+    contributor as “Not a Contribution.”
+
+(d) “Contributor” means Licensor or any other individual or legal entity
+    that creates or owns a Contribution that is added to or incorporated
+    into an Artifact or its Derivative.
+
+(e) “Data” means a collection of information and/or content extracted
+    from the dataset used with a given Model, including to train,
+    pretrain, or otherwise evaluate the Model. The Data is not licensed
+    under this License.
+
+(f) “Derivative” means a work derived from or based upon an Artifact,
+    and includes all modified versions of such Artifact.
+
+(g) “Distribution” means any transmission, reproduction, publication or
+    other sharing of an Artifact or Derivative to a third party,
+    including providing a hosted service incorporating the Artifact,
+    which is made available by electronic or other remote means -
+    e.g. API-based or web access.
+
+(h) “Harm” includes but is not limited to physical, mental,
+    psychological, financial and reputational damage, pain, or loss.
+
+(i) “License” means the terms and conditions for use, reproduction, and
+    Distribution as defined in this document.
+
+(j) “Licensor” means the rights owner (by virtue of creation or
+    documented transfer of ownership) or entity authorized by the rights
+    owner (e.g., exclusive licensee) that is granting the rights in this
+    License.
+
+(k) “Model” means any machine-learning based assembly or assemblies
+    (including checkpoints), consisting of learnt weights, parameters
+    (including optimizer states), corresponding to the model
+    architecture as embodied in the Source Code.
+
+(l) “Output” means the results of operating a Model as embodied in
+    informational content resulting therefrom.
+
+(m) “Source Code” means any collection of text written using
+    human-readable programming language, including the code and scripts
+    used to define, run, load, benchmark or evaluate a Model or any
+    component thereof, and/or used to prepare data for training or
+    evaluation, if any. Source Code includes any accompanying
+    documentation, tutorials, examples, etc, if any. For clarity, the
+    term “Source Code” as used in this License includes any and all
+    Derivatives of such Source Code.
+
+(n) “Third Parties” means individuals or legal entities that are not
+    under common control with Licensor or You.
+
+(o) “Use” includes accessing and utilizing an Artifact, and may, in
+    connection with a Model, also include creating content, fine-tuning,
+    updating, running, training, evaluating and/or re-parametrizing such
+    Model.
+
+(p) “You” (or “Your”) means an individual or legal entity receiving and
+    exercising permissions granted by this License and/or making use of
+    the Artifact for permitted purposes and in any permitted field of
+    use, including usage of the Artifact in an end-use application -
+    e.g. chatbot, translator, image generator, etc.
+
+Section II: INTELLECTUAL PROPERTY RIGHTS
+
+Both copyright and patent grants may apply to the Artifact. The Artifact
+is subject to additional terms as described in Section III below, which
+govern the use of the Artifact in the event that Section II is held
+unenforceable or inapplicable.
+
+2. Grant of Copyright License. Conditioned upon compliance with Section
+III below and subject to the terms and conditions of this License, each
+Contributor hereby grants to You a worldwide, non-exclusive,
+royalty-free copyright license to reproduce, use, publicly display,
+publicly perform, sublicense, and distribute the Artifact and
+Derivatives thereof.
+
+3. Grant of Patent License. Conditioned upon compliance with Section III
+below and subject to the terms and conditions of this License, and only
+where and as applicable, each Contributor hereby grants to You a
+worldwide, non-exclusive, royalty-free, irrevocable (except as stated in
+this paragraph) patent license to make, have made, use, sell, offer to
+sell, import, and otherwise transfer the Artifact where such license
+applies only to those patent claims licensable by such Contributor that
+are necessarily infringed by their Contribution(s) alone or by
+combination of their Contribution(s) with the Artifact to which such
+Contribution(s) was submitted. If You institute patent litigation
+against any entity (including a cross-claim or counterclaim in a
+lawsuit) alleging that the Artifact and/or a Contribution incorporated
+within the Artifact constitutes direct or contributory patent
+infringement, then any patent licenses granted to You under this License
+in connection with the Artifact shall terminate as of the date such
+litigation is asserted or filed.
+
+Licensor and Contributor each have the right to grant the licenses
+above.
+
+Section III: CONDITIONS OF USAGE, DISTRIBUTION AND REDISTRIBUTION
+
+4. Use-based restrictions. The restrictions set forth in Attachment A
+are mandatory Use-based restrictions. Therefore You may not Use the
+Artifact in violation of such restrictions. You may Use the Artifact
+only subject to this License. You shall require all of Your users who
+use the Artifact or its Derivative to comply with the terms of this
+paragraph.
+
+5. The Output You Generate with a Model (as Artfact). Except as set
+forth herein, Licensor claims no rights in the Output You generate. You
+are accountable for the Output You generate and its subsequent uses. No
+use of the Output may contravene any provision as stated in this
+License.
+
+6. Distribution and Redistribution. You may host for Third Party remote
+access purposes (e.g. software-as-a-service), reproduce and distribute
+copies of the Artifact or its Derivatives in any medium, with or without
+modifications, provided that You meet the following conditions:
+
+1.  Use-based restrictions in paragraph 4 MUST be included as a
+    condition precedent to effect any type of legal agreement (e.g. a
+    license) governing the use and/or distribution of the Artifact or
+    its Derivatives, and You shall give such notice to any subsequent
+    Third Party recipients;
+2.  You shall give any Third Party recipients of the Artifact or its
+    Derivatives a copy of this License;
+3.  You shall cause any modified files to carry prominent notices
+    stating that You changed the files;
+4.  You shall retain all copyright, patent, trademark, and attribution
+    notices excluding those notices that do not pertain to any part of
+    the Artifact or its Derivatives.
+
+You may add Your own copyright statement to Your modifications and may
+provide additional or different license terms and conditions with
+respect to paragraph 6.1., to govern the use, reproduction, or
+Distribution of Your modifications, or for any Derivative, provided that
+Your use, reproduction, and Distribution of the Artifact or its
+Derivative otherwise complies with the conditions stated in this
+License. In other words, the Use-based restrictions in Attachment A form
+the minimum set of terms for You to license to Third Parties any
+Artifact or its Derivative, but You may add more restrictive terms if
+You deem it necessary.
+
+Section IV: OTHER PROVISIONS
+
+7. Updates and Runtime Restrictions. To the maximum extent permitted by
+law, Licensor reserves the right to restrict (remotely or otherwise)
+usage of the Artifact in violation of this License or update the
+Artifact through electronic means.
+
+8. Trademarks and related. Nothing in this License permits You to make
+use of Licensors’ trademarks, trade names, logos or to otherwise suggest
+endorsement or misrepresent the relationship between the parties; and
+any rights not expressly granted herein are reserved by the Licensors.
+
+9. Disclaimer of Warranty. Unless required by applicable law or agreed
+to in writing, Licensor provides the Artifact (and each Contributor
+provides its Contributions) on an “AS IS” BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied, including, without
+limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT,
+MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely
+responsible for determining the appropriateness of using the Artifact,
+and assume any risks associated with Your exercise of permissions under
+this License.
+
+10. Limitation of Liability. In no event and under no legal theory,
+whether in tort (including negligence), contract, or otherwise, unless
+required by applicable law (such as deliberate and grossly negligent
+acts) or agreed to in writing, shall any Contributor be liable to You
+for damages, including any direct, indirect, special, incidental, or
+consequential damages of any character arising as a result of this
+License or out of the use or inability to use the Artifact (including
+but not limited to damages for loss of goodwill, work stoppage, computer
+failure or malfunction, or any and all other commercial damages or
+losses), even if such Contributor has been advised of the possibility of
+such damages.
+
+11. If any provision of this License is held to be invalid, illegal or
+unenforceable, the remaining provisions shall be unaffected thereby and
+remain valid as if such provision had not been set forth herein.
+
+12. Term and Termination. The term of this License will commence upon
+the earlier of (a) Your acceptance of this License or (b) accessing the
+Artifact; and will continue in full force and effect until terminated in
+accordance with the terms and conditions herein. Licensor may terminate
+this License if You are in breach of any term or condition of this
+Agreement. Upon termination of this Agreement, You shall delete and
+cease use of the Artifact. Section 10 shall survive the termination of
+this License.
+
+END OF TERMS AND CONDITIONS
+
+Attachment A
+
+Use Restrictions
+
+You agree not to use the Artifact or its Derivatives in any of the
+following ways:
+
+1.  Discrimination
+
+    (a) To discriminate or exploit individuals or groups based on
+        legally protected characteristics and/or vulnerabilities.
+
+    (b) For purposes of administration of justice, law enforcement,
+        immigration, or asylum processes, such as predicting that a
+        natural person will commit a crime or the likelihood thereof.
+
+2.  Military
+
+    (a) For weaponry or warfare.
+
+3.  Legal
+
+    (a) To engage or enable fully automated decision-making that
+        adversely impacts a natural person's legal rights without
+        expressly and intelligibly disclosing the impact to such natural
+        person and providing an appeal process.
+
+    (b) To engage or enable fully automated decision-making that
+        creates, modifies or terminates a binding, enforceable
+        obligation between entities; whether these include natural
+        persons or not.
+
+4.  Disinformation
+
+    (a) To create, present or disseminate verifiably false or misleading
+        information for economic gain or to intentionally deceive the
+        public, including creating false impersonations of natural
+        persons.
+
+    (b) To synthesize or modify a natural person's appearance, voice, or
+        other individual characteristics, unless prior informed consent
+        of said natural person is obtained.
+
+    (c) To autonomously interact with a natural person, in text or audio
+        format, unless disclosure and consent is given prior to
+        interaction that the system engaging in the interaction is not a
+        natural person.
+
+5.  Privacy
+
+    (a) To utilize personal information to infer additional personal
+        information about a natural person, including but not limited to
+        legally protected characteristics, vulnerabilities or
+        categories; unless informed consent from the data subject to
+        collect said inferred personal information for a stated purpose
+        and defined duration is received.
+
+6.  Health
+
+    (a) To provide medical advice or make clinical decisions without
+        necessary (external) accreditation of the system; unless the use
+        is (i) in an internal research context with independent and
+        accountable oversight and/or (ii) with medical professional
+        oversight that is accompanied by any related compulsory
+        certification and/or safety/quality standard for the
+        implementation of the technology.
