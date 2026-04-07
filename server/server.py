@@ -575,7 +575,6 @@ if __name__ == "__main__":
     if DEBUG:
         print("🐛 Debug logging enabled")
 
-    global _default_dtype
     _default_dtype = args.dtype  # requests that omit dtype will use this
 
     device = get_device(args.device)
