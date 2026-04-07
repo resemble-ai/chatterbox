@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 from transformers import LlamaModel, LlamaConfig, GPT2Config, GPT2Model
+from .inference.kv_truncating_cache import KVTruncatingStaticCache
 from transformers.generation.logits_process import (
     LogitsProcessorList,
     RepetitionPenaltyLogitsProcessor,
@@ -18,6 +19,8 @@ from transformers.generation.logits_process import (
     TopPLogitsWarper,
     MinPLogitsWarper,
 )
+from .fast_min_p_warper import FastMinPLogitsWarper
+from .fast_top_p_warper import FastTopPLogitsWarper
 from .modules.learned_pos_emb import LearnedPositionEmbeddings
 
 from .modules.cond_enc import T3CondEnc, T3Cond
@@ -25,6 +28,7 @@ from .modules.t3_config import T3Config
 from .llama_configs import LLAMA_CONFIGS
 from .inference.t3_hf_backend import T3HuggingfaceBackend
 from .inference.alignment_stream_analyzer import AlignmentStreamAnalyzer
+from .t3_cuda_graphs import T3StepCUDAGraphWrapper, get_next_bucket, TOKEN_LIMIT
 from ..utils import AttrDict
 
 
@@ -85,10 +89,74 @@ class T3(nn.Module):
         self.text_head = nn.Linear(self.cfg.hidden_size, hp.text_tokens_dict_size, bias=False)
         self.speech_head = nn.Linear(self.cfg.hidden_size, hp.speech_tokens_dict_size, bias=self.is_gpt)
         self.compiled = False
+        self.init_processors()
 
     @property
     def device(self):
         return self.speech_head.weight.device
+
+    def init_processors(self, top_p=1.0, min_p=0.05, repetition_penalty=1.2):
+        self.top_p_warper = FastTopPLogitsWarper(top_p=top_p, device=self.device)
+        self.min_p_warper = FastMinPLogitsWarper(min_p=min_p, device=self.device)
+        self.repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=repetition_penalty)
+        # Track as Python floats to avoid GPU tensor comparisons (which cause CUDA syncs)
+        self._top_p = float(top_p)
+        self._min_p = float(min_p)
+        self._repetition_penalty = float(repetition_penalty)
+
+    def update_processors(self, top_p, min_p, repetition_penalty):
+        if self._top_p != top_p:
+            self.top_p_warper.top_p = torch.tensor(top_p, device=self.top_p_warper.top_p.device)
+            self._top_p = float(top_p)
+        if self._min_p != min_p:
+            self.min_p_warper.min_p = torch.tensor(min_p, device=self.min_p_warper.min_p.device)
+            self._min_p = float(min_p)
+        if self._repetition_penalty != repetition_penalty:
+            self.repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=repetition_penalty)
+            self._repetition_penalty = float(repetition_penalty)
+
+    def get_speech_pos_embedding_cache(self, max_gen_tokens, dtype):
+        if not hasattr(self, '_speech_pos_embedding_cache') or \
+                self._speech_pos_embedding_cache.size(0) < max_gen_tokens:
+            cache = [self.speech_pos_emb.get_fixed_embedding(i) for i in range(max_gen_tokens)]
+            self._speech_pos_embedding_cache = torch.stack(cache).to(device=self.device)
+        return self._speech_pos_embedding_cache.to(dtype=dtype)
+
+    def init_speech_embedding_cache(self, vocab_size, dtype):
+        if not hasattr(self, '_speech_embedding_cache') or \
+                self._speech_embedding_cache.size(0) < vocab_size:
+            tokens = torch.arange(vocab_size, device=self.device)
+            self._speech_embedding_cache = self.speech_emb(tokens)
+        return self._speech_embedding_cache.to(dtype=dtype)
+
+    def get_or_reset_static_cache(self, max_batch_size, max_cache_len):
+        """Allocate StaticCache once; reset in-place on subsequent calls.
+        CUDA graphs are captured with specific memory addresses — reusing the same
+        object keeps those addresses stable across generation calls."""
+        if not hasattr(self, '_static_kv_cache'):
+            self._static_kv_cache = KVTruncatingStaticCache(
+                config=self._patched_model_fast.config,
+                max_batch_size=max_batch_size,
+                max_cache_len=max_cache_len,
+                device=self.device,
+                dtype=self._patched_model_fast.dtype if hasattr(self._patched_model_fast, 'dtype') else torch.float32,
+            )
+            self._static_kv_cache_params = (max_batch_size, max_cache_len)
+        elif self._static_kv_cache_params != (max_batch_size, max_cache_len):
+            # Params changed — must reallocate (also invalidates captured graphs)
+            if hasattr(self, '_cudagraph_wrapper'):
+                self._cudagraph_wrapper.reset()
+            self._static_kv_cache = KVTruncatingStaticCache(
+                config=self._patched_model_fast.config,
+                max_batch_size=max_batch_size,
+                max_cache_len=max_cache_len,
+                device=self.device,
+                dtype=self._patched_model_fast.dtype if hasattr(self._patched_model_fast, 'dtype') else torch.float32,
+            )
+            self._static_kv_cache_params = (max_batch_size, max_cache_len)
+        else:
+            self._static_kv_cache.reset()
+        return self._static_kv_cache
 
     def prepare_conditioning(self, t3_cond: T3Cond):
         """
@@ -390,10 +458,8 @@ class T3(nn.Module):
         generated_ids = bos_token.clone()
         predicted = []  # To store the predicted tokens
 
-        # Instantiate the logits processors.
-        min_p_warper = MinPLogitsWarper(min_p=min_p)
-        top_p_warper = TopPLogitsWarper(top_p=top_p)
-        repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
+        # Update pre-instantiated logits processors with current call's parameters.
+        self.update_processors(top_p=top_p, min_p=min_p, repetition_penalty=float(repetition_penalty))
 
         # ---- Initial Forward Pass (no kv_cache yet) ----
         output = self.patched_model(
@@ -426,15 +492,15 @@ class T3(nn.Module):
 
             # Apply repetition penalty
             ids_for_proc = generated_ids[:1, ...]   # batch = 1
-            logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
+            logits = self.repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
             
             # Apply temperature scaling.
             if temperature != 1.0:
                 logits = logits / temperature
                 
             # Apply min_p and top_p filtering
-            logits = min_p_warper(ids_for_proc, logits)
-            logits = top_p_warper(ids_for_proc, logits)
+            logits = self.min_p_warper(ids_for_proc, logits)
+            logits = self.top_p_warper(ids_for_proc, logits)
 
             # Convert logits to probabilities and sample the next token.
             probs = torch.softmax(logits, dim=-1)
@@ -547,3 +613,220 @@ class T3(nn.Module):
             all_tokens = all_tokens[:, :-1]
 
         return all_tokens
+
+    @torch.inference_mode()
+    def inference_fast(
+        self,
+        *,
+        t3_cond: T3Cond,
+        text_tokens: Tensor,
+        max_new_tokens: int = 1000,
+        max_cache_len: int = TOKEN_LIMIT,
+        temperature: float = 0.8,
+        cfg_weight: float = 0.5,
+        repetition_penalty: float = 1.2,
+        min_p: float = 0.05,
+        top_p: float = 1.0,
+    ):
+        """Fast inference using CUDA graphs and StaticCache. No AlignmentStreamAnalyzer.
+
+        Falls back to regular inference() on non-CUDA devices.
+        Note: cfg_weight, temperature, and max_cache_len must remain constant across
+        calls for CUDA graph reuse to be valid.
+        """
+        if self.device.type != "cuda":
+            logger.info("generate_fast() called on non-CUDA device (%s) — falling back to generate()", self.device)
+            return self.inference(
+                t3_cond=t3_cond,
+                text_tokens=text_tokens,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                cfg_weight=cfg_weight,
+                repetition_penalty=repetition_penalty,
+                min_p=min_p,
+                top_p=top_p,
+            )
+
+        # Build the fast-path backend once (separate from inference()'s self.patched_model)
+        if not hasattr(self, '_patched_model_fast'):
+            self._patched_model_fast = T3HuggingfaceBackend(
+                config=self.cfg,
+                llama=self.tfmr,
+                speech_enc=self.speech_emb,
+                speech_head=self.speech_head,
+                alignment_stream_analyzer=None,  # disabled for fast path
+            )
+            # Re-init processors now that self.device is guaranteed CUDA.
+            # init_processors() is also called in __init__ (on CPU), so this moves
+            # the warper tensors to the correct device for graph capture.
+            self.init_processors()
+
+        text_tokens = torch.atleast_2d(text_tokens).to(dtype=torch.long, device=self.device)
+
+        initial_speech_tokens = self.hp.start_speech_token * torch.ones_like(text_tokens[:, :1])
+        embeds, _ = self.prepare_input_embeds(
+            t3_cond=t3_cond,
+            text_tokens=text_tokens,
+            speech_tokens=initial_speech_tokens,
+            cfg_weight=cfg_weight,
+        )
+
+        # Pre-compute embedding caches (needed for bos_embed and the generation loop)
+        self.get_speech_pos_embedding_cache(max_new_tokens + 1, dtype=embeds.dtype)
+        self.init_speech_embedding_cache(self.hp.speech_tokens_dict_size, dtype=embeds.dtype)
+
+        bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=self.device)
+        bos_embed = self._speech_embedding_cache[bos_token] + self._speech_pos_embedding_cache[0]
+        if cfg_weight > 0.0:
+            bos_embed = torch.cat([bos_embed, bos_embed])
+        inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
+        seq_len = inputs_embeds.shape[1]  # actual context length, before padding
+
+        # Pad to TOKEN_LIMIT for static shape (required for CUDA graph capture)
+        pad_len = TOKEN_LIMIT - inputs_embeds.shape[1]
+        if pad_len > 0:
+            pad = torch.zeros(
+                inputs_embeds.shape[0], pad_len, inputs_embeds.shape[2],
+                dtype=inputs_embeds.dtype, device=self.device,
+            )
+            inputs_embeds = torch.cat([inputs_embeds, pad], dim=1)
+
+        effective_batch = 2 if cfg_weight > 0.0 else 1
+        kv_cache = self.get_or_reset_static_cache(
+            max_batch_size=effective_batch, max_cache_len=max_cache_len
+        )
+
+        self.update_processors(top_p=top_p, min_p=min_p, repetition_penalty=float(repetition_penalty))
+
+        # cfg_weight and temperature are baked into captured CUDA graphs — changing them
+        # between calls would produce silently wrong output. Detect the change and reset.
+        if hasattr(self, '_cudagraph_wrapper'):
+            if cfg_weight != getattr(self, '_last_cfg_weight', None) or \
+                    temperature != getattr(self, '_last_temperature', None):
+                self._cudagraph_wrapper.reset()
+                del self._cudagraph_wrapper
+        self._last_cfg_weight = cfg_weight
+        self._last_temperature = temperature
+
+        # Sync processor refs on existing wrapper (update_processors may have replaced them)
+        if hasattr(self, '_cudagraph_wrapper'):
+            self._cudagraph_wrapper.repetition_penalty_processor = self.repetition_penalty_processor
+            self._cudagraph_wrapper.min_p_warper = self.min_p_warper
+            self._cudagraph_wrapper.top_p_warper = self.top_p_warper
+
+        # Initial forward pass: fills KV cache with the full prompt context
+        output_logits = _fast_initial_forward_pass(
+            inputs_embeds, kv_cache, self._patched_model_fast, seq_len
+        )
+
+        # Create CUDA graph wrapper once; reuse on subsequent calls
+        if not hasattr(self, '_cudagraph_wrapper'):
+            self._cudagraph_wrapper = T3StepCUDAGraphWrapper(
+                _fast_generate_t3_token,
+                self._patched_model_fast,
+                kv_cache,
+                self.repetition_penalty_processor,
+                self.min_p_warper,
+                self.top_p_warper,
+            )
+
+        # generated_ids: batch_size=1 (we only track the conditional sequence)
+        bos_len = bos_token.shape[1]
+        generated_ids = torch.full(
+            (1, bos_len + TOKEN_LIMIT), 0, dtype=torch.long, device=self.device
+        )
+        generated_ids[0, :bos_len] = bos_token
+
+        batch_idx = torch.zeros(1, dtype=torch.long, device=self.device)
+        indices = torch.arange(1, max_new_tokens + 1, device=self.device)
+
+        stop_token = torch.tensor(self.hp.stop_speech_token, device=self.device)
+        length_hint = text_tokens.shape[1] * 2
+
+        for i in tqdm(range(max_new_tokens), desc="Sampling (fast)", dynamic_ncols=True):
+            i_tensor = indices[i]
+            torch.compiler.cudagraph_mark_step_begin()
+            max_position = get_next_bucket(i + seq_len)
+            outputs = self._cudagraph_wrapper(
+                self._speech_embedding_cache,
+                output_logits,
+                i_tensor,
+                batch_idx,
+                self._speech_pos_embedding_cache,
+                generated_ids,
+                cfg_weight,
+                temperature,
+                stride_length=1,
+                max_position=max_position,
+            )
+            output_logits = outputs[1].clone()
+            generated_ids = outputs[2].clone()
+
+            if i > length_hint and i % 20 == 0:
+                if (generated_ids[0] == stop_token).any():
+                    break
+
+        return generated_ids
+
+
+def _fast_initial_forward_pass(inputs_embeds, kv_cache, patched_model, seq_len):
+    """Run the full prompt through the model to fill the KV cache."""
+    inputs_embeds = inputs_embeds[:, :seq_len, :]
+    cache_position = torch.arange(seq_len, device=inputs_embeds.device)
+    out = patched_model(
+        inputs_embeds=inputs_embeds,
+        past_key_values=kv_cache,
+        cache_position=cache_position,
+        output_hidden_states=False,
+        output_attentions=False,
+    )
+    return out.logits[:, -1:, :]
+
+
+def _fast_generate_t3_token(
+    speech_embedding_cache,
+    output_logits,
+    i_tensor,
+    batch_idx,
+    speech_pos_embedding_cache,
+    generated_ids,
+    cfg_weight,
+    temperature,
+    repetition_penalty_processor,
+    min_p_warper,
+    top_p_warper,
+    patched_model,
+    kv_cache,
+    stride_length=1,
+    max_position=None,
+    alignment_stream_analyzer=None,
+):
+    """Single-token generation step; designed to be wrapped in a CUDA graph."""
+    logits = output_logits[:, -1, :]
+    if cfg_weight > 0.0:
+        logits = logits[0:1] + cfg_weight * (logits[0:1] - logits[1:2])
+
+    logits = repetition_penalty_processor(generated_ids, logits)
+    if temperature != 1.0:
+        logits = logits / temperature
+    logits = min_p_warper(None, logits)
+    logits = top_p_warper(None, logits)
+
+    probs = torch.softmax(logits, dim=-1)
+    next_token = torch.multinomial(probs, num_samples=1)
+    generated_ids.index_put_((batch_idx, i_tensor), next_token.squeeze(-1))
+
+    position_embed = torch.index_select(speech_pos_embedding_cache, 0, i_tensor).squeeze(0)
+    next_token_embed = speech_embedding_cache[next_token] + position_embed
+    if cfg_weight > 0.0:
+        next_token_embed = torch.cat([next_token_embed, next_token_embed])
+
+    out = patched_model(
+        inputs_embeds=next_token_embed,
+        past_key_values=kv_cache,
+        cache_position=kv_cache.get_seq_length().unsqueeze(0),
+        max_position=max_position,
+        output_hidden_states=False,
+        output_attentions=False,
+    )
+    return next_token, out.logits

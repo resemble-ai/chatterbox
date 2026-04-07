@@ -1,4 +1,5 @@
 .vscode
+.DS_Store
 
 # Pylance
 pyrightconfig.json
@@ -59,4 +60,3 @@ src/finetune/cache_files/*
 # Environment files (may contain secrets)
 .env
 .env.*
-

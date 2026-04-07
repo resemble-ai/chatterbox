@@ -1,12 +1,18 @@
 # CoRal Chatterbox TTS
 
-A fork of [Resemble AI's Chatterbox TTS](https://github.com/resemble-ai/chatterbox), extended by the [Alexandra Institute](https://www.alexandra.dk/) as part of the [CoRal project](https://huggingface.co/CoRal-project) with a finetuning framework targeted towards Danish language support, though it can easily be adapted for other languages.
+A fork of [Resemble AI's Chatterbox TTS](https://github.com/resemble-ai/chatterbox), extended by the [Alexandra Institute](https://www.alexandra.dk/) as part of the [CoRal project](https://huggingface.co/CoRal-project) with a finetuning framework and optimised inference targeted towards Danish language support, though it can easily be adapted for other languages.
 
-The finetuning framework supports all three Chatterbox model variants (base, multilingual, turbo). The original Chatterbox inference code is preserved as-is under `src/chatterbox/`. Finetuning scripts inspired by [stlohrey's chatterbox-finetuning](https://github.com/stlohrey/chatterbox-finetuning).
+The finetuning framework supports all three Chatterbox model variants (base, multilingual, turbo). The original Chatterbox inference code is preserved under `src/chatterbox/`, and a thin blocking inference wrapper adds text normalization, sentence splitting, and custom checkpoint loading without changing the core finetuning path. Finetuning scripts inspired by [stlohrey's chatterbox-finetuning](https://github.com/stlohrey/chatterbox-finetuning).
+
+- [Installation](#installation)
+- [Setup](#setup)
+- [Finetuning](#finetuning)
+- [Inference](#inference)
+- [License](#license)
 
 ## Installation
 
-Requires Python 3.10 or later. Tested on Python 3.11.
+Requires Python >=3.10, <3.14. Tested on Python 3.11.
 
 We recommend [uv](https://docs.astral.sh/uv/) as the package manager:
 
@@ -14,16 +20,13 @@ We recommend [uv](https://docs.astral.sh/uv/) as the package manager:
 # Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install Python 3.11 (if not already available)
-uv python install 3.11
-
 # Install base dependencies
 uv sync
 
-# With finetuning dependencies
-uv sync --extra finetune
+# With finetuning dependencies (requires Python >=3.11, <3.14)
+uv sync --extra finetune --python 3.12
 
-# With multilingual dependencies
+# With multilingual dependencies (only required for Chinese language support)
 uv sync --extra multilingual
 ```
 
@@ -32,7 +35,7 @@ Alternatively, with pip:
 ```bash
 pip install -e .
 pip install -e ".[finetune]"
-pip install -e ".[multilingual]"
+pip install -e ".[multilingual]"  # only required for Chinese language support
 ```
 
 ### CUDA Compatibility
@@ -251,11 +254,101 @@ Two Jupyter notebooks in `src/finetune/utils/` for uploading models to Hugging F
 
 Both notebooks stage files into a clean temporary directory before upload to avoid including unwanted artifacts.
 
+## Inference
+
+`ChatterboxInference` is the recommended entry point for all inference use cases. It wraps the base, multilingual, and turbo model variants and adds text normalisation, sentence splitting, inter-sentence silence, and Hub/local model loading.
+
+> **Intended use:** `ChatterboxInference` is designed for single-caller scenarios — local scripts, research pipelines, and single-worker servers. It is not suited for concurrent multi-user serving, where each request would require its own model instance. Production-scale serving with request batching and concurrency would require a dedicated inference server implementation.
+
+### Loading
+
+```python
+import torchaudio
+from chatterbox.inference import ChatterboxInference
+
+# Default pretrained model from Hugging Face Hub
+model = ChatterboxInference.from_pretrained(model_type="multilingual", language="da", device="cuda")
+
+# Custom Hub repo (e.g. a finetuned model)
+model = ChatterboxInference.from_pretrained(
+    model_type="multilingual",
+    language="da",
+    device="cuda",
+    repo_id="CoRal-project/roest-v3-chatterbox-500m",
+)
+
+# Local model directory
+model = ChatterboxInference.from_local("path/to/model", model_type="multilingual", language="da", device="cuda")
+```
+
+`model_type` is one of `"base"`, `"multilingual"`, or `"turbo"`. When using a finetuned checkpoint, match the `model_type` to the variant the checkpoint was trained from.
+
+### Blocking generation
+
+```python
+# Standard path — works on CPU and CUDA
+wav = model.generate("Hej, verden.", audio_prompt_path="reference.wav")
+
+# Fast CUDA graph path — ~2× faster T3 decode on GPU; falls back to generate() on CPU
+wav = model.generate_fast("Hej, verden.", audio_prompt_path="reference.wav")
+
+torchaudio.save("output.wav", wav, model.sr)
+```
+
+`generate_fast()` accepts the same parameters as `generate()`. The first call per session captures the CUDA graph (one-time cost); subsequent calls reuse it.
+
+### Text preprocessing
+
+Before synthesis, `ChatterboxInference` applies two preprocessing steps by default (both can be disabled per-call):
+
+- **Text normalisation** — numbers are expanded to words in a language-aware way using [`num2words`](https://github.com/savoirfairelinux/num2words). For example, `"Der er 1.000 deltagere"` becomes `"Der er et tusinde deltagere"` in Danish, and `"There are 1,000 attendees"` becomes `"There are one thousand attendees"` in English. Thousands separators and decimal conventions are handled per language.
+- **Sentence splitting** — long input is split into sentences using NLTK's `sent_tokenize`, with per-language tokenisation models for 18 languages. Each sentence is synthesised independently and concatenated with a configurable inter-sentence silence (default 100 ms). This keeps individual T3 decode sequences short and improves prosody at sentence boundaries.
+
+Both steps are controlled via the `normalize_text` and `sentence_split` flags on the constructor or per-call.
+
+### Streaming
+
+Streaming methods always split on sentences — each yielded `torch.Tensor` corresponds to one sentence and is ready to play back as soon as it is synthesised, without waiting for the rest. Concatenating all chunks produces the same audio as the equivalent blocking call.
+
+| Method | Style | Fast path |
+|---|---|---|
+| `generate_stream_sync` | sync generator | no |
+| `generate_stream_async` | async generator | no |
+| `generate_stream_fast_sync` | sync generator | yes (CUDA) |
+| `generate_stream_fast_async` | async generator | yes (CUDA) |
+
+```python
+text = "Første sætning fylder lidt. Anden sætning kommer hurtigt efter. Tredje sætning afslutter det hele."
+
+# Sync — each chunk is one sentence, ready to play as soon as it is synthesised
+for chunk in model.generate_stream_fast_sync(text, audio_prompt_path="ref.wav"):
+    send_to_playback(chunk)
+
+# Async — same behaviour inside a FastAPI or other async server
+async for chunk in model.generate_stream_fast_async(text, audio_prompt_path="ref.wav"):
+    await send_to_client(chunk)
+```
+
+### Speaker conditioning
+
+`prepare_conditionals()` pre-computes and caches speaker embeddings from a reference audio file. Call it once to avoid re-encoding on every sentence when reusing the same voice across multiple calls:
+
+```python
+model.prepare_conditionals("reference.wav")
+wav1 = model.generate("First sentence.")
+wav2 = model.generate("Second sentence.")  # no re-encoding
+```
+
 ## Repository Structure
 
 ```
 src/
-  chatterbox/              # Upstream Chatterbox inference code (unchanged)
+  chatterbox/              # Chatterbox inference code (extended with fast CUDA inference and streaming)
+    inference.py           # ChatterboxInference wrapper (added)
+    utils/
+      normalizer.py        # Language-aware text normalisation, e.g. number-to-words (added)
+      splitter.py          # Sentence splitting via NLTK (added)
+      device.py            # Device utilities (added)
   finetune/                # Finetuning framework (this fork's addition)
     finetune_t3.py         # Main training entry point
     preprocess_dataset.py  # Dataset preprocessing (speaker embeddings)
@@ -273,44 +366,6 @@ src/
       upload_checkpoint.ipynb   # Upload checkpoint-assembled model to HF
       text_examples.txt         # Test prompts for checkpoint testing
 ```
-
-## Upstream Chatterbox
-
-For Chatterbox inference documentation, model zoo, usage examples, supported languages, and watermarking details, see the [upstream Chatterbox repository](https://github.com/resemble-ai/chatterbox).
-
-### Using a Finetuned Model
-
-The upstream Chatterbox library hardcodes its own Hugging Face repository for `from_pretrained()`. To run inference with a finetuned model hosted on a different repository, download the model manually and use `from_local()`:
-
-```python
-import os
-import torchaudio as ta
-from huggingface_hub import snapshot_download
-from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-
-REPO_ID = "CoRal-project/roest-v3-chatterbox-500m"
-device = "cuda"  # Change to "cpu" if no GPU is available
-
-# Download the finetuned model
-model_dir = snapshot_download(
-    repo_id=REPO_ID,
-    token=os.getenv("HF_TOKEN") or True,
-    allow_patterns=["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"],
-)
-
-# Load from the local download directory
-model = ChatterboxMultilingualTTS.from_local(model_dir, device=device)
-
-# Generate speech
-wav = model.generate(
-    "Hej, dette er en test af den fintunede model.",
-    language_id="da", #Multilingual specific argument
-    audio_prompt_path="reference.wav",
-)
-ta.save("output.wav", wav, model.sr)
-```
-
-This applies to all three variants. Use `ChatterboxTTS`, `ChatterboxMultilingualTTS`, or `ChatterboxTurboTTS` with `from_local()` accordingly.
 
 ## Acknowledgements
 
@@ -334,9 +389,6 @@ If you use the Chatterbox models, please cite the original work:
 
 ## Roadmap
 
-- [ ] Streaming inference support
-- [ ] Optimized generation (reduced latency, faster decoding)
+- [x] Streaming inference support
+- [x] Optimised generation (reduced latency, faster decoding)
 
-## License
-
-This project is licensed under the [MIT License](LICENSE), same as the upstream Chatterbox repository.
