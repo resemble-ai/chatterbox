@@ -402,7 +402,9 @@ class HiFTGenerator(nn.Module):
         return spec[..., 0], spec[..., 1]
 
     def _istft(self, magnitude, phase):
-        magnitude = torch.clip(magnitude, max=1e2)
+        # torch.istft only supports float32/float64
+        magnitude = torch.clip(magnitude, max=1e2).float()
+        phase = phase.float()
         real = magnitude * torch.cos(phase)
         img = magnitude * torch.sin(phase)
         inverse_transform = torch.istft(torch.complex(real, img), self.istft_params["n_fft"], self.istft_params["hop_len"],
@@ -410,8 +412,9 @@ class HiFTGenerator(nn.Module):
         return inverse_transform
 
     def decode(self, x: torch.Tensor, s: torch.Tensor = torch.zeros(1, 1, 0)) -> torch.Tensor:
-        s_stft_real, s_stft_imag = self._stft(s.squeeze(1))
-        s_stft = torch.cat([s_stft_real, s_stft_imag], dim=1)
+        # torch.stft only supports float32/float64; cast back to model dtype afterwards
+        s_stft_real, s_stft_imag = self._stft(s.squeeze(1).float())
+        s_stft = torch.cat([s_stft_real, s_stft_imag], dim=1).to(x.dtype)
 
         x = self.conv_pre(x)
         for i in range(self.num_upsamples):
