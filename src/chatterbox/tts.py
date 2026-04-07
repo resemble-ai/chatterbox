@@ -93,11 +93,14 @@ class Conditionals:
     t3: T3Cond
     gen: dict
 
-    def to(self, device):
-        self.t3 = self.t3.to(device=device)
+    def to(self, device=None, dtype=None):
+        self.t3 = self.t3.to(device=device, dtype=dtype)
         for k, v in self.gen.items():
             if torch.is_tensor(v):
-                self.gen[k] = v.to(device=device)
+                if dtype is not None and v.is_floating_point():
+                    self.gen[k] = v.to(device=device, dtype=dtype)
+                else:
+                    self.gen[k] = v.to(device=device)
         return self
 
     def save(self, fpath: Path):
@@ -138,7 +141,7 @@ class ChatterboxTTS:
         self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
+    def from_local(cls, ckpt_dir, device, dtype=None) -> 'ChatterboxTTS':
         ckpt_dir = Path(ckpt_dir)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
@@ -151,20 +154,20 @@ class ChatterboxTTS:
         ve.load_state_dict(
             load_file(ckpt_dir / "ve.safetensors")
         )
-        ve.to(device).eval()
+        ve.to(device=device, dtype=dtype).eval()
 
         t3 = T3()
         t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
-        t3.to(device).eval()
+        t3.to(device=device, dtype=dtype).eval()
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
             load_file(ckpt_dir / "s3gen.safetensors"), strict=False
         )
-        s3gen.to(device).eval()
+        s3gen.to(device=device, dtype=dtype).eval()
 
         tokenizer = EnTokenizer(
             str(ckpt_dir / "tokenizer.json")
@@ -172,12 +175,12 @@ class ChatterboxTTS:
 
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
+            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device=device, dtype=dtype)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTTS':
+    def from_pretrained(cls, device, dtype=None) -> 'ChatterboxTTS':
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -189,7 +192,7 @@ class ChatterboxTTS:
         for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
             local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
 
-        return cls.from_local(Path(local_path).parent, device)
+        return cls.from_local(Path(local_path).parent, device, dtype=dtype)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav

@@ -97,11 +97,14 @@ class Conditionals:
     t3: T3Cond
     gen: dict
 
-    def to(self, device):
-        self.t3 = self.t3.to(device=device)
+    def to(self, device=None, dtype=None):
+        self.t3 = self.t3.to(device=device, dtype=dtype)
         for k, v in self.gen.items():
             if torch.is_tensor(v):
-                self.gen[k] = v.to(device=device)
+                if dtype is not None and v.is_floating_point():
+                    self.gen[k] = v.to(device=device, dtype=dtype)
+                else:
+                    self.gen[k] = v.to(device=device)
         return self
 
     def save(self, fpath: Path):
@@ -142,7 +145,7 @@ class ChatterboxTurboTTS:
         self.watermarker = perth.PerthImplicitWatermarker()
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxTurboTTS':
+    def from_local(cls, ckpt_dir, device, dtype=None) -> 'ChatterboxTurboTTS':
         ckpt_dir = Path(ckpt_dir)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
@@ -155,7 +158,7 @@ class ChatterboxTurboTTS:
         ve.load_state_dict(
             load_file(ckpt_dir / "ve.safetensors")
         )
-        ve.to(device).eval()
+        ve.to(device=device, dtype=dtype).eval()
 
         # Turbo specific hp
         hp = T3Config(text_tokens_dict_size=50276)
@@ -172,14 +175,14 @@ class ChatterboxTurboTTS:
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
         del t3.tfmr.wte
-        t3.to(device).eval()
+        t3.to(device=device, dtype=dtype).eval()
 
         s3gen = S3Gen(meanflow=True)
         weights = load_file(ckpt_dir / "s3gen_meanflow.safetensors")
         s3gen.load_state_dict(
             weights, strict=True
         )
-        s3gen.to(device).eval()
+        s3gen.to(device=device, dtype=dtype).eval()
 
         tokenizer = AutoTokenizer.from_pretrained(ckpt_dir)
         if tokenizer.pad_token is None:
@@ -190,12 +193,12 @@ class ChatterboxTurboTTS:
         conds = None
         builtin_voice = ckpt_dir / "conds.pt"
         if builtin_voice.exists():
-            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
+            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device=device, dtype=dtype)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTurboTTS':
+    def from_pretrained(cls, device, dtype=None) -> 'ChatterboxTurboTTS':
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -211,7 +214,7 @@ class ChatterboxTurboTTS:
             allow_patterns=["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"]
         )
 
-        return cls.from_local(local_path, device)
+        return cls.from_local(local_path, device, dtype=dtype)
 
     def norm_loudness(self, wav, sr, target_lufs=-27):
         try:

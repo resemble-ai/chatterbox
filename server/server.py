@@ -78,8 +78,25 @@ def get_device(device_str: str) -> str:
     return device_str
 
 
-def load_model(model_name: str, device: str):
-    key = f"{model_name}:{device}"
+_DTYPE_MAP = {
+    "fp16": torch.float16,
+    "bf16": torch.bfloat16,
+    "fp32": torch.float32,
+}
+
+
+def parse_dtype(dtype_str: str):
+    """Convert a dtype string ('fp16', 'bf16', 'fp32') to a torch.dtype, or None."""
+    if dtype_str is None:
+        return None
+    dtype = _DTYPE_MAP.get(dtype_str.lower())
+    if dtype is None:
+        raise ValueError(f"Unknown dtype '{dtype_str}'. Choose from: fp16, bf16, fp32.")
+    return dtype
+
+
+def load_model(model_name: str, device: str, dtype=None):
+    key = f"{model_name}:{device}:{dtype}"
     if key in _loaded:
         return _loaded[key]
 
@@ -90,17 +107,18 @@ def load_model(model_name: str, device: str):
     if device.startswith("cuda"):
         torch.cuda.empty_cache()
 
-    print(f"Loading model '{model_name}' on {device}…")
+    dtype_label = dtype if dtype is not None else "default"
+    print(f"Loading model '{model_name}' on {device} (dtype={dtype_label})…")
 
     if model_name == "base":
         from chatterbox.tts import ChatterboxTTS
-        model = ChatterboxTTS.from_pretrained(device=device)
+        model = ChatterboxTTS.from_pretrained(device=device, dtype=dtype)
     elif model_name == "multilingual":
         from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-        model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+        model = ChatterboxMultilingualTTS.from_pretrained(device=device, dtype=dtype)
     elif model_name == "turbo":
         from chatterbox.tts_turbo import ChatterboxTurboTTS
-        model = ChatterboxTurboTTS.from_pretrained(device=device)
+        model = ChatterboxTurboTTS.from_pretrained(device=device, dtype=dtype)
     else:
         raise ValueError(f"Unknown model '{model_name}'")
 
@@ -124,6 +142,7 @@ class GenerateRequest(BaseModel):
     text: str = Field(..., description="Text to synthesize.")
     model: str = Field("multilingual", description="Model to use: base | multilingual | turbo.")
     device: str = Field("auto", description="Compute device: auto | cuda | cpu | mps.")
+    dtype: Optional[str] = Field(None, description="Model precision: fp16 | bf16 | fp32 | null (server default). fp16/bf16 halve VRAM and can significantly improve throughput on CUDA GPUs.")
     language_id: str = Field("en", description="BCP-47 language code (multilingual model only).")
     audio_prompt_path: Optional[str] = Field(None, description="Server-side path to a reference audio file for voice cloning (API use).")
     audio_id: Optional[str] = Field(None, description="ID of a previously uploaded reference audio file (returned by POST /upload-audio).")
@@ -290,7 +309,8 @@ def audio_stream(req: "GenerateRequest", resolved_audio_path):
     import time
 
     device = get_device(req.device)
-    model = load_model(req.model, device)
+    dtype = parse_dtype(req.dtype)
+    model = load_model(req.model, device, dtype=dtype)
 
     def make_frame(audio_tensor) -> bytes:
         samples = audio_tensor.squeeze().cpu().numpy().astype("float32")
@@ -518,6 +538,9 @@ if __name__ == "__main__":
                         help="Model to pre-load on startup (default: multilingual)")
     parser.add_argument("--device", default="auto",
                         help="Device: auto|cuda|cpu|mps (default: auto)")
+    parser.add_argument("--dtype", default=None, choices=["fp16", "bf16", "fp32"],
+                        help="Model precision: fp16 | bf16 | fp32 (default: keep weights as-is). "
+                             "fp16/bf16 halve VRAM usage and can significantly improve throughput on CUDA GPUs.")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--debug", action="store_true",
@@ -531,12 +554,13 @@ if __name__ == "__main__":
         print("🐛 Debug logging enabled")
 
     device = get_device(args.device)
+    dtype = parse_dtype(args.dtype)
     print(f"Pre-loading '{args.model}' on {device}…")
-    load_model(args.model, device)
+    load_model(args.model, device, dtype=dtype)
 
     if args.warmup:
         print("Warming up (triggering CUDA kernel JIT compilation)…")
-        _warmup_req = GenerateRequest(text="ok", model=args.model, device=args.device)
+        _warmup_req = GenerateRequest(text="ok", model=args.model, device=args.device, dtype=args.dtype)
         for _ in audio_stream(_warmup_req, None):
             pass
         print("Warmup complete.")
