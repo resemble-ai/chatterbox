@@ -140,6 +140,15 @@ class S3Token2Mel(torch.nn.Module):
             ref_wav_24 = get_resampler(ref_sr, S3GEN_SR, device)(ref_wav)
         ref_wav_24 = ref_wav_24.to(device=device, dtype=self.dtype)
 
+        # Pad 24kHz ref to a multiple of 40ms (960 samples) so mel frames align with S3 tokens.
+        # The mel extractor uses hop_size=480 at 24kHz; the S3 tokenizer uses 25 tokens/sec
+        # (640 samples/token at 16kHz = 960 samples/token at 24kHz), so both produce counts
+        # in exact 2:1 ratio only when the audio length is a multiple of 960.
+        _pad_24 = 960
+        _rem = ref_wav_24.shape[-1] % _pad_24
+        if _rem != 0:
+            ref_wav_24 = torch.nn.functional.pad(ref_wav_24, (0, _pad_24 - _rem))
+
         ref_mels_24 = self.mel_extractor(ref_wav_24).transpose(1, 2).to(dtype=self.dtype)
         ref_mels_24_len = None
 
@@ -148,17 +157,21 @@ class S3Token2Mel(torch.nn.Module):
         if ref_sr != S3_SR:
             ref_wav_16 = get_resampler(ref_sr, S3_SR, device)(ref_wav)
 
+        # Pad 16kHz ref to a multiple of 40ms (640 samples) for the same reason.
+        _pad_16 = 640
+        _rem = ref_wav_16.shape[-1] % _pad_16
+        if _rem != 0:
+            ref_wav_16 = torch.nn.functional.pad(ref_wav_16, (0, _pad_16 - _rem))
+
         # Speaker embedding
         ref_x_vector = self.speaker_encoder.inference(ref_wav_16.to(dtype=self.dtype))
 
         # Tokenize 16khz reference
         ref_speech_tokens, ref_speech_token_lens = self.tokenizer(ref_wav_16.float())
 
-        # Make sure mel_len = 2 * stoken_len (happens when the input is not padded to multiple of 40ms)
+        # Safety alignment: should be a no-op after padding above, but guards against
+        # any off-by-one from resampler rounding on unusual audio lengths.
         if ref_mels_24.shape[1] != 2 * ref_speech_tokens.shape[1]:
-            logging.warning(
-                "Reference mel length is not equal to 2 * reference token length.\n"
-            )
             ref_speech_tokens = ref_speech_tokens[:, :ref_mels_24.shape[1] // 2]
             ref_speech_token_lens[0] = ref_speech_tokens.shape[1]
 

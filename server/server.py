@@ -66,6 +66,7 @@ app.mount("/static", StaticFiles(directory=os.path.dirname(__file__)), name="sta
 # ─── Model registry ──────────────────────────────────────────────────────────
 
 _loaded: dict = {}  # { model_key: model_instance }
+_cond_cache: dict = {}  # { (model_key, audio_id, exaggeration): Conditionals }
 
 
 def get_device(device_str: str) -> str:
@@ -104,6 +105,9 @@ def load_model(model_name: str, device: str, dtype=None):
     for old_key in list(_loaded.keys()):
         print(f"Unloading '{old_key}' to free VRAM…")
         del _loaded[old_key]
+        # Drop cached conditionals tied to the evicted model
+        for ck in [k for k in _cond_cache if k[0] == old_key]:
+            del _cond_cache[ck]
     if device.startswith("cuda"):
         torch.cuda.empty_cache()
 
@@ -311,6 +315,19 @@ def audio_stream(req: "GenerateRequest", resolved_audio_path):
     device = get_device(req.device)
     dtype = parse_dtype(req.dtype)
     model = load_model(req.model, device, dtype=dtype)
+    model_key = f"{req.model}:{device}:{req.dtype}"
+
+    # Pre-compute and cache conditionals (mel extraction + speaker embedding + S3 tokenization)
+    # so the same reference audio is never processed more than once per model/exaggeration combo.
+    if resolved_audio_path and req.audio_id:
+        cond_key = (model_key, req.audio_id, req.exaggeration)
+        if cond_key not in _cond_cache:
+            print(f"  Computing conditionals for speaker '{req.audio_id}' (exaggeration={req.exaggeration})…")
+            model.prepare_conditionals(resolved_audio_path, exaggeration=req.exaggeration)
+            _cond_cache[cond_key] = model.conds
+        else:
+            model.conds = _cond_cache[cond_key]
+        resolved_audio_path = None  # conds already set; skip re-preparation inside generate_stream
 
     def make_frame(audio_tensor) -> bytes:
         samples = audio_tensor.squeeze().cpu().numpy().astype("float32")
@@ -507,6 +524,9 @@ def delete_speaker(audio_id: str):
         os.unlink(info["path"])
     except OSError:
         pass
+    # Drop any cached conditionals for this speaker
+    for ck in [k for k in _cond_cache if k[1] == audio_id]:
+        del _cond_cache[ck]
     print(f"Deleted speaker '{info['name']}' (id={audio_id})")
 
 
