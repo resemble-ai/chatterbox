@@ -21,7 +21,7 @@ python server/server.py [--model base|multilingual|turbo] [--device auto|cuda|cp
 
 The server pre-loads the requested model on startup.  Only one model is kept in memory at a time; switching models evicts the previous one to free VRAM.
 
-Use `--dtype bf16` or `--dtype fp16` to halve VRAM usage and significantly improve throughput on CUDA GPUs (both are supported on Ampere and newer).  `bf16` is the safer default — it has the same numeric range as fp32 and avoids the overflow risk of fp16.  Omitting `--dtype` keeps the weights in their saved precision (fp32).
+**Note on `--dtype`:** The current model weights were trained in fp32. In testing, `bf16` and `fp16` produce noticeably degraded or unintelligible audio and are **not recommended** for production use. They are exposed as an experimental option for future fine-tuned checkpoints that may tolerate reduced precision. Omitting `--dtype` (the default) keeps weights in fp32 and gives the best audio quality. The dtype chosen at startup is used as the server default; per-request `dtype` fields in the API can override it but carry the same quality caveats.
 
 ## Endpoints
 
