@@ -3,7 +3,7 @@ name = "chatterbox-tts"
 version = "0.1.1"
 description = "Chatterbox TTS fork by the Alexandra Institute with a finetuning framework for Danish and other languages"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 license = {file = "LICENSE"}
 authors = [
     {name = "alexandra-instituttet"}
@@ -14,12 +14,10 @@ dependencies = [
     "numpy>=2.0.0; python_version >= '3.13'",
     "librosa==0.11.0",
     "s3tokenizer",
-    # torch 2.7.1 supports Python 3.10-3.13; Python 3.14 needs 2.9.0+
-    "torch==2.7.1; python_version < '3.14'",
-    "torch>=2.9.0; python_version >= '3.14'",
-    "torchaudio==2.7.1; python_version < '3.14'",
-    "torchaudio>=2.9.0; python_version >= '3.14'",
-    "transformers==5.2.0",
+    "torch==2.7.1",
+    "torchaudio==2.7.1",
+    # transformers 5.x rewrote masking/cache internals in a way that breaks CUDA graph capture
+    "transformers==4.46.3",
     "diffusers==0.29.0",
     "resemble-perth @ git+https://github.com/resemble-ai/Perth.git@master",
     "conformer==0.3.2",

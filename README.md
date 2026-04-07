@@ -12,7 +12,7 @@ The finetuning framework supports all three Chatterbox model variants (base, mul
 
 ## Installation
 
-Requires Python 3.10 or later. Tested on Python 3.11.
+Requires Python >=3.10, <3.14. Tested on Python 3.11.
 
 We recommend [uv](https://docs.astral.sh/uv/) as the package manager:
 
@@ -23,8 +23,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Install base dependencies
 uv sync
 
-# With finetuning dependencies
-uv sync --extra finetune
+# With finetuning dependencies (requires Python >=3.11, <3.14)
+uv sync --extra finetune --python 3.12
 
 # With multilingual dependencies (only required for Chinese language support)
 uv sync --extra multilingual
