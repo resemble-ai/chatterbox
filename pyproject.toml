@@ -1,12 +1,12 @@
 [project]
 name = "chatterbox-tts"
-version = "0.1.7"
-description = "Chatterbox: Open Source TTS and Voice Conversion by Resemble AI"
+version = "0.1.1"
+description = "Chatterbox TTS fork by the Alexandra Institute with a finetuning framework for Danish and other languages"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
-    {name = "resemble-ai", email = "engineering@resemble.ai"}
+    {name = "alexandra-instituttet"}
 ]
 dependencies = [
     # numpy 1.x for Python < 3.13 (no 1.x wheels on 3.13+), numpy 2.x for 3.13+

@@ -20,16 +20,13 @@ We recommend [uv](https://docs.astral.sh/uv/) as the package manager:
 # Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install Python 3.11 (if not already available)
-uv python install 3.11
-
 # Install base dependencies
 uv sync
 
 # With finetuning dependencies
 uv sync --extra finetune
 
-# With multilingual dependencies
+# With multilingual dependencies (only required for Chinese language support)
 uv sync --extra multilingual
 ```
 
@@ -38,7 +35,7 @@ Alternatively, with pip:
 ```bash
 pip install -e .
 pip install -e ".[finetune]"
-pip install -e ".[multilingual]"
+pip install -e ".[multilingual]"  # only required for Chinese language support
 ```
 
 ### CUDA Compatibility
