@@ -67,7 +67,7 @@ app.mount("/static", StaticFiles(directory=os.path.dirname(__file__)), name="sta
 
 _loaded: dict = {}  # { model_key: model_instance }
 _cond_cache: dict = {}  # { (model_key, audio_id, exaggeration): Conditionals }
-_default_dtype: Optional[str] = None  # set at startup from --dtype; used when requests omit dtype
+_default_dtype = None  # set at startup from --dtype; used when requests omit dtype
 
 
 def get_device(device_str: str) -> str:
