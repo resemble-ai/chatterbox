@@ -65,10 +65,9 @@ class AttentionQKV(nn.Module):
 
     def setup_flash_config(self):
         # Setup flash attention configuration
+        backends = torch.nn.attention.SDPBackend
         flash_config = {
-            'enable_flash': True,
-            'enable_math': True,
-            'enable_mem_efficient': True
+            'backends': [backends.FLASH_ATTENTION, backends.EFFICIENT_ATTENTION, backends.MATH]
         }
         return flash_config
 
@@ -91,7 +90,7 @@ class AttentionQKV(nn.Module):
 
     def flash_attention(self, q, k, v, mask=None):
         config = self.flash_config if self.flash_config else {}
-        with torch.backends.cuda.sdp_kernel(**config):
+        with torch.nn.attention.sdpa_kernel(**config):
             out = F.scaled_dot_product_attention(
                 q, k, v,
                 attn_mask=mask,
