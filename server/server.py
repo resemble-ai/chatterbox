@@ -67,6 +67,7 @@ app.mount("/static", StaticFiles(directory=os.path.dirname(__file__)), name="sta
 
 _loaded: dict = {}  # { model_key: model_instance }
 _cond_cache: dict = {}  # { (model_key, audio_id, exaggeration): Conditionals }
+_default_dtype: Optional[str] = None  # set at startup from --dtype; used when requests omit dtype
 
 
 def get_device(device_str: str) -> str:
@@ -88,11 +89,12 @@ _DTYPE_MAP = {
 
 def parse_dtype(dtype_str: str):
     """Convert a dtype string ('fp16', 'bf16', 'fp32') to a torch.dtype, or None."""
-    if dtype_str is None:
+    effective = dtype_str if dtype_str is not None else _default_dtype
+    if effective is None:
         return None
-    dtype = _DTYPE_MAP.get(dtype_str.lower())
+    dtype = _DTYPE_MAP.get(effective.lower())
     if dtype is None:
-        raise ValueError(f"Unknown dtype '{dtype_str}'. Choose from: fp16, bf16, fp32.")
+        raise ValueError(f"Unknown dtype '{effective}'. Choose from: fp16, bf16, fp32.")
     return dtype
 
 
@@ -572,6 +574,9 @@ if __name__ == "__main__":
     DEBUG = args.debug
     if DEBUG:
         print("🐛 Debug logging enabled")
+
+    global _default_dtype
+    _default_dtype = args.dtype  # requests that omit dtype will use this
 
     device = get_device(args.device)
     dtype = parse_dtype(args.dtype)
