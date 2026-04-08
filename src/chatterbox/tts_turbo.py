@@ -176,8 +176,10 @@ class ChatterboxTurboTTS:
         t3.load_state_dict(t3_state)
         del t3.tfmr.wte
         t3.to(device=device, dtype=dtype).eval()
-        # NOTE: torch.compile disabled — requires StaticCache (see PENDING.md)
-        # t3.compile_for_inference()
+        # Turbo uses GPT2 (no StaticCache needed) — mode="default" uses inductor kernel
+        # fusion without CUDA graphs, which is compatible with the dynamic KV cache.
+        if device not in ("cpu", "mps"):
+            t3.compile_for_inference(mode="default")
 
         s3gen = S3Gen(meanflow=True)
         weights = load_file(ckpt_dir / "s3gen_meanflow.safetensors")

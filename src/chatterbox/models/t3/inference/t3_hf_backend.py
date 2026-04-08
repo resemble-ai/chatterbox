@@ -2,7 +2,7 @@ from typing import Optional
 
 import torch
 from torch import nn as nn
-from transformers import LlamaConfig, LlamaModel, LlamaPreTrainedModel, GenerationMixin
+from transformers import LlamaConfig, LlamaModel, LlamaPreTrainedModel, GenerationMixin, StaticCache
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 
@@ -78,6 +78,7 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         output_attentions=False,
         output_hidden_states=False,
         return_dict=True,
+        cache_position: Optional[torch.Tensor]=None,
     ):
         """
         This is a method used by huggingface's generate() method.
@@ -85,11 +86,16 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
 
         :param inputs_embeds: (B, S, C) float32 tensor of conditioning inputs. If past key values are given,
         S should be 1.
+        :param cache_position: Required when using StaticCache. 1-D tensor of positions in the cache
+        to read/write at this step.
         """
-        is_large_input = inputs_embeds.size(1) != 1
-        has_cache = past_key_values is not None and len(past_key_values) > 0
-        assert not (is_large_input and has_cache)
         assert return_dict
+        # With StaticCache the prefill can have large inputs_embeds alongside the cache object;
+        # only guard against this for legacy DynamicCache.
+        if not isinstance(past_key_values, StaticCache):
+            is_large_input = inputs_embeds.size(1) != 1
+            has_cache = past_key_values is not None and len(past_key_values) > 0
+            assert not (is_large_input and has_cache)
 
         tfmr_out = self.model(
             inputs_embeds=inputs_embeds,
@@ -98,6 +104,7 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=True,
+            cache_position=cache_position,
         )
         hidden_states = tfmr_out.last_hidden_state  # (B, seq, dim)
 

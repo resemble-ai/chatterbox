@@ -200,9 +200,11 @@ class ChatterboxMultilingualTTS:
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
         t3.to(device=device, dtype=dtype).eval()
-        # NOTE: torch.compile on T3 disabled — incompatible with this transformers
-        # version (output_capturing.py loses torch reference). See PENDING.md.
-        # t3.compile_for_inference(mode="default")
+        # transformers 5.x fixed the output_capturing.py NameError; use mode="default"
+        # (inductor kernel fusion, no CUDA graphs) since AlignmentStreamAnalyzer's per-layer
+        # hooks introduce Python-side steps that are incompatible with CUDA graph replay.
+        if device not in ("cpu", "mps"):
+            t3.compile_for_inference(mode="default")
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
@@ -361,6 +363,7 @@ class ChatterboxMultilingualTTS:
         S3 token rate is 25 tokens/sec, so chunk_size=25 ≈ 1 second per chunk.
         Uses AlignmentStreamAnalyzer for hallucination suppression.
         """
+        from transformers import StaticCache
         from transformers.generation.logits_process import (
             TopPLogitsWarper,
             MinPLogitsWarper,
@@ -403,6 +406,7 @@ class ChatterboxMultilingualTTS:
         bos_embed = torch.cat([bos_embed, bos_embed])  # batch=2 for CFG
 
         inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
+        prefix_len = inputs_embeds.size(1)
         chunk_buffer = []
         stop_token = self.t3.hp.stop_speech_token
 
@@ -415,14 +419,24 @@ class ChatterboxMultilingualTTS:
         min_p_warper = MinPLogitsWarper(min_p=min_p)
         rep_pen = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
 
+        # StaticCache: fixed KV shape enables torch.compile with CUDA graphs
+        static_cache = StaticCache(
+            config=self.t3.cfg,
+            max_batch_size=inputs_embeds.size(0),
+            max_cache_len=prefix_len + max_new_tokens,
+            device=device,
+            dtype=inputs_embeds.dtype,
+        )
+
+        cache_position = torch.arange(0, prefix_len, device=device)
         output = patched_model(
             inputs_embeds=inputs_embeds,
-            past_key_values=None,
+            past_key_values=static_cache,
+            cache_position=cache_position,
             use_cache=True,
             output_attentions=False,
             return_dict=True,
         )
-        past = output.past_key_values
 
         for i in range(max_new_tokens):
             logits = output.logits[:, -1, :]
@@ -468,13 +482,14 @@ class ChatterboxMultilingualTTS:
             next_token_embed = next_token_embed + self.t3.speech_pos_emb.get_fixed_embedding(i + 1)
             next_token_embed = torch.cat([next_token_embed, next_token_embed])  # CFG
 
+            cache_position = torch.tensor([prefix_len + i], device=device, dtype=torch.long)
             output = patched_model(
                 inputs_embeds=next_token_embed,
-                past_key_values=past,
+                past_key_values=static_cache,
+                cache_position=cache_position,
                 output_attentions=False,
                 return_dict=True,
             )
-            past = output.past_key_values
 
         # Flush remaining buffer (max_new_tokens reached or final partial chunk)
         if chunk_buffer:
