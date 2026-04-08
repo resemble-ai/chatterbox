@@ -22,6 +22,8 @@ FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         ffmpeg \
+        gcc \
+        g++ \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
