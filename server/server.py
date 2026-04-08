@@ -577,6 +577,9 @@ if __name__ == "__main__":
 
     _default_dtype = args.dtype  # requests that omit dtype will use this
 
+    # Enable TF32 tensor cores for ~2x faster float32 matmuls on Ampere+ GPUs
+    torch.set_float32_matmul_precision('high')
+
     device = get_device(args.device)
     dtype = parse_dtype(args.dtype)
     print(f"Pre-loading '{args.model}' on {device}…")
