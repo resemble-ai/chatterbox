@@ -176,6 +176,7 @@ class ChatterboxTurboTTS:
         t3.load_state_dict(t3_state)
         del t3.tfmr.wte
         t3.to(device=device, dtype=dtype).eval()
+        t3.compile_for_inference()
 
         s3gen = S3Gen(meanflow=True)
         weights = load_file(ckpt_dir / "s3gen_meanflow.safetensors")

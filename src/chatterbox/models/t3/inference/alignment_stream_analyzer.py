@@ -42,7 +42,8 @@ class AlignmentStreamAnalyzer:
         # self.queue = queue
         self.text_tokens_slice = (i, j) = text_tokens_slice
         self.eos_idx = eos_idx
-        self.alignment = torch.zeros(0, j-i)
+        self.device = next(tfmr.parameters()).device
+        self.alignment = torch.zeros(0, j-i, device=self.device)
         # self.alignment_bin = torch.zeros(0, j-i)
         self.curr_frame_pos = 0
         self.text_position = 0
@@ -76,7 +77,7 @@ class AlignmentStreamAnalyzer:
             - `attn_output` has shape [B, H, T0, T0] for the 0th entry, and [B, H, 1, T0+i] for the rest i-th.
             """
             if isinstance(output, tuple) and len(output) > 1 and output[1] is not None:
-                step_attention = output[1].cpu()  # (B, n_heads, T0, Ti)
+                step_attention = output[1]  # (B, n_heads, T0, Ti) — keep on GPU
                 self.last_aligned_attns[buffer_idx] = step_attention[0, head_idx]  # (T0, Ti)
 
         target_layer = tfmr.layers[layer_idx].self_attn
@@ -98,10 +99,10 @@ class AlignmentStreamAnalyzer:
         i, j = self.text_tokens_slice
         if self.curr_frame_pos == 0:
             # first chunk has conditioning info, text tokens, and BOS token
-            A_chunk = aligned_attn[j:, i:j].clone().cpu() # (T, S)
+            A_chunk = aligned_attn[j:, i:j].clone() # (T, S) — stays on GPU
         else:
             # subsequent chunks have 1 frame due to KV-caching
-            A_chunk = aligned_attn[:, i:j].clone().cpu() # (1, S)
+            A_chunk = aligned_attn[:, i:j].clone() # (1, S) — stays on GPU
 
         # TODO: monotonic masking; could have issue b/c spaces are often skipped.
         A_chunk[:, self.curr_frame_pos + 1:] = 0

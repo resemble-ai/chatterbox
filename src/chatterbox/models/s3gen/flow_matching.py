@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F
 from .matcha.flow_matching import BASECFM
 from .configs import CFM_PARAMS
-from tqdm import tqdm
+
 
 
 def cast_all(*args, dtype):
@@ -236,8 +236,7 @@ class CausalConditionalCFM(ConditionalCFM):
         in_dtype = x.dtype
         x, t_span, mu, mask, spks, cond = cast_all(x, t_span, mu, mask, spks, cond, dtype=self.estimator.dtype)
 
-        print("S3 Token -> Mel Inference...")
-        for t, r in tqdm(zip(t_span[..., :-1], t_span[..., 1:]), total=t_span.shape[-1] - 1):
+        for t, r in zip(t_span[..., :-1], t_span[..., 1:]):
             t, r = t[None], r[None]
             dxdt = self.estimator.forward(x, mask=mask, mu=mu, t=t, spks=spks, cond=cond, r=r)
             dt = r - t

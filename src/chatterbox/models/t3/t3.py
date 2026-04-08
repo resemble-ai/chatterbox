@@ -5,7 +5,7 @@ from typing import Union, Optional, List
 
 logger = logging.getLogger(__name__)
 
-from tqdm import tqdm
+
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
@@ -84,11 +84,22 @@ class T3(nn.Module):
         # logit projection
         self.text_head = nn.Linear(self.cfg.hidden_size, hp.text_tokens_dict_size, bias=False)
         self.speech_head = nn.Linear(self.cfg.hidden_size, hp.speech_tokens_dict_size, bias=self.is_gpt)
-        self.compiled = False
+        self._compiled = False
 
     @property
     def device(self):
         return self.speech_head.weight.device
+
+    def compile_for_inference(self):
+        """Apply torch.compile to the transformer backbone for faster inference.
+        Only effective on CUDA. First call with new shapes triggers compilation (~30-60s).
+        """
+        if self._compiled or self.device.type != "cuda":
+            return
+        logger.info("Compiling transformer with torch.compile(mode='reduce-overhead')...")
+        self.tfmr = torch.compile(self.tfmr, mode="reduce-overhead")
+        self._compiled = True
+        logger.info("Compilation registered (will compile on first forward pass).")
 
     def prepare_conditioning(self, t3_cond: T3Cond):
         """
@@ -270,32 +281,26 @@ class T3(nn.Module):
         # In order to use the standard HF generate method, we need to extend some methods to inject our custom logic
         # Note the llama-specific logic. Other tfmr types can be added later.
 
-        self.compiled = False
-
-        # TODO? synchronize the expensive compile function
-        # with self.compile_lock:
-        if not self.compiled:
-            # Default to None for English models, only create for multilingual
-            alignment_stream_analyzer = None
-            if self.hp.is_multilingual:
-                alignment_stream_analyzer = AlignmentStreamAnalyzer(
-                    self.tfmr,
-                    None,
-                    text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
-                    alignment_layer_idx=9, # TODO: hparam or something?
-                    eos_idx=self.hp.stop_speech_token,
-                )
-                assert alignment_stream_analyzer.eos_idx == self.hp.stop_speech_token
-
-            patched_model = T3HuggingfaceBackend(
-                config=self.cfg,
-                llama=self.tfmr,
-                speech_enc=self.speech_emb,
-                speech_head=self.speech_head,
-                alignment_stream_analyzer=alignment_stream_analyzer,
+        # Default to None for English models, only create for multilingual
+        alignment_stream_analyzer = None
+        if self.hp.is_multilingual:
+            alignment_stream_analyzer = AlignmentStreamAnalyzer(
+                self.tfmr,
+                None,
+                text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
+                alignment_layer_idx=9,
+                eos_idx=self.hp.stop_speech_token,
             )
-            self.patched_model = patched_model
-            self.compiled = True
+            assert alignment_stream_analyzer.eos_idx == self.hp.stop_speech_token
+
+        patched_model = T3HuggingfaceBackend(
+            config=self.cfg,
+            llama=self.tfmr,
+            speech_enc=self.speech_emb,
+            speech_head=self.speech_head,
+            alignment_stream_analyzer=alignment_stream_analyzer,
+        )
+        self.patched_model = patched_model
 
         # # Run normal generate method, which calls our custom extended methods
         # return self.patched_model.generate(
@@ -326,12 +331,14 @@ class T3(nn.Module):
         # Combine condition and BOS token for the initial input
         inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
 
-        # Track generated token ids; start with the BOS token.
-        generated_ids = bos_token.clone()
+        # Pre-allocate token buffer to avoid O(N²) torch.cat growth
+        generated_ids = torch.zeros(1, max_new_tokens + 1, dtype=torch.long, device=device)
+        generated_ids[0, 0] = self.hp.start_speech_token
+        gen_pos = 1  # next write position
         predicted = []  # To store the predicted tokens
+        stop_token = self.hp.stop_speech_token
 
         # Instantiate the logits processors.
-        top_p_warper = TopPLogitsWarper(top_p=top_p)
         min_p_warper = MinPLogitsWarper(min_p=min_p)
         top_p_warper = TopPLogitsWarper(top_p=top_p)
         repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
@@ -342,37 +349,36 @@ class T3(nn.Module):
             past_key_values=None,
             use_cache=True,
             output_attentions=True,
-            output_hidden_states=True,
             return_dict=True,
         )
         # Initialize kv_cache with the full context.
         past = output.past_key_values
 
         # ---- Generation Loop using kv_cache ----
-        for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
+        for i in range(max_new_tokens):
             logits_step = output.logits[:, -1, :]
             # CFG combine  → (1, V)
             cond   = logits_step[0:1, :]
             uncond = logits_step[1:2, :]
             cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
             logits = cond + cfg * (cond - uncond)
-            
+
             # Apply alignment stream analyzer integrity checks
             if self.patched_model.alignment_stream_analyzer is not None:
                 if logits.dim() == 1:            # guard in case something upstream squeezed
                     logits = logits.unsqueeze(0) # (1, V)
                 # Pass the last generated token for repetition tracking
-                last_token = generated_ids[0, -1].item() if len(generated_ids[0]) > 0 else None
+                last_token = generated_ids[0, gen_pos - 1].item() if gen_pos > 0 else None
                 logits = self.patched_model.alignment_stream_analyzer.step(logits, next_token=last_token)  # (1, V)
 
             # Apply repetition penalty
-            ids_for_proc = generated_ids[:1, ...]   # batch = 1
+            ids_for_proc = generated_ids[:1, :gen_pos]
             logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
-            
+
             # Apply temperature scaling.
             if temperature != 1.0:
                 logits = logits / temperature
-                
+
             # Apply min_p and top_p filtering
             logits = min_p_warper(ids_for_proc, logits)
             logits = top_p_warper(ids_for_proc, logits)
@@ -382,11 +388,12 @@ class T3(nn.Module):
             next_token = torch.multinomial(probs, num_samples=1)  # shape: (B, 1)
 
             predicted.append(next_token)
-            generated_ids = torch.cat([generated_ids, next_token], dim=1)
+            generated_ids[0, gen_pos] = next_token.view(-1)
+            gen_pos += 1
 
             # Check for EOS token.
-            if next_token.view(-1) == self.hp.stop_speech_token:
-                logger.info(f"✅ EOS token detected! Stopping generation at step {i+1}")
+            if next_token.view(-1) == stop_token:
+                logger.info(f"EOS token detected! Stopping generation at step {i+1}")
                 break
 
             # Get embedding for the new token.
@@ -401,7 +408,6 @@ class T3(nn.Module):
                 inputs_embeds=next_token_embed,
                 past_key_values=past,
                 output_attentions=True,
-                output_hidden_states=True,
                 return_dict=True,
             )
             # Update the kv_cache.
@@ -434,7 +440,13 @@ class T3(nn.Module):
             cfg_weight=0.0,
         )
 
-        generated_speech_tokens = []
+        device = embeds.device
+        stop_token = self.hp.stop_speech_token
+
+        # Pre-allocate token buffer to avoid O(N²) torch.cat growth
+        generated_ids = torch.zeros(1, max_gen_len + 1, dtype=torch.long, device=device)
+        generated_ids[0, 0] = self.hp.start_speech_token
+        gen_pos = 1  # next write position
 
         llm_outputs = self.tfmr(
             inputs_embeds=embeds,
@@ -455,10 +467,11 @@ class T3(nn.Module):
             probs = F.softmax(processed_logits, dim=-1)
             next_speech_token = torch.multinomial(probs, num_samples=1)
 
-        generated_speech_tokens.append(next_speech_token)
+        generated_ids[0, gen_pos] = next_speech_token.view(-1)
+        gen_pos += 1
         current_speech_token = next_speech_token
 
-        for _ in tqdm(range(max_gen_len)):
+        for _ in range(max_gen_len):
             current_speech_embed = self.speech_emb(current_speech_token)
 
             llm_outputs = self.tfmr(
@@ -471,10 +484,9 @@ class T3(nn.Module):
             past_key_values = llm_outputs.past_key_values
             speech_logits = self.speech_head(hidden_states)
 
-            input_ids = torch.cat(generated_speech_tokens, dim=1)
-            processed_logits = logits_processors(input_ids, speech_logits[:, -1, :])
+            processed_logits = logits_processors(generated_ids[:1, :gen_pos], speech_logits[:, -1, :])
             if torch.all(processed_logits == -float("inf")):
-                print("Warning: All logits are -inf")
+                logger.warning("All logits are -inf")
                 break
 
             if greedy:
@@ -483,15 +495,15 @@ class T3(nn.Module):
                 probs = F.softmax(processed_logits, dim=-1)
                 next_speech_token = torch.multinomial(probs, num_samples=1)
 
-            generated_speech_tokens.append(next_speech_token)
+            generated_ids[0, gen_pos] = next_speech_token.view(-1)
+            gen_pos += 1
             current_speech_token = next_speech_token
-            if torch.all(next_speech_token == self.hp.stop_speech_token):
+            if next_speech_token.view(-1) == stop_token:
                 break
 
-        all_tokens = torch.cat(generated_speech_tokens, dim=1)
-
-        # Remove EOS token if present
-        if all_tokens.size(1) > 0 and all_tokens[0, -1] == self.hp.stop_speech_token:
+        # Return all generated tokens (excluding BOS and EOS)
+        all_tokens = generated_ids[:, 1:gen_pos]
+        if all_tokens.size(1) > 0 and all_tokens[0, -1] == stop_token:
             all_tokens = all_tokens[:, :-1]
 
         return all_tokens
@@ -531,8 +543,14 @@ class T3(nn.Module):
             cfg_weight=0.0,
         )
 
-        generated_speech_tokens = []
+        device = embeds.device
+        stop_token = self.hp.stop_speech_token
         chunk_buffer = []
+
+        # Pre-allocate token buffer to avoid O(N²) torch.cat growth
+        generated_ids = torch.zeros(1, max_gen_len + 1, dtype=torch.long, device=device)
+        generated_ids[0, 0] = self.hp.start_speech_token
+        gen_pos = 1  # next write position
 
         llm_outputs = self.tfmr(inputs_embeds=embeds, use_cache=True)
         hidden_states = llm_outputs[0]
@@ -547,7 +565,8 @@ class T3(nn.Module):
             probs = F.softmax(processed_logits, dim=-1)
             next_speech_token = torch.multinomial(probs, num_samples=1)
 
-        generated_speech_tokens.append(next_speech_token)
+        generated_ids[0, gen_pos] = next_speech_token.view(-1)
+        gen_pos += 1
         chunk_buffer.append(next_speech_token)
         current_speech_token = next_speech_token
 
@@ -562,11 +581,18 @@ class T3(nn.Module):
             past_key_values = llm_outputs.past_key_values
             speech_logits = self.speech_head(hidden_states)
 
-            input_ids = torch.cat(generated_speech_tokens, dim=1)
-            processed_logits = logits_processors(input_ids, speech_logits[:, -1, :])
+            processed_logits = logits_processors(generated_ids[:1, :gen_pos], speech_logits[:, -1, :])
             if torch.all(processed_logits == -float("inf")):
+                # Flush buffer (trimming any EOS) before breaking
                 if chunk_buffer:
-                    yield torch.cat(chunk_buffer, dim=1)
+                    chunk_tokens = torch.cat(chunk_buffer, dim=1)
+                    eos_mask = (chunk_tokens.view(-1) == stop_token)
+                    if eos_mask.any().item():
+                        eos_idx = eos_mask.nonzero(as_tuple=False)[0].item()
+                        if eos_idx > 0:
+                            yield chunk_tokens[:, :eos_idx]
+                    else:
+                        yield chunk_tokens
                 break
 
             if greedy:
@@ -575,17 +601,30 @@ class T3(nn.Module):
                 probs = F.softmax(processed_logits, dim=-1)
                 next_speech_token = torch.multinomial(probs, num_samples=1)
 
-            generated_speech_tokens.append(next_speech_token)
+            generated_ids[0, gen_pos] = next_speech_token.view(-1)
+            gen_pos += 1
             chunk_buffer.append(next_speech_token)
             current_speech_token = next_speech_token
 
-            if torch.all(next_speech_token == self.hp.stop_speech_token):
-                # Flush buffer on EOS (don't include EOS token itself)
-                chunk_buffer.pop()  # remove EOS
-                if chunk_buffer:
-                    yield torch.cat(chunk_buffer, dim=1)
-                break
-
+            # Defer EOS check to chunk boundaries (one sync per chunk instead of per token)
             if len(chunk_buffer) >= chunk_size:
-                yield torch.cat(chunk_buffer, dim=1)
+                chunk_tokens = torch.cat(chunk_buffer, dim=1)
+                eos_mask = (chunk_tokens.view(-1) == stop_token)
+                if eos_mask.any().item():
+                    eos_idx = eos_mask.nonzero(as_tuple=False)[0].item()
+                    if eos_idx > 0:
+                        yield chunk_tokens[:, :eos_idx]
+                    break
+                yield chunk_tokens
                 chunk_buffer = []
+
+        # Flush remaining buffer (max_gen_len reached or final partial chunk)
+        if chunk_buffer:
+            chunk_tokens = torch.cat(chunk_buffer, dim=1)
+            eos_mask = (chunk_tokens.view(-1) == stop_token)
+            if eos_mask.any().item():
+                eos_idx = eos_mask.nonzero(as_tuple=False)[0].item()
+                if eos_idx > 0:
+                    yield chunk_tokens[:, :eos_idx]
+            else:
+                yield chunk_tokens

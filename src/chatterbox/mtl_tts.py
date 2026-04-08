@@ -394,8 +394,13 @@ class ChatterboxMultilingualTTS:
         bos_embed = torch.cat([bos_embed, bos_embed])  # batch=2 for CFG
 
         inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
-        generated_ids = bos_token.clone()
         chunk_buffer = []
+        stop_token = self.t3.hp.stop_speech_token
+
+        # Pre-allocate token buffer to avoid O(N²) torch.cat growth
+        generated_ids = torch.zeros(1, max_new_tokens + 1, dtype=torch.long, device=device)
+        generated_ids[0, 0] = self.t3.hp.start_speech_token
+        gen_pos = 1  # next write position
 
         top_p_warper = TopPLogitsWarper(top_p=top_p)
         min_p_warper = MinPLogitsWarper(min_p=min_p)
@@ -406,7 +411,6 @@ class ChatterboxMultilingualTTS:
             past_key_values=None,
             use_cache=True,
             output_attentions=True,
-            output_hidden_states=True,
             return_dict=True,
         )
         past = output.past_key_values
@@ -420,10 +424,10 @@ class ChatterboxMultilingualTTS:
             logits = logits_cond + cfg_weight * (logits_cond - logits_uncond)
 
             # Alignment stream analyzer: suppresses hallucinations / forces EOS when needed
-            last_token = generated_ids[0, -1].item() if generated_ids.size(1) > 0 else None
+            last_token = generated_ids[0, gen_pos - 1].item() if gen_pos > 0 else None
             logits = alignment_stream_analyzer.step(logits, next_token=last_token)
 
-            ids_for_proc = generated_ids[:1, ...]
+            ids_for_proc = generated_ids[:1, :gen_pos]
             logits = rep_pen(ids_for_proc, logits)
             if temperature == 0.0:
                 next_token = logits.argmax(dim=-1, keepdim=True)
@@ -436,15 +440,19 @@ class ChatterboxMultilingualTTS:
                 next_token = torch.multinomial(probs, num_samples=1)
 
             chunk_buffer.append(next_token)
-            generated_ids = torch.cat([generated_ids, next_token], dim=1)
+            generated_ids[0, gen_pos] = next_token.view(-1)
+            gen_pos += 1
 
-            if next_token.view(-1) == self.t3.hp.stop_speech_token:
-                if chunk_buffer:
-                    yield torch.cat(chunk_buffer, dim=1)
-                break
-
+            # Defer EOS check to chunk boundaries (one sync per chunk instead of per token)
             if len(chunk_buffer) >= chunk_size:
-                yield torch.cat(chunk_buffer, dim=1)
+                chunk_tokens = torch.cat(chunk_buffer, dim=1)
+                eos_mask = (chunk_tokens.view(-1) == stop_token)
+                if eos_mask.any().item():
+                    eos_idx = eos_mask.nonzero(as_tuple=False)[0].item()
+                    if eos_idx > 0:
+                        yield chunk_tokens[:, :eos_idx]
+                    break
+                yield chunk_tokens
                 chunk_buffer = []
 
             next_token_embed = self.t3.speech_emb(next_token)
@@ -455,10 +463,20 @@ class ChatterboxMultilingualTTS:
                 inputs_embeds=next_token_embed,
                 past_key_values=past,
                 output_attentions=True,
-                output_hidden_states=True,
                 return_dict=True,
             )
             past = output.past_key_values
+
+        # Flush remaining buffer (max_new_tokens reached or final partial chunk)
+        if chunk_buffer:
+            chunk_tokens = torch.cat(chunk_buffer, dim=1)
+            eos_mask = (chunk_tokens.view(-1) == stop_token)
+            if eos_mask.any().item():
+                eos_idx = eos_mask.nonzero(as_tuple=False)[0].item()
+                if eos_idx > 0:
+                    yield chunk_tokens[:, :eos_idx]
+            else:
+                yield chunk_tokens
 
     def _process_token_chunk(
         self,
