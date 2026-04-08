@@ -605,7 +605,8 @@ class ChatterboxMultilingualTTS:
         # Pipeline: run S3Gen vocoder on a background thread + separate CUDA stream
         # so it overlaps with T3 generating the next token chunk.
         from concurrent.futures import ThreadPoolExecutor
-        s3_stream = torch.cuda.Stream(device=self.device) if self.device.type == 'cuda' else None
+        is_cuda = (self.device.type == 'cuda') if isinstance(self.device, torch.device) else ('cuda' in str(self.device))
+        s3_stream = torch.cuda.Stream(device=self.device) if is_cuda else None
 
         def _decode_chunk(token_chunk, all_tokens_snapshot):
             """Run S3Gen decode on a separate CUDA stream."""
