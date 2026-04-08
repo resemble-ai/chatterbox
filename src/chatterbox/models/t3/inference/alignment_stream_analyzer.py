@@ -1,6 +1,7 @@
 # Copyright (c) 2025 Resemble AI
 # Author: John Meade, Jeremy Hsu
 # MIT License
+import copy
 import logging
 import torch
 from dataclasses import dataclass
@@ -89,6 +90,13 @@ class AlignmentStreamAnalyzer:
             return args, kwargs
 
         target_layer = tfmr.layers[layer_idx].self_attn
+
+        # Give this layer its own config copy with eager attention so it can
+        # return attention weights. All other layers keep the shared config (SDPA).
+        eager_config = copy.copy(tfmr.config)
+        eager_config._attn_implementation = 'eager'
+        target_layer.config = eager_config
+
         target_layer.register_forward_pre_hook(force_output_attentions, with_kwargs=True)
         target_layer.register_forward_hook(attention_forward_hook)
 
