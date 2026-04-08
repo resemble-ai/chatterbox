@@ -1,0 +1,58 @@
+
+# QUICK TEST CONFIG
+
+datasets: 
+  coral:
+    id: CoRal-project/coral-tts
+    split: null
+    text_column: text
+    audio_column: audio
+    language: da
+    filter: true # True if no pre-embeddings, False if pre-embeddings
+
+dataset_cache_dir: 
+stream_dataset: false
+filter_dataset: false
+audio_prompt_duration_s: 5
+min_seconds_per_example: 7.0
+max_seconds_per_example: 38.0
+
+# Model arguments
+output_dir: "./output_test"
+model_variant: "multilingual"
+
+# WandB Configuration
+run_name: 
+wandb_project: 
+
+# Training Configuration - Step limited
+max_steps: 1000
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 4
+learning_rate: 3.0e-5
+warmup_steps: 100
+fp16: false
+bf16: false
+gradient_checkpointing: false
+resume_from_checkpoint: false
+max_grad_norm: 1.0
+dataloader_drop_last: true
+
+# Evaluation and Logging
+eval_split_size: 0.001
+eval_strategy: steps
+logging_steps: 50
+eval_steps: 200
+
+# Saving Configuration
+save_strategy: "no"
+save_total_limit: 1
+
+# Data Processing
+text_column_name: text
+audio_column_name: audio
+dataloader_pin_memory: false
+
+# Training Control
+do_train: true
+do_eval: false

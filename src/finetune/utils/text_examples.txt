@@ -1,0 +1,16 @@
+# One prompt per line. Blank lines and lines starting with # are ignored.
+Vejret er dejligt i dag, så jeg tænker på at tage en gåtur i parken.
+København er Danmarks hovedstad og ligger på øerne Sjælland og Amager, hvor mange turister besøger de smukke kanaler og historiske bygninger.
+Fredag den trettende marts klokken sytten tredive bliver der afholdt et vigtigt møde på Christiansborg Slot.
+Den berømte danske forfatter Hans Christian Andersen skrev mange eventyr, der stadig læses og elskes af børn og voksne over hele verden, herunder "Den lille havfrue" og "Den grimme ælling".
+Tak for hjælpen, det betyder meget for mig.
+Vi skal mødes på caféen klokken tre i eftermiddag. Vil du passe børnene imens?
+Det danske sommervejr kan være meget uforudsigelig med både sol og regn på samme dag.
+Børnene leger i haven mens forældrene laver mad til aftensmaden.
+Teknologien udvikler sig så hurtigt, at det kan være svært at følge med alle de nye innovationer.
+Jeg elsker at gå lange ture langs stranden og lytte til bølgernes brusende lyd.
+Universitetsstuderende fra hele verden kommer til Danmark for at studere bæredygtig energi og miljøvidenskab.
+Det er vigtigt at huske at tage medicinen hver dag på samme tidspunkt som lægen har ordineret.
+Politikerne diskuterede intensivt de økonomiske konsekvenser af den nye skattelovgivning i parlamentet.
+Kunstmuseet præsenterer en ekstraordinær udstilling med værker fra både klassiske og moderne danske malere.
+Zoologisk have er et børnevenligt sted, hvor man kan få alle mulige dyr at se, heriblandt løver, elefanter og giraffer.

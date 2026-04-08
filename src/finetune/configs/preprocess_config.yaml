@@ -1,0 +1,36 @@
+datasets:
+  dataset1:
+    id: 
+    split: null
+    text_column: text
+    audio_column: audio
+    id_column: speaker_id
+    language: da
+  dataset2:
+    id:
+    split: null
+    text_column: text
+    audio_column: audio
+    id_column: speaker_id
+    language: da
+
+dataset_cache_dir:
+ignore_verifications: false
+filter_dataset: false
+preprocess_cache_dir: preprocessing_cache/
+local_output_dir: processed_datasets/
+stream_dataset: false
+
+seed: 42
+embedding_batch_size: 4
+push_to_hub: true
+push_private: false
+hub_org: 
+output_dataset_version: _with_embeddings
+
+cache_dir: preprocessing_cache/
+model_variant: "turbo"
+
+# Data Processing
+text_column_name: text
+audio_column_name: audio

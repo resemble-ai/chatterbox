@@ -128,7 +128,6 @@ class ConditionalDecoder(nn.Module):
             time_embed_dim=time_embed_dim,
             act_fn="silu",
         )
-
         self.down_blocks = nn.ModuleList([])
         self.mid_blocks = nn.ModuleList([])
         self.up_blocks = nn.ModuleList([])

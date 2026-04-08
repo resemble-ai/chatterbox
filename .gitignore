@@ -1,4 +1,5 @@
 .vscode
+.DS_Store
 
 # Pylance
 pyrightconfig.json
@@ -46,3 +47,16 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+!src/finetune/voices/**/*.wav
+
+# Ignore wandb files
+**/wandb/
+
+
+
+src/finetune/model/
+src/finetune/cache_files/*
+
+# Environment files (may contain secrets)
+.env
+.env.*
