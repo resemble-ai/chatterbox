@@ -162,7 +162,8 @@ class ChatterboxTTS:
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
         t3.to(device=device, dtype=dtype).eval()
-        t3.compile_for_inference()
+        # NOTE: torch.compile disabled — requires StaticCache (see PENDING.md)
+        # t3.compile_for_inference()
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
