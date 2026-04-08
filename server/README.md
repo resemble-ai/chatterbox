@@ -54,6 +54,7 @@ Accepts a JSON body (`GenerateRequest`) and streams binary audio frames back via
 | `cfg_weight` | `0.5` | Classifier-free guidance weight (base/multilingual) |
 | `temperature` | `0.8` | Sampling temperature |
 | `chunk_size` | `25` | Tokens per streaming chunk (~1 s of audio) |
+| `cfm_steps` | `10` | CFM flow-matching steps for the S3Gen vocoder (1–20). Lower values speed up decoding at some quality cost. `5`–`6` is a good trade-off for low-latency streaming; `4` is aggressive. |
 | `sentence_split` | `false` | Split text into sentences before synthesis |
 | `min_chars` | `100` | Minimum chars per sentence segment |
 | `max_chars` | `250` | Maximum chars per sentence segment |

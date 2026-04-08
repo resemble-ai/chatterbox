@@ -40,7 +40,32 @@ Ampere+ GPUs (RTX 30xx, A100, etc).
 - `compile_for_inference()` method is in `t3.py:93`
 - Plan: see step 9 in the optimization plan
 
-## 2. Dockerfile: gcc/g++ added for torch.compile
+## 2. torch.compile on multilingual T3 (Step 8)
+
+**Status:** Disabled — compile call commented out in `mtl_tts.py:201`
+
+**Problem:** `torch.compile(mode="default")` hits a `NameError: name 'torch' is not
+defined` inside `transformers/utils/output_capturing.py`. This is a compatibility issue
+between the installed transformers version and torch.compile's dynamo tracer.
+
+**Fix path:** Upgrade transformers to a version with torch.compile support, or pin a
+compatible pair of torch + transformers versions. Then re-enable the commented-out call
+in `mtl_tts.py`.
+
+## 3. torch.compile on S3Gen vocoder (Step 10)
+
+**Status:** Disabled — compile call commented out in `mtl_tts.py:207`
+
+**Problem:** The S3Gen estimator has too many graph breaks (`.item()` calls in
+`models/s3gen/utils/mask.py:161`, dynamic tensor shapes per chunk) causing excessive
+recompilation. First inference was 5x slower; steady-state was also slower than
+uncompiled.
+
+**Fix path:** Refactor the `.item()` calls and data-dependent control flow in the
+estimator's mask computation to be torch.compile-friendly, or use
+`torch._dynamo.config.capture_scalar_outputs = True`.
+
+## 4. Dockerfile: gcc/g++ added for torch.compile
 
 **Status:** Done (in Dockerfile), but only needed once torch.compile is re-enabled.
 
