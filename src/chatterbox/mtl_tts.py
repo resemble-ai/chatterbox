@@ -602,8 +602,32 @@ class ChatterboxMultilingualTTS:
         t3_time_total = 0.0
         s3_time_total = 0.0
 
-        with torch.inference_mode():
+        # Pipeline: run S3Gen vocoder on a background thread + separate CUDA stream
+        # so it overlaps with T3 generating the next token chunk.
+        from concurrent.futures import ThreadPoolExecutor
+        s3_stream = torch.cuda.Stream(device=self.device) if self.device.type == 'cuda' else None
+
+        def _decode_chunk(token_chunk, all_tokens_snapshot):
+            """Run S3Gen decode on a separate CUDA stream."""
+            s3_start = time.time()
+            if s3_stream is not None:
+                with torch.cuda.stream(s3_stream):
+                    result = self._process_token_chunk(
+                        token_chunk, all_tokens_snapshot, context_window,
+                        start_time, metrics, fade_duration, cfm_steps=cfm_steps,
+                    )
+                s3_stream.synchronize()
+            else:
+                result = self._process_token_chunk(
+                    token_chunk, all_tokens_snapshot, context_window,
+                    start_time, metrics, fade_duration, cfm_steps=cfm_steps,
+                )
+            return (*result, time.time() - s3_start)
+
+        with torch.inference_mode(), ThreadPoolExecutor(max_workers=1) as pool:
+            pending_future = None
             t3_start = time.time()
+
             for token_chunk in self._inference_stream(
                 t3_cond=self.conds.t3,
                 text_tokens=text_tokens,
@@ -617,28 +641,33 @@ class ChatterboxMultilingualTTS:
                 chunk_size=chunk_size,
             ):
                 torch.cuda.synchronize()
-                t3_elapsed = time.time() - t3_start
-                t3_time_total += t3_elapsed
+                t3_time_total += time.time() - t3_start
 
                 token_chunk = token_chunk[0]  # extract conditional batch
 
-                s3_start = time.time()
-                audio, duration = self._process_token_chunk(
-                    token_chunk, all_tokens, context_window, start_time, metrics, fade_duration,
-                    cfm_steps=cfm_steps,
-                )
-                torch.cuda.synchronize()
-                s3_time_total += time.time() - s3_start
+                # Collect previous S3Gen result (blocks until background decode finishes)
+                if pending_future is not None:
+                    audio, duration, s3_elapsed = pending_future.result()
+                    s3_time_total += s3_elapsed
+                    if audio is not None:
+                        total_audio += duration
+                        yield audio, metrics
 
+                # Submit current chunk for S3Gen decode in background
+                pending_future = pool.submit(_decode_chunk, token_chunk, all_tokens)
+
+                all_tokens = token_chunk if all_tokens is None else torch.cat([all_tokens, token_chunk], dim=-1)
+                t3_start = time.time()
+
+            # Collect final S3Gen result
+            if pending_future is not None:
+                audio, duration, s3_elapsed = pending_future.result()
+                s3_time_total += s3_elapsed
                 if audio is not None:
                     total_audio += duration
                     yield audio, metrics
 
-                all_tokens = token_chunk if all_tokens is None else torch.cat([all_tokens, token_chunk], dim=-1)
-
-                t3_start = time.time()
-
-        print(f"[PERF] T3 token gen: {t3_time_total:.3f}s | S3Gen vocoder: {s3_time_total:.3f}s | ratio T3/S3: {t3_time_total/max(s3_time_total,0.001):.2f}", flush=True)
+        print(f"[PERF] T3 token gen: {t3_time_total:.3f}s | S3Gen vocoder: {s3_time_total:.3f}s (overlapped) | wall: {time.time()-start_time:.3f}s", flush=True)
 
         metrics.total_generation_time = time.time() - start_time
         metrics.total_audio_duration = total_audio
