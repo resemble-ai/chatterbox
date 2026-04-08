@@ -191,6 +191,10 @@
       <label>Chunk size</label>
       <input type="text" id="chunk_size" value="25" style="text-align:center;">
     </div>
+    <div class="col-sm">
+      <label>CFM steps</label>
+      <input type="number" id="cfm_steps" value="10" min="1" max="20" style="text-align:center;" title="Flow-matching steps for vocoder. Lower = faster, may reduce quality. Default 10, try 4-6 for speed.">
+    </div>
   </div>
 
   <div class="row">
@@ -548,6 +552,7 @@ async function generate() {
     min_p: 0.05,
     top_p: 1.0,
     top_k: 1000,
+    cfm_steps: parseInt(el('cfm_steps').value) || 10,
     sentence_split: useSplit,
     min_chars: parseInt(el('min_chars').value) || 100,
     max_chars: parseInt(el('max_chars').value) || 250,

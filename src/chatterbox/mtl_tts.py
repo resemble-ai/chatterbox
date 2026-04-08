@@ -495,6 +495,7 @@ class ChatterboxMultilingualTTS:
         start_time: float,
         metrics: StreamingMetrics,
         fade_duration: float = 0.02,
+        cfm_steps: int = 10,
     ) -> Tuple[Optional[torch.Tensor], float]:
         """
         Decode a speech token chunk to audio via S3Gen with context overlap for smooth boundaries.
@@ -514,7 +515,7 @@ class ChatterboxMultilingualTTS:
         if clean.numel() == 0:
             return None, 0.0
 
-        wav, _ = self.s3gen.inference(speech_tokens=clean, ref_dict=self.conds.gen)
+        wav, _ = self.s3gen.inference(speech_tokens=clean, ref_dict=self.conds.gen, n_cfm_timesteps=cfm_steps)
         wav = wav.squeeze(0).detach().cpu().numpy()
 
         if context_length > 0:
@@ -555,10 +556,12 @@ class ChatterboxMultilingualTTS:
         chunk_size: int = 25,
         context_window: int = 50,
         fade_duration: float = 0.02,
+        cfm_steps: int = 10,
     ) -> Generator[Tuple[torch.Tensor, StreamingMetrics], None, None]:
         """
         Streaming multilingual TTS: yields (audio_chunk, metrics) as tokens are generated.
         chunk_size=25 ≈ 1 second of audio per chunk (S3 token rate is 25 tokens/sec).
+        cfm_steps: number of CFM flow-matching steps (default 10, lower = faster).
         """
         import time
 
@@ -621,7 +624,8 @@ class ChatterboxMultilingualTTS:
 
                 s3_start = time.time()
                 audio, duration = self._process_token_chunk(
-                    token_chunk, all_tokens, context_window, start_time, metrics, fade_duration
+                    token_chunk, all_tokens, context_window, start_time, metrics, fade_duration,
+                    cfm_steps=cfm_steps,
                 )
                 torch.cuda.synchronize()
                 s3_time_total += time.time() - s3_start

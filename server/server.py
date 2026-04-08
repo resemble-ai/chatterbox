@@ -160,6 +160,7 @@ class GenerateRequest(BaseModel):
     repetition_penalty: float = Field(1.2, description="Repetition penalty (base/multilingual only).")
     min_p: float = Field(0.05, description="Min-p sampling threshold (base/multilingual only).")
     top_p: float = Field(1.0, description="Top-p (nucleus) sampling threshold.")
+    cfm_steps: int = Field(10, description="CFM flow-matching steps for S3Gen vocoder (default 10). Lower = faster but may reduce quality. Try 4-6 for low-latency streaming.")
     # turbo only
     top_k: int = Field(1000, description="Top-k sampling (turbo only).")
     # sentence splitting
@@ -289,6 +290,7 @@ def _make_gen(model, req: "GenerateRequest", text: str, audio_path):
             min_p=req.min_p,
             top_p=req.top_p,
             chunk_size=req.chunk_size,
+            cfm_steps=req.cfm_steps,
         )
     elif req.model == "turbo":
         return model.generate_stream(
