@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 import os
@@ -19,6 +20,8 @@ from .models.tokenizers import MTLTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 
+
+logger = logging.getLogger(__name__)
 
 REPO_ID = "ResembleAI/chatterbox"
 
@@ -206,7 +209,9 @@ class ChatterboxMultilingualTTS:
             torch.load(ckpt_dir / "s3gen.pt", map_location=map_location, weights_only=True)
         )
         s3gen.to(device=device, dtype=dtype).eval()
-        s3gen.compile_for_inference()
+        # NOTE: torch.compile on S3Gen disabled — too many graph breaks (.item() in
+        # mask.py, dynamic shapes) cause recompilation overhead. See PENDING.md.
+        # s3gen.compile_for_inference()
 
         tokenizer = MTLTokenizer(
             str(ckpt_dir / "grapheme_mtl_merged_expanded_v1.json")
@@ -591,8 +596,11 @@ class ChatterboxMultilingualTTS:
 
         total_audio = 0.0
         all_tokens = None
+        t3_time_total = 0.0
+        s3_time_total = 0.0
 
         with torch.inference_mode():
+            t3_start = time.time()
             for token_chunk in self._inference_stream(
                 t3_cond=self.conds.t3,
                 text_tokens=text_tokens,
@@ -605,17 +613,28 @@ class ChatterboxMultilingualTTS:
                 top_p=top_p,
                 chunk_size=chunk_size,
             ):
+                torch.cuda.synchronize()
+                t3_elapsed = time.time() - t3_start
+                t3_time_total += t3_elapsed
+
                 token_chunk = token_chunk[0]  # extract conditional batch
 
+                s3_start = time.time()
                 audio, duration = self._process_token_chunk(
                     token_chunk, all_tokens, context_window, start_time, metrics, fade_duration
                 )
+                torch.cuda.synchronize()
+                s3_time_total += time.time() - s3_start
 
                 if audio is not None:
                     total_audio += duration
                     yield audio, metrics
 
                 all_tokens = token_chunk if all_tokens is None else torch.cat([all_tokens, token_chunk], dim=-1)
+
+                t3_start = time.time()
+
+        logger.warning(f"[PERF] T3 token gen: {t3_time_total:.3f}s | S3Gen vocoder: {s3_time_total:.3f}s | ratio T3/S3: {t3_time_total/max(s3_time_total,0.001):.2f}")
 
         metrics.total_generation_time = time.time() - start_time
         metrics.total_audio_duration = total_audio
