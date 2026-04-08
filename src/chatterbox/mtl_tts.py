@@ -634,7 +634,7 @@ class ChatterboxMultilingualTTS:
 
                 t3_start = time.time()
 
-        logger.warning(f"[PERF] T3 token gen: {t3_time_total:.3f}s | S3Gen vocoder: {s3_time_total:.3f}s | ratio T3/S3: {t3_time_total/max(s3_time_total,0.001):.2f}")
+        print(f"[PERF] T3 token gen: {t3_time_total:.3f}s | S3Gen vocoder: {s3_time_total:.3f}s | ratio T3/S3: {t3_time_total/max(s3_time_total,0.001):.2f}", flush=True)
 
         metrics.total_generation_time = time.time() - start_time
         metrics.total_audio_duration = total_audio
