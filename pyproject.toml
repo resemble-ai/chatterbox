@@ -1,5 +1,5 @@
 [project]
-name = "chatterbox-tts"
+name = "coral_chatterbox"
 version = "0.1.1"
 description = "Chatterbox TTS fork by the Alexandra Institute with a finetuning framework for Danish and other languages"
 readme = "README.md"
