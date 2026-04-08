@@ -270,6 +270,16 @@ class S3Token2Wav(S3Token2Mel):
         trim_fade[n_trim:] = (torch.cos(torch.linspace(torch.pi, 0, n_trim)) + 1) / 2
         self.register_buffer("trim_fade", trim_fade, persistent=False) # (buffers get automatic device casting)
         self.estimator_dtype = "fp32"
+        self._compiled = False
+
+    def compile_for_inference(self):
+        """Compile the CFM estimator and HiFi-GAN vocoder for faster inference."""
+        if self._compiled or self.device.type != "cuda":
+            return
+        logging.getLogger(__name__).info("Compiling S3Gen estimator and vocoder with torch.compile(mode='default')...")
+        self.flow.decoder.estimator = torch.compile(self.flow.decoder.estimator, mode="default")
+        self.mel2wav = torch.compile(self.mel2wav, mode="default")
+        self._compiled = True
 
     def forward(
         self,

@@ -197,12 +197,14 @@ class ChatterboxMultilingualTTS:
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
         t3.to(device=device, dtype=dtype).eval()
+        t3.compile_for_inference(mode="default")
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
             torch.load(ckpt_dir / "s3gen.pt", map_location=map_location, weights_only=True)
         )
         s3gen.to(device=device, dtype=dtype).eval()
+        s3gen.compile_for_inference()
 
         tokenizer = MTLTokenizer(
             str(ckpt_dir / "grapheme_mtl_merged_expanded_v1.json")

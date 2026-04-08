@@ -90,14 +90,19 @@ class T3(nn.Module):
     def device(self):
         return self.speech_head.weight.device
 
-    def compile_for_inference(self):
+    def compile_for_inference(self, mode="reduce-overhead"):
         """Apply torch.compile to the transformer backbone for faster inference.
         Only effective on CUDA. First call with new shapes triggers compilation (~30-60s).
+
+        Args:
+            mode: torch.compile mode. 'reduce-overhead' uses CUDA graphs (requires
+                  StaticCache). 'default' uses inductor kernel fusion only (safe with
+                  dynamic KV cache and hooks).
         """
         if self._compiled or self.device.type != "cuda":
             return
-        logger.info("Compiling transformer with torch.compile(mode='reduce-overhead')...")
-        self.tfmr = torch.compile(self.tfmr, mode="reduce-overhead")
+        logger.info(f"Compiling transformer with torch.compile(mode='{mode}')...")
+        self.tfmr = torch.compile(self.tfmr, mode=mode)
         self._compiled = True
         logger.info("Compilation registered (will compile on first forward pass).")
 
