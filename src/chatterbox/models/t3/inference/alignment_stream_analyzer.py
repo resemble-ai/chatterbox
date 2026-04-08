@@ -63,13 +63,13 @@ class AlignmentStreamAnalyzer:
         self.last_aligned_attns = []
 
         # --- DIAGNOSTIC: log attention layer classes and config state ---
-        logger.info(f"[DIAG] config.output_attentions = {getattr(tfmr.config, 'output_attentions', 'N/A')}")
-        logger.info(f"[DIAG] config._attn_implementation = {getattr(tfmr.config, '_attn_implementation', 'N/A')}")
+        logger.warning(f"[DIAG] config.output_attentions = {getattr(tfmr.config, 'output_attentions', 'N/A')}")
+        logger.warning(f"[DIAG] config._attn_implementation = {getattr(tfmr.config, '_attn_implementation', 'N/A')}")
         sample_layers = [0, 9, 12, 13, 29] if len(tfmr.layers) >= 30 else [0]
         for idx in sample_layers:
             if idx < len(tfmr.layers):
                 attn_cls = type(tfmr.layers[idx].self_attn).__name__
-                logger.info(f"[DIAG] Layer {idx} attn class: {attn_cls}")
+                logger.warning(f"[DIAG] Layer {idx} attn class: {attn_cls}")
         # --- END DIAGNOSTIC ---
 
         for i, (layer_idx, head_idx) in enumerate(LLAMA_ALIGNED_HEADS):
@@ -77,12 +77,12 @@ class AlignmentStreamAnalyzer:
             self._add_attention_spy(tfmr, i, layer_idx, head_idx)
 
         # --- DIAGNOSTIC: log config state AFTER hooks are registered ---
-        logger.info(f"[DIAG] AFTER hooks: config.output_attentions = {getattr(tfmr.config, 'output_attentions', 'N/A')}")
-        logger.info(f"[DIAG] AFTER hooks: config._attn_implementation = {getattr(tfmr.config, '_attn_implementation', 'N/A')}")
+        logger.warning(f"[DIAG] AFTER hooks: config.output_attentions = {getattr(tfmr.config, 'output_attentions', 'N/A')}")
+        logger.warning(f"[DIAG] AFTER hooks: config._attn_implementation = {getattr(tfmr.config, '_attn_implementation', 'N/A')}")
         for idx in sample_layers:
             if idx < len(tfmr.layers):
                 attn_cls = type(tfmr.layers[idx].self_attn).__name__
-                logger.info(f"[DIAG] AFTER hooks: Layer {idx} attn class: {attn_cls}")
+                logger.warning(f"[DIAG] AFTER hooks: Layer {idx} attn class: {attn_cls}")
         # --- END DIAGNOSTIC ---
 
     def _add_attention_spy(self, tfmr, buffer_idx, layer_idx, head_idx):
@@ -101,16 +101,16 @@ class AlignmentStreamAnalyzer:
                 self.last_aligned_attns[buffer_idx] = step_attention[0, head_idx]  # (T0, Ti)
 
         target_layer = tfmr.layers[layer_idx].self_attn
-        logger.info(f"[DIAG] Registering attention spy on layer {layer_idx}, head {head_idx} (class: {type(target_layer).__name__})")
+        logger.warning(f"[DIAG] Registering attention spy on layer {layer_idx}, head {head_idx} (class: {type(target_layer).__name__})")
         # Register hook and store the handle
         target_layer.register_forward_hook(attention_forward_hook)
         if hasattr(tfmr, 'config') and hasattr(tfmr.config, 'output_attentions'):
             self.original_output_attentions = tfmr.config.output_attentions
             self.original_attn_implementation = getattr(tfmr.config, '_attn_implementation', None)
             if getattr(tfmr.config, '_attn_implementation', None) == 'sdpa':
-                logger.info(f"[DIAG] Changing config._attn_implementation from 'sdpa' to 'eager' (GLOBAL — affects ALL 30 layers!)")
+                logger.warning(f"[DIAG] Changing config._attn_implementation from 'sdpa' to 'eager' (GLOBAL — affects ALL 30 layers!)")
                 tfmr.config._attn_implementation = 'eager'
-            logger.info(f"[DIAG] Setting config.output_attentions = True (GLOBAL — forces eager fallback on ALL layers)")
+            logger.warning(f"[DIAG] Setting config.output_attentions = True (GLOBAL — forces eager fallback on ALL layers)")
             tfmr.config.output_attentions = True
 
     def step(self, logits, next_token=None):
