@@ -368,7 +368,7 @@ class ChatterboxTTS:
             inputs_embeds=inputs_embeds,
             past_key_values=None,
             use_cache=True,
-            output_attentions=True,
+            output_attentions=False,
             return_dict=True,
         )
         past = output.past_key_values
@@ -421,7 +421,7 @@ class ChatterboxTTS:
             output = patched_model(
                 inputs_embeds=next_token_embed,
                 past_key_values=past,
-                output_attentions=True,
+                output_attentions=False,
                 return_dict=True,
             )
             past = output.past_key_values
