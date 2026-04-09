@@ -200,11 +200,12 @@ class ChatterboxMultilingualTTS:
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
         t3.to(device=device, dtype=dtype).eval()
-        # mode="default": inductor kernel fusion, no CUDA graphs.
-        # CUDA graphs skipped because AlignmentStreamAnalyzer runs Python-side hooks
-        # between generation steps, which is incompatible with CUDA graph replay.
-        if device not in ("cpu", "mps"):
-            t3.compile_for_inference(mode="default")
+        # torch.compile disabled for multilingual T3: transformers decorates forward()
+        # with output_capturing.py which is missing `import torch`, causing a NameError
+        # when the compiler traces through it. Tracked upstream — re-enable once fixed.
+        # When re-enabling, use mode="default" (not "reduce-overhead") because
+        # AlignmentStreamAnalyzer's per-layer hooks are incompatible with CUDA graph replay.
+        # t3.compile_for_inference(mode="default")
 
         s3gen = S3Gen()
         s3gen.load_state_dict(

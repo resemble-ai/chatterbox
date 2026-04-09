@@ -1,22 +1,21 @@
 # Pending Issues
 
-## 1. torch.compile on multilingual T3 — verify in production (Step 8)
+## 1. torch.compile on multilingual T3 — blocked on upstream transformers bug (Step 8)
 
-**Status:** Re-enabled with `mode="default"`. Bumped transformers 5.2.0 → 5.5.2 to pick up
-the `output_capturing.py` fix (missing `import torch` caused NameError on compile).
+**Status:** Disabled — compile call commented out in `mtl_tts.py`
 
-**What changed:** `mtl_tts.py` calls `t3.compile_for_inference(mode="default")` on CUDA.
-`mode="default"` uses inductor kernel fusion without CUDA graphs. CUDA graphs are skipped
-because `AlignmentStreamAnalyzer` runs Python-side hooks between generation steps, which is
-incompatible with CUDA graph replay.
+**Root cause:** transformers decorates `LlamaModel.forward()` with an `output_capturing.py`
+wrapper that uses `torch` internally but never imports it at module level. When
+`torch.compile` traces through it, this raises:
+```
+NameError: name 'torch' is not defined
+  File "transformers/utils/output_capturing.py"
+```
+Confirmed broken in transformers 5.2.0 and 5.5.2. Opened upstream issue to track the fix.
 
-**Still to verify:** confirm RTF improvement in a real deployment run and that audio quality
-is unchanged.
-
-**Note on the fix:** transformers 5.5.2 also did not fix the bug. The Dockerfile now patches
-`output_capturing.py` at build time by prepending `import torch` (see the documented RUN
-layer in the Dockerfile). The patch is idempotent — if transformers ever fixes it upstream,
-the guard condition makes it a no-op.
+**When re-enabling:** use `mode="default"` (not `"reduce-overhead"`), because
+`AlignmentStreamAnalyzer`'s per-layer hooks are incompatible with CUDA graph replay.
+The call is ready to uncomment in `mtl_tts.py` once the upstream bug is fixed.
 
 ---
 
