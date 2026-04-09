@@ -60,21 +60,13 @@ RUN pip install --no-cache-dir -e .
 #   makes this RUN layer a no-op. You can then delete it for cleanliness, but
 #   leaving it is harmless.
 #
-RUN printf '%s\n' \
-        'import pathlib, transformers.utils.output_capturing as m' \
-        'p = pathlib.Path(m.__file__)' \
-        'src = p.read_text()' \
-        'if "import torch" not in src:' \
-        '    lines = src.splitlines(keepends=True)' \
-        '    # __future__ imports must stay first; insert torch after the last one' \
-        '    insert_at = next((i for i, l in enumerate(lines) if not l.startswith("from __future__") and l.strip() and not l.startswith("#")), 0)' \
-        '    lines.insert(insert_at, "import torch\n")' \
-        '    p.write_text("".join(lines))' \
-        '    print("Applied patch: added import torch to output_capturing.py")' \
-        'else:' \
-        '    print("output_capturing.py: no patch needed, skipping")' \
-    > /tmp/_patch_transformers.py \
-    && python3 /tmp/_patch_transformers.py
+RUN PATCH_FILE=$(python3 -c "import transformers.utils.output_capturing as m; print(m.__file__)") \
+    && if ! grep -q '^import torch' "$PATCH_FILE"; then \
+        sed -i '/^from __future__ import annotations/a import torch' "$PATCH_FILE" \
+        && echo "Applied patch: added import torch to output_capturing.py"; \
+    else \
+        echo "output_capturing.py: no patch needed, skipping"; \
+    fi
 
 # ── Layer 2: server dependencies (not listed in pyproject.toml)
 RUN pip install --no-cache-dir "fastapi>=0.110" "uvicorn[standard]>=0.29" "python-multipart>=0.0.9"
