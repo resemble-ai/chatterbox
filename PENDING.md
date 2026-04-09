@@ -2,16 +2,17 @@
 
 ## 1. torch.compile on multilingual T3 — verify in production (Step 8)
 
-**Status:** Re-enabled with `mode="default"` (transformers 5.2.0 fixed the NameError)
+**Status:** Re-enabled with `mode="default"`. Bumped transformers 5.2.0 → 5.5.2 to pick up
+the `output_capturing.py` fix (missing `import torch` caused NameError on compile).
 
-**What changed:** `mtl_tts.py` now calls `t3.compile_for_inference(mode="default")` on CUDA.
-`mode="default"` uses inductor kernel fusion without CUDA graphs. CUDA graphs are not used
-because `AlignmentStreamAnalyzer` runs Python-side logic (logit modification, attention
-hook dispatch) between each generation step, which is incompatible with CUDA graph replay.
+**What changed:** `mtl_tts.py` calls `t3.compile_for_inference(mode="default")` on CUDA.
+`mode="default"` uses inductor kernel fusion without CUDA graphs. CUDA graphs are skipped
+because `AlignmentStreamAnalyzer` runs Python-side hooks between generation steps, which is
+incompatible with CUDA graph replay.
 
 **Still to verify:** confirm RTF improvement in a real deployment run and that audio quality
-is unchanged. If the compile causes issues (recompilation storms, wrong output), revert to
-the commented-out call in `mtl_tts.py`.
+is unchanged. If the NameError recurs (5.5.2 still broken), fall back to patching the file
+in the Dockerfile by prepending `import torch\n` to `output_capturing.py` after pip install.
 
 ---
 

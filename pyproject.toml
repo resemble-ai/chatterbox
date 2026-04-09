@@ -19,7 +19,7 @@ dependencies = [
     "torch>=2.9.0; python_version >= '3.14'",
     "torchaudio==2.6.0; python_version < '3.14'",
     "torchaudio>=2.9.0; python_version >= '3.14'",
-    "transformers==5.2.0",
+    "transformers==5.5.2",
     "diffusers==0.29.0",
     "resemble-perth @ git+https://github.com/resemble-ai/Perth.git@master",
     "conformer==0.3.2",

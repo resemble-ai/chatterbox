@@ -200,9 +200,9 @@ class ChatterboxMultilingualTTS:
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
         t3.to(device=device, dtype=dtype).eval()
-        # transformers 5.x fixed the output_capturing.py NameError; use mode="default"
-        # (inductor kernel fusion, no CUDA graphs) since AlignmentStreamAnalyzer's per-layer
-        # hooks introduce Python-side steps that are incompatible with CUDA graph replay.
+        # mode="default": inductor kernel fusion, no CUDA graphs.
+        # CUDA graphs skipped because AlignmentStreamAnalyzer runs Python-side hooks
+        # between generation steps, which is incompatible with CUDA graph replay.
         if device not in ("cpu", "mps"):
             t3.compile_for_inference(mode="default")
 
