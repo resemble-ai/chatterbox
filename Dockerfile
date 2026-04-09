@@ -4,13 +4,21 @@
 #   docker build -t chatterbox-server .
 #
 # Run (GPU):
-#   docker run --gpus all -p 8000:8000 -v hf-cache:/root/.cache/huggingface chatterbox-server
+#   docker run --gpus all -p 8000:8000 \
+#     -v hf-cache:/root/.cache/huggingface \
+#     -v torch-cache:/cache \
+#     chatterbox-server
 #
 # Run (CPU only):
-#   docker run -p 8000:8000 -v hf-cache:/root/.cache/huggingface chatterbox-server --model base --device cpu
+#   docker run -p 8000:8000 \
+#     -v hf-cache:/root/.cache/huggingface \
+#     -v torch-cache:/cache \
+#     chatterbox-server --model base --device cpu
 #
-# The HuggingFace model cache is mounted as a named volume so weights are
-# downloaded once and reused across container restarts.
+# Two named volumes are used:
+#   hf-cache     — HuggingFace model weights (downloaded once, reused across restarts)
+#   torch-cache  — torch.compile kernel cache (compiled once per model, ~200-500 MB each;
+#                  without this volume the ~60 s compilation runs on every container start)
 #
 # Extra CLI flags are forwarded to server.py, e.g.:
 #   docker run ... chatterbox-server --model turbo --device cuda --debug
@@ -77,9 +85,15 @@ COPY server/ server/
 
 EXPOSE 8000
 
-# Mount a volume here so HuggingFace model weights survive container restarts:
-#   docker run -v hf-cache:/root/.cache/huggingface ...
+# HuggingFace model weights — mount as a named volume so downloads persist.
 ENV HF_HOME=/root/.cache/huggingface
+
+# torch.compile kernel cache — mount as a named volume (-v torch-cache:/cache) so
+# compiled CUDA kernels survive container restarts. Without this, each startup
+# recompiles from scratch (~60 s per model). Each model caches independently, so
+# switching models compiles once and is then fast on all future restarts.
+ENV TORCHINDUCTOR_CACHE_DIR=/cache/torch_inductor
+ENV TRITON_CACHE_DIR=/cache/triton
 
 # --host 0.0.0.0 is required so the port is reachable outside the container.
 # CMD provides defaults that can be overridden at `docker run` time.
