@@ -11,8 +11,12 @@ because `AlignmentStreamAnalyzer` runs Python-side hooks between generation step
 incompatible with CUDA graph replay.
 
 **Still to verify:** confirm RTF improvement in a real deployment run and that audio quality
-is unchanged. If the NameError recurs (5.5.2 still broken), fall back to patching the file
-in the Dockerfile by prepending `import torch\n` to `output_capturing.py` after pip install.
+is unchanged.
+
+**Note on the fix:** transformers 5.5.2 also did not fix the bug. The Dockerfile now patches
+`output_capturing.py` at build time by prepending `import torch` (see the documented RUN
+layer in the Dockerfile). The patch is idempotent — if transformers ever fixes it upstream,
+the guard condition makes it a no-op.
 
 ---
 

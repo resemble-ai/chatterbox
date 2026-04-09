@@ -35,6 +35,41 @@ COPY pyproject.toml .
 RUN mkdir -p src/chatterbox && touch src/chatterbox/__init__.py
 RUN pip install --no-cache-dir -e .
 
+# ── Layer 1b: patch transformers' output_capturing.py ────────────────────────
+#
+# WHY THIS EXISTS:
+#   torch.compile() traces through the model's forward() call, which is
+#   decorated by transformers' internal output_capturing.py wrapper. That
+#   wrapper uses `torch` at runtime but never imports it at the module level —
+#   a bug in transformers that has not been fixed as of 5.5.2 (upstream issue).
+#   Without this patch, compile raises:
+#     NameError: name 'torch' is not defined
+#       File "transformers/utils/output_capturing.py", line 222, in wrapper
+#
+# WHY THE PATCH IS SAFE:
+#   - `torch` is always installed as a hard dependency of transformers, so it
+#     is guaranteed to be importable.
+#   - Prepending `import torch` to a file that already imports it elsewhere is
+#     a Python no-op (modules are cached in sys.modules after the first import).
+#   - If a future transformers release adds the import itself, this patch will
+#     print "already patched" and do nothing.
+#
+# WHEN TO REMOVE THIS:
+#   Once the upstream bug is fixed, the `if 'import torch' not in src` guard
+#   makes this RUN layer a no-op. You can then delete it for cleanliness, but
+#   leaving it is harmless.
+#
+RUN python3 -c "
+import pathlib, transformers.utils.output_capturing as m
+p = pathlib.Path(m.__file__)
+src = p.read_text()
+if 'import torch' not in src:
+    p.write_text('import torch\n' + src)
+    print('Applied patch: added missing import torch to output_capturing.py')
+else:
+    print('output_capturing.py already contains import torch — patch not needed')
+"
+
 # ── Layer 2: server dependencies (not listed in pyproject.toml)
 RUN pip install --no-cache-dir "fastapi>=0.110" "uvicorn[standard]>=0.29" "python-multipart>=0.0.9"
 
