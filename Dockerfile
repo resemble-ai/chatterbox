@@ -49,8 +49,9 @@ RUN pip install --no-cache-dir -e .
 # WHY THE PATCH IS SAFE:
 #   - `torch` is always installed as a hard dependency of transformers, so it
 #     is guaranteed to be importable.
-#   - Prepending `import torch` to a file that already imports it elsewhere is
-#     a Python no-op (modules are cached in sys.modules after the first import).
+#   - `import torch` is inserted after any `from __future__` lines (which Python
+#     requires to be first). If torch is already imported, the patch is skipped.
+#   - Re-importing an already-loaded module is a no-op (sys.modules cache).
 #   - If a future transformers release adds the import itself, this patch will
 #     print "already patched" and do nothing.
 #
@@ -64,7 +65,11 @@ RUN printf '%s\n' \
         'p = pathlib.Path(m.__file__)' \
         'src = p.read_text()' \
         'if "import torch" not in src:' \
-        '    p.write_text("import torch\n" + src)' \
+        '    lines = src.splitlines(keepends=True)' \
+        '    # __future__ imports must stay first; insert torch after the last one' \
+        '    insert_at = next((i for i, l in enumerate(lines) if not l.startswith("from __future__") and l.strip() and not l.startswith("#")), 0)' \
+        '    lines.insert(insert_at, "import torch\n")' \
+        '    p.write_text("".join(lines))' \
         '    print("Applied patch: added import torch to output_capturing.py")' \
         'else:' \
         '    print("output_capturing.py: no patch needed, skipping")' \
