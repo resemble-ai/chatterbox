@@ -59,16 +59,17 @@ RUN pip install --no-cache-dir -e .
 #   makes this RUN layer a no-op. You can then delete it for cleanliness, but
 #   leaving it is harmless.
 #
-RUN python3 -c "
-import pathlib, transformers.utils.output_capturing as m
-p = pathlib.Path(m.__file__)
-src = p.read_text()
-if 'import torch' not in src:
-    p.write_text('import torch\n' + src)
-    print('Applied patch: added missing import torch to output_capturing.py')
-else:
-    print('output_capturing.py already contains import torch — patch not needed')
-"
+RUN printf '%s\n' \
+        'import pathlib, transformers.utils.output_capturing as m' \
+        'p = pathlib.Path(m.__file__)' \
+        'src = p.read_text()' \
+        'if "import torch" not in src:' \
+        '    p.write_text("import torch\n" + src)' \
+        '    print("Applied patch: added import torch to output_capturing.py")' \
+        'else:' \
+        '    print("output_capturing.py: no patch needed, skipping")' \
+    > /tmp/_patch_transformers.py \
+    && python3 /tmp/_patch_transformers.py
 
 # ── Layer 2: server dependencies (not listed in pyproject.toml)
 RUN pip install --no-cache-dir "fastapi>=0.110" "uvicorn[standard]>=0.29" "python-multipart>=0.0.9"
