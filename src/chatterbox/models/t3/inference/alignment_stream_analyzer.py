@@ -47,6 +47,13 @@ class AlignmentStreamAnalyzer:
         self.curr_frame_pos = 0
         self.text_position = 0
 
+        # Track the transformer and any state we mutate so `close()` can undo it.
+        self._tfmr = tfmr
+        self._hook_handles = []
+        self._config_patched = False
+        self._original_output_attentions = None
+        self._original_attn_implementation = None
+
         self.started = False
         self.started_at = None
 
@@ -80,14 +87,45 @@ class AlignmentStreamAnalyzer:
                 self.last_aligned_attns[buffer_idx] = step_attention[0, head_idx]  # (T0, Ti)
 
         target_layer = tfmr.layers[layer_idx].self_attn
-        # Register hook and store the handle
-        target_layer.register_forward_hook(attention_forward_hook)
-        if hasattr(tfmr, 'config') and hasattr(tfmr.config, 'output_attentions'):
-            self.original_output_attentions = tfmr.config.output_attentions
-            self.original_attn_implementation = getattr(tfmr.config, '_attn_implementation', None)
+        # Register hook and store the handle so it can be removed in `close()`.
+        handle = target_layer.register_forward_hook(attention_forward_hook)
+        self._hook_handles.append(handle)
+        if not self._config_patched and hasattr(tfmr, 'config') and hasattr(tfmr.config, 'output_attentions'):
+            self._original_output_attentions = tfmr.config.output_attentions
+            self._original_attn_implementation = getattr(tfmr.config, '_attn_implementation', None)
             if getattr(tfmr.config, '_attn_implementation', None) == 'sdpa':
                 tfmr.config._attn_implementation = 'eager'
             tfmr.config.output_attentions = True
+            self._config_patched = True
+
+    def close(self):
+        """
+        Remove all registered forward hooks and restore any transformer config
+        values that were mutated during construction. Safe to call multiple
+        times.
+        """
+        while self._hook_handles:
+            handle = self._hook_handles.pop()
+            try:
+                handle.remove()
+            except Exception:
+                pass
+        if self._config_patched:
+            tfmr = self._tfmr
+            if tfmr is not None and hasattr(tfmr, 'config'):
+                try:
+                    tfmr.config.output_attentions = self._original_output_attentions
+                    if self._original_attn_implementation is not None:
+                        tfmr.config._attn_implementation = self._original_attn_implementation
+                except Exception:
+                    pass
+            self._config_patched = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
 
     def step(self, logits, next_token=None):
         """
