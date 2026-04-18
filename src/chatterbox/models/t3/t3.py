@@ -274,142 +274,150 @@ class T3(nn.Module):
 
         # TODO? synchronize the expensive compile function
         # with self.compile_lock:
-        if not self.compiled:
-            # Default to None for English models, only create for multilingual
-            alignment_stream_analyzer = None
-            if self.hp.is_multilingual:
-                alignment_stream_analyzer = AlignmentStreamAnalyzer(
-                    self.tfmr,
-                    None,
-                    text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
-                    alignment_layer_idx=9, # TODO: hparam or something?
-                    eos_idx=self.hp.stop_speech_token,
+        alignment_stream_analyzer = None
+        try:
+            if not self.compiled:
+                # Default to None for English models, only create for multilingual
+                alignment_stream_analyzer = None
+                if self.hp.is_multilingual:
+                    alignment_stream_analyzer = AlignmentStreamAnalyzer(
+                        self.tfmr,
+                        None,
+                        text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
+                        alignment_layer_idx=9, # TODO: hparam or something?
+                        eos_idx=self.hp.stop_speech_token,
+                    )
+                    assert alignment_stream_analyzer.eos_idx == self.hp.stop_speech_token
+
+                patched_model = T3HuggingfaceBackend(
+                    config=self.cfg,
+                    llama=self.tfmr,
+                    speech_enc=self.speech_emb,
+                    speech_head=self.speech_head,
+                    alignment_stream_analyzer=alignment_stream_analyzer,
                 )
-                assert alignment_stream_analyzer.eos_idx == self.hp.stop_speech_token
+                self.patched_model = patched_model
+                self.compiled = True
 
-            patched_model = T3HuggingfaceBackend(
-                config=self.cfg,
-                llama=self.tfmr,
-                speech_enc=self.speech_emb,
-                speech_head=self.speech_head,
-                alignment_stream_analyzer=alignment_stream_analyzer,
-            )
-            self.patched_model = patched_model
-            self.compiled = True
+            # # Run normal generate method, which calls our custom extended methods
+            # return self.patched_model.generate(
+            #     inputs=initial_speech_tokens,
+            #     decoder_cond=embeds,
+            #     bos_token_id=self.hp.start_speech_token,
+            #     eos_token_id=(self.hp.stop_speech_token if stop_on_eos else -1),
+            #     pad_token_id=self.hp.stop_speech_token,
+            #     max_new_tokens=max_new_tokens or self.hp.max_speech_tokens,
+            #     num_return_sequences=num_return_sequences,
+            #     temperature=temperature,
+            #     min_p=min_p,
+            #     length_penalty=length_penalty,
+            #     repetition_penalty=repetition_penalty,
+            #     do_sample=do_sample,
+            #     # cache_implementation=None if not self.compiled else "static",
+            # )
 
-        # # Run normal generate method, which calls our custom extended methods
-        # return self.patched_model.generate(
-        #     inputs=initial_speech_tokens,
-        #     decoder_cond=embeds,
-        #     bos_token_id=self.hp.start_speech_token,
-        #     eos_token_id=(self.hp.stop_speech_token if stop_on_eos else -1),
-        #     pad_token_id=self.hp.stop_speech_token,
-        #     max_new_tokens=max_new_tokens or self.hp.max_speech_tokens,
-        #     num_return_sequences=num_return_sequences,
-        #     temperature=temperature,
-        #     min_p=min_p,
-        #     length_penalty=length_penalty,
-        #     repetition_penalty=repetition_penalty,
-        #     do_sample=do_sample,
-        #     # cache_implementation=None if not self.compiled else "static",
-        # )
+            device = embeds.device
 
-        device = embeds.device
+            bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=device)
+            bos_embed = self.speech_emb(bos_token)  # shape: (B, 1, embed_dim)
+            bos_embed = bos_embed + self.speech_pos_emb.get_fixed_embedding(0)
 
-        bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=device)
-        bos_embed = self.speech_emb(bos_token)  # shape: (B, 1, embed_dim)
-        bos_embed = bos_embed + self.speech_pos_emb.get_fixed_embedding(0)
+            # batch_size=2 for CFG
+            bos_embed = torch.cat([bos_embed, bos_embed])
 
-        # batch_size=2 for CFG
-        bos_embed = torch.cat([bos_embed, bos_embed])
+            # Combine condition and BOS token for the initial input
+            inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
 
-        # Combine condition and BOS token for the initial input
-        inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
+            # Track generated token ids; start with the BOS token.
+            generated_ids = bos_token.clone()
+            predicted = []  # To store the predicted tokens
 
-        # Track generated token ids; start with the BOS token.
-        generated_ids = bos_token.clone()
-        predicted = []  # To store the predicted tokens
+            # Instantiate the logits processors.
+            top_p_warper = TopPLogitsWarper(top_p=top_p)
+            min_p_warper = MinPLogitsWarper(min_p=min_p)
+            top_p_warper = TopPLogitsWarper(top_p=top_p)
+            repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
 
-        # Instantiate the logits processors.
-        top_p_warper = TopPLogitsWarper(top_p=top_p)
-        min_p_warper = MinPLogitsWarper(min_p=min_p)
-        top_p_warper = TopPLogitsWarper(top_p=top_p)
-        repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
-
-        # ---- Initial Forward Pass (no kv_cache yet) ----
-        output = self.patched_model(
-            inputs_embeds=inputs_embeds,
-            past_key_values=None,
-            use_cache=True,
-            output_attentions=True,
-            output_hidden_states=True,
-            return_dict=True,
-        )
-        # Initialize kv_cache with the full context.
-        past = output.past_key_values
-
-        # ---- Generation Loop using kv_cache ----
-        for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
-            logits_step = output.logits[:, -1, :]
-            # CFG combine  → (1, V)
-            cond   = logits_step[0:1, :]
-            uncond = logits_step[1:2, :]
-            cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
-            logits = cond + cfg * (cond - uncond)
-            
-            # Apply alignment stream analyzer integrity checks
-            if self.patched_model.alignment_stream_analyzer is not None:
-                if logits.dim() == 1:            # guard in case something upstream squeezed
-                    logits = logits.unsqueeze(0) # (1, V)
-                # Pass the last generated token for repetition tracking
-                last_token = generated_ids[0, -1].item() if len(generated_ids[0]) > 0 else None
-                logits = self.patched_model.alignment_stream_analyzer.step(logits, next_token=last_token)  # (1, V)
-
-            # Apply repetition penalty
-            ids_for_proc = generated_ids[:1, ...]   # batch = 1
-            logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
-            
-            # Apply temperature scaling.
-            if temperature != 1.0:
-                logits = logits / temperature
-                
-            # Apply min_p and top_p filtering
-            logits = min_p_warper(ids_for_proc, logits)
-            logits = top_p_warper(ids_for_proc, logits)
-
-            # Convert logits to probabilities and sample the next token.
-            probs = torch.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)  # shape: (B, 1)
-
-            predicted.append(next_token)
-            generated_ids = torch.cat([generated_ids, next_token], dim=1)
-
-            # Check for EOS token.
-            if next_token.view(-1) == self.hp.stop_speech_token:
-                logger.info(f"✅ EOS token detected! Stopping generation at step {i+1}")
-                break
-
-            # Get embedding for the new token.
-            next_token_embed = self.speech_emb(next_token)
-            next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
-
-            #  For CFG
-            next_token_embed = torch.cat([next_token_embed, next_token_embed])
-
-            # Forward pass with only the new token and the cached past.
+            # ---- Initial Forward Pass (no kv_cache yet) ----
             output = self.patched_model(
-                inputs_embeds=next_token_embed,
-                past_key_values=past,
+                inputs_embeds=inputs_embeds,
+                past_key_values=None,
+                use_cache=True,
                 output_attentions=True,
                 output_hidden_states=True,
                 return_dict=True,
             )
-            # Update the kv_cache.
+            # Initialize kv_cache with the full context.
             past = output.past_key_values
 
-        # Concatenate all predicted tokens along the sequence dimension.
-        predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
-        return predicted_tokens
+            # ---- Generation Loop using kv_cache ----
+            for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
+                logits_step = output.logits[:, -1, :]
+                # CFG combine  → (1, V)
+                cond   = logits_step[0:1, :]
+                uncond = logits_step[1:2, :]
+                cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
+                logits = cond + cfg * (cond - uncond)
+            
+                # Apply alignment stream analyzer integrity checks
+                if self.patched_model.alignment_stream_analyzer is not None:
+                    if logits.dim() == 1:            # guard in case something upstream squeezed
+                        logits = logits.unsqueeze(0) # (1, V)
+                    # Pass the last generated token for repetition tracking
+                    last_token = generated_ids[0, -1].item() if len(generated_ids[0]) > 0 else None
+                    logits = self.patched_model.alignment_stream_analyzer.step(logits, next_token=last_token)  # (1, V)
+
+                # Apply repetition penalty
+                ids_for_proc = generated_ids[:1, ...]   # batch = 1
+                logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
+            
+                # Apply temperature scaling.
+                if temperature != 1.0:
+                    logits = logits / temperature
+                
+                # Apply min_p and top_p filtering
+                logits = min_p_warper(ids_for_proc, logits)
+                logits = top_p_warper(ids_for_proc, logits)
+
+                # Convert logits to probabilities and sample the next token.
+                probs = torch.softmax(logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)  # shape: (B, 1)
+
+                predicted.append(next_token)
+                generated_ids = torch.cat([generated_ids, next_token], dim=1)
+
+                # Check for EOS token.
+                if next_token.view(-1) == self.hp.stop_speech_token:
+                    logger.info(f"✅ EOS token detected! Stopping generation at step {i+1}")
+                    break
+
+                # Get embedding for the new token.
+                next_token_embed = self.speech_emb(next_token)
+                next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
+
+                #  For CFG
+                next_token_embed = torch.cat([next_token_embed, next_token_embed])
+
+                # Forward pass with only the new token and the cached past.
+                output = self.patched_model(
+                    inputs_embeds=next_token_embed,
+                    past_key_values=past,
+                    output_attentions=True,
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+                # Update the kv_cache.
+                past = output.past_key_values
+
+            # Concatenate all predicted tokens along the sequence dimension.
+            predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
+            return predicted_tokens
+        finally:
+            # Always release forward hooks and restore tfmr config, even on
+            # exception, so repeated calls to `inference()` do not accumulate
+            # hooks on the underlying transformer layers.
+            if alignment_stream_analyzer is not None:
+                alignment_stream_analyzer.close()
 
     @torch.inference_mode()
     def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
