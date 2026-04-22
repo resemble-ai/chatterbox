@@ -1,5 +1,7 @@
 import logging
 import json
+import os
+import hashlib
 
 import torch
 from pathlib import Path
@@ -114,19 +116,99 @@ def hiragana_normalize(text: str) -> str:
         return text
 
 
+# Dicta ONNX model for Hebrew diacritization
+_DICTA_MODEL_URL = (
+    "https://github.com/thewh1teagle/dicta-onnx/releases/download/"
+    "model-files-v1.0/dicta-1.0.int8.onnx"
+)
+_DICTA_MODEL_SHA256 = None  # skip hash check — upstream provides no checksum
+_DICTA_MODEL_FILENAME = "dicta-1.0.int8.onnx"
+
+
+def _get_dicta_model_path() -> Path:
+    """Return a local path to the dicta ONNX model, downloading it on first use.
+
+    The model is cached under ``$XDG_CACHE_HOME/chatterbox/dicta/`` (or
+    ``~/.cache/chatterbox/dicta/`` when the env-var is unset).  An env-var
+    ``DICTA_MODEL_PATH`` overrides auto-download and points directly at an
+    existing ``.onnx`` file.
+    """
+    # 1. Honour explicit override
+    env_path = os.environ.get("DICTA_MODEL_PATH")
+    if env_path:
+        p = Path(env_path).expanduser()
+        if not p.is_file():
+            raise FileNotFoundError(
+                f"DICTA_MODEL_PATH={env_path!r} does not point to an existing file"
+            )
+        return p
+
+    # 2. Cached download
+    cache_root = Path(
+        os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")
+    ) / "chatterbox" / "dicta"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    model_path = cache_root / _DICTA_MODEL_FILENAME
+
+    if model_path.is_file():
+        return model_path
+
+    logger.info(
+        "Downloading Hebrew diacritization model (%s) — this is a one-time "
+        "~300 MB download…",
+        _DICTA_MODEL_URL,
+    )
+
+    import urllib.request
+    import tempfile
+
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=str(cache_root), suffix=".onnx.part"
+    )
+    try:
+        os.close(tmp_fd)
+        urllib.request.urlretrieve(_DICTA_MODEL_URL, tmp_path)
+        # Atomic rename so a partial download never poisons the cache
+        os.replace(tmp_path, str(model_path))
+    except Exception:
+        # Clean up partial file on failure
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+    logger.info("Dicta model saved to %s", model_path)
+    return model_path
+
+
 def add_hebrew_diacritics(text: str) -> str:
     """Hebrew text normalization: adds diacritics to Hebrew text."""
     global _dicta
-    
+
     try:
         if _dicta is None:
             from dicta_onnx import Dicta
-            _dicta = Dicta()
-        
+
+            model_path = _get_dicta_model_path()
+            _dicta = Dicta(str(model_path))
+
         return _dicta.add_diacritics(text)
-        
+
     except ImportError:
-        logger.warning("dicta_onnx not available - Hebrew text processing skipped")
+        logger.warning(
+            "dicta_onnx not available — install it with: "
+            "pip install dicta-onnx\n"
+            "Hebrew text processing skipped."
+        )
+        return text
+    except FileNotFoundError as e:
+        logger.warning(
+            "Hebrew diacritization model not found: %s\n"
+            "You can set DICTA_MODEL_PATH to a local .onnx file, or let "
+            "chatterbox download it automatically (requires internet).",
+            e,
+        )
         return text
     except Exception as e:
         logger.warning(f"Hebrew diacritization failed: {e}")
