@@ -1,0 +1,39 @@
+{
+  "_note": "40 trained tags in 4 categories. build_splits.py consumes this. `turbo_pretrained` lists the subset already present as single tokens in Chatterbox-Turbo's tokenizer; the rest are added via vocab expansion before training.",
+  "event": [
+    "cough", "clearing throat", "sigh", "laugh", "chuckle",
+    "bitter laugh", "belly laugh", "pause", "long pause"
+  ],
+  "prosody": [
+    "quickly", "slowly", "very slowly", "very quietly", "whispering",
+    "shouting", "monotone", "trailing off", "mumbling", "deep pitch",
+    "speeding up", "more firmly", "firmly"
+  ],
+  "emotional": [
+    "warmly", "warm", "confidently", "passionately", "friendly",
+    "delighted", "exhausted", "animated", "curious", "playful",
+    "hesitantly", "stern", "mocking", "excited", "joking",
+    "sarcastic", "frustrated"
+  ],
+  "neutral_baseline": ["normal voice"],
+  "accent_deferred": [],
+  "turbo_pretrained": [
+    "cough", "clearing throat", "sigh", "laugh", "chuckle",
+    "whispering", "sarcastic"
+  ],
+  "_turbo_cousins": {
+    "frustrated": "angry",
+    "delighted": "happy",
+    "exhausted": "crying",
+    "excited": "happy",
+    "mocking": "sarcastic"
+  },
+  "_notes": {
+    "total_phase1_tags": 40,
+    "turbo_pretrained_count": 7,
+    "turbo_must_add_count": 33,
+    "min_rows_threshold": 600,
+    "speaker_coverage": "all top tags appear in 150-211 of 217 speakers",
+    "deferred": "compound tags, dynamic-trajectory tags, accent+X combos — all in the 26k long tail"
+  }
+}

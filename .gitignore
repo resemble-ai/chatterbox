@@ -46,3 +46,37 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+
+
+# ── paralinguistic-tag finetune additions ──
+# Heavy / derivable training & eval artifacts
+eval_runs/
+outputs/
+inference/
+
+# Derivable analysis outputs (regenerate via analysis/analyze_tags.py)
+analysis/row_index.jsonl
+analysis/tag_counts.csv
+analysis/tag_counts_v2.csv
+analysis/tag_per_speaker.csv
+analysis/tag_per_speaker_v2.csv
+analysis/tag_cooccurrence.csv
+analysis/neutral_rows_per_speaker.csv
+analysis/neutral_rows_per_speaker_v2.csv
+analysis/tag_tokenization.json
+analysis/tags_vs_tags_field.json
+analysis/voice_id_stats.json
+analysis/speaker
+
+# Derivable split files (regenerate via splits/build_splits.py)
+splits/train.json
+splits/eval_slices.json
+splits/speaker_to_rows.json
+splits/neutral_refs_by_speaker.json
+splits/locale_to_speakers.json
+splits/held_out_speakers.json
+
+# Local scratch
+finetune_scripts_others/
+test_tags_ab.py
+hf_canopy/samples/
