@@ -85,6 +85,7 @@ class T3(nn.Module):
         self.text_head = nn.Linear(self.cfg.hidden_size, hp.text_tokens_dict_size, bias=False)
         self.speech_head = nn.Linear(self.cfg.hidden_size, hp.speech_tokens_dict_size, bias=self.is_gpt)
         self.compiled = False
+        self.alignment_heads = None
 
     @property
     def device(self):
@@ -277,12 +278,12 @@ class T3(nn.Module):
         if not self.compiled:
             # Default to None for English models, only create for multilingual
             alignment_stream_analyzer = None
-            if self.hp.is_multilingual:
+            if self.hp.is_multilingual and self.alignment_heads is not None:
                 alignment_stream_analyzer = AlignmentStreamAnalyzer(
                     self.tfmr,
                     None,
                     text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
-                    alignment_layer_idx=9, # TODO: hparam or something?
+                    alignment_heads=self.alignment_heads,
                     eos_idx=self.hp.stop_speech_token,
                 )
                 assert alignment_stream_analyzer.eos_idx == self.hp.stop_speech_token

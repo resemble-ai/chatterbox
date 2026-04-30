@@ -10,9 +10,6 @@ from types import MethodType
 logger = logging.getLogger(__name__)
 
 
-LLAMA_ALIGNED_HEADS = [(12, 15), (13, 11), (9, 2)]
-
-
 @dataclass
 class AlignmentAnalysisResult:
     # was this frame detected as being part of a noisy beginning chunk with potential hallucinations?
@@ -30,7 +27,7 @@ class AlignmentAnalysisResult:
 
 
 class AlignmentStreamAnalyzer:
-    def __init__(self, tfmr, queue, text_tokens_slice, alignment_layer_idx=9, eos_idx=0):
+    def __init__(self, tfmr, queue, text_tokens_slice, alignment_heads=None, alignment_layer_idx=9, eos_idx=0):
         """
         Some transformer TTS models implicitly solve text-speech alignment in one or more of their self-attention
         activation maps. This module exploits this to perform online integrity checks which streaming.
@@ -59,8 +56,10 @@ class AlignmentStreamAnalyzer:
         # Using `output_attentions=True` is incompatible with optimized attention kernels, so
         # using it for all layers slows things down too much. We can apply it to just one layer
         # by intercepting the kwargs and adding a forward hook (credit: jrm)
+        if alignment_heads is None:
+            raise ValueError("AlignmentStreamAnalyzer requires verified alignment_heads")
         self.last_aligned_attns = []
-        for i, (layer_idx, head_idx) in enumerate(LLAMA_ALIGNED_HEADS):
+        for i, (layer_idx, head_idx) in enumerate(alignment_heads):
             self.last_aligned_attns += [None]
             self._add_attention_spy(tfmr, i, layer_idx, head_idx)
 

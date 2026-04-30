@@ -21,6 +21,7 @@ wav = model.generate(text)
 ta.save("test-1.wav", wav, model.sr)
 
 multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+# v2 is the default. Pass t3_model="v3" to use the v3 multilingual checkpoint.
 text = "Bonjour, comment ça va? Ceci est le modèle de synthèse vocale multilingue Chatterbox, il prend en charge 23 langues."
 wav = multilingual_model.generate(text, language_id="fr")
 ta.save("test-2.wav", wav, multilingual_model.sr)

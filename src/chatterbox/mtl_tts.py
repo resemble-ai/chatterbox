@@ -19,6 +19,20 @@ from .models.t3.modules.cond_enc import T3Cond
 
 
 REPO_ID = "ResembleAI/chatterbox"
+DEFAULT_MULTILINGUAL_T3_MODEL = "t3_mtl23ls_v2.safetensors"
+MULTILINGUAL_T3_MODELS = {
+    "v2": "t3_mtl23ls_v2.safetensors",
+    "t3_mtl23ls_v2": "t3_mtl23ls_v2.safetensors",
+    "v3": "t3_mtl23ls_v3.safetensors",
+    "t3_mtl23ls_v3": "t3_mtl23ls_v3.safetensors",
+}
+MULTILINGUAL_T3_ALIGNMENT_HEADS = {
+    # Verified for the existing public multilingual checkpoint.
+    "t3_mtl23ls_v2.safetensors": [(12, 15), (13, 11), (9, 2)],
+    # v3 generates reliably without alignment-based hallucination detection;
+    # leave None to skip the analyzer and keep optimized attention kernels.
+    "t3_mtl23ls_v3.safetensors": None,
+}
 
 # Supported languages for the multilingual model
 SUPPORTED_LANGUAGES = {
@@ -46,6 +60,19 @@ SUPPORTED_LANGUAGES = {
   "tr": "Turkish",
   "zh": "Chinese",
 }
+
+
+def _resolve_multilingual_t3_model(t3_model: str | None) -> str:
+    if t3_model is None:
+        return DEFAULT_MULTILINGUAL_T3_MODEL
+    if t3_model in MULTILINGUAL_T3_MODELS:
+        return MULTILINGUAL_T3_MODELS[t3_model]
+    if t3_model.endswith(".safetensors"):
+        return t3_model
+    raise ValueError(
+        f"Unknown multilingual T3 model '{t3_model}'. "
+        f"Expected one of {sorted(MULTILINGUAL_T3_MODELS)} or a .safetensors filename."
+    )
 
 
 def punc_norm(text: str) -> str:
@@ -160,8 +187,15 @@ class ChatterboxMultilingualTTS:
         return SUPPORTED_LANGUAGES.copy()
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxMultilingualTTS':
+    def from_local(
+        cls,
+        ckpt_dir,
+        device,
+        t3_model: str | None = None,
+        use_alignment_analyzer: bool | None = None,
+    ) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(ckpt_dir)
+        t3_model = _resolve_multilingual_t3_model(t3_model)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
         if device in ["cpu", "mps"]:
@@ -176,10 +210,16 @@ class ChatterboxMultilingualTTS:
         ve.to(device).eval()
 
         t3 = T3(T3Config.multilingual())
-        t3_state = load_safetensors(ckpt_dir / "t3_mtl23ls_v2.safetensors")
+        t3_state = load_safetensors(ckpt_dir / t3_model)
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
+        alignment_heads = MULTILINGUAL_T3_ALIGNMENT_HEADS.get(t3_model)
+        if use_alignment_analyzer is False:
+            alignment_heads = None
+        elif use_alignment_analyzer is True and alignment_heads is None:
+            raise ValueError(f"No verified alignment analyzer heads for {t3_model}")
+        t3.alignment_heads = alignment_heads
         t3.to(device).eval()
 
         s3gen = S3Gen()
@@ -199,7 +239,12 @@ class ChatterboxMultilingualTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device: torch.device) -> 'ChatterboxMultilingualTTS':
+    def from_pretrained(
+        cls,
+        device: torch.device,
+        t3_model: str | None = None,
+        use_alignment_analyzer: bool | None = None,
+    ) -> 'ChatterboxMultilingualTTS':
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -208,16 +253,22 @@ class ChatterboxMultilingualTTS:
                 print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
             device = "cpu"
 
+        t3_model = _resolve_multilingual_t3_model(t3_model)
         ckpt_dir = Path(
             snapshot_download(
                 repo_id=REPO_ID,
                 repo_type="model",
                 revision="main",
-                allow_patterns=["ve.pt", "t3_mtl23ls_v2.safetensors", "s3gen.pt", "grapheme_mtl_merged_expanded_v1.json", "conds.pt", "Cangjie5_TC.json"],
+                allow_patterns=["ve.pt", t3_model, "s3gen.pt", "grapheme_mtl_merged_expanded_v1.json", "conds.pt", "Cangjie5_TC.json"],
                 token=os.getenv("HF_TOKEN"),
             )
         )
-        return cls.from_local(ckpt_dir, device)
+        return cls.from_local(
+            ckpt_dir,
+            device,
+            t3_model=t3_model,
+            use_alignment_analyzer=use_alignment_analyzer,
+        )
     
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
