@@ -11,7 +11,7 @@ from huggingface_hub import snapshot_download
 
 from .models.t3 import T3
 from .models.t3.modules.t3_config import T3Config
-from .models.s3tokenizer import S3_SR, drop_invalid_tokens
+from .models.s3tokenizer import S3_SR, S3_TOKEN_RATE, drop_invalid_tokens
 from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import MTLTokenizer
 from .models.voice_encoder import VoiceEncoder
@@ -25,13 +25,6 @@ MULTILINGUAL_T3_MODELS = {
     "t3_mtl23ls_v2": "t3_mtl23ls_v2.safetensors",
     "v3": "t3_mtl23ls_v3.safetensors",
     "t3_mtl23ls_v3": "t3_mtl23ls_v3.safetensors",
-}
-MULTILINGUAL_T3_ALIGNMENT_HEADS = {
-    # Verified for the existing public multilingual checkpoint.
-    "t3_mtl23ls_v2.safetensors": [(12, 15), (13, 11), (9, 2)],
-    # v3 generates reliably without alignment-based hallucination detection;
-    # leave None to skip the analyzer and keep optimized attention kernels.
-    "t3_mtl23ls_v3.safetensors": None,
 }
 
 # Supported languages for the multilingual model
@@ -192,7 +185,6 @@ class ChatterboxMultilingualTTS:
         ckpt_dir,
         device,
         t3_model: str | None = None,
-        use_alignment_analyzer: bool | None = None,
     ) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(ckpt_dir)
         t3_model = _resolve_multilingual_t3_model(t3_model)
@@ -214,12 +206,6 @@ class ChatterboxMultilingualTTS:
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
-        alignment_heads = MULTILINGUAL_T3_ALIGNMENT_HEADS.get(t3_model)
-        if use_alignment_analyzer is False:
-            alignment_heads = None
-        elif use_alignment_analyzer is True and alignment_heads is None:
-            raise ValueError(f"No verified alignment analyzer heads for {t3_model}")
-        t3.alignment_heads = alignment_heads
         t3.to(device).eval()
 
         s3gen = S3Gen()
@@ -243,7 +229,6 @@ class ChatterboxMultilingualTTS:
         cls,
         device: torch.device,
         t3_model: str | None = None,
-        use_alignment_analyzer: bool | None = None,
     ) -> 'ChatterboxMultilingualTTS':
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
@@ -263,12 +248,7 @@ class ChatterboxMultilingualTTS:
                 token=os.getenv("HF_TOKEN"),
             )
         )
-        return cls.from_local(
-            ckpt_dir,
-            device,
-            t3_model=t3_model,
-            use_alignment_analyzer=use_alignment_analyzer,
-        )
+        return cls.from_local(ckpt_dir, device, t3_model=t3_model)
     
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
@@ -305,7 +285,7 @@ class ChatterboxMultilingualTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
-        repetition_penalty=2.0,
+        repetition_penalty=1.2,
         min_p=0.05,
         top_p=1.0,
     ):
@@ -364,5 +344,12 @@ class ChatterboxMultilingualTTS:
                 ref_dict=self.conds.gen,
             )
             wav = wav.squeeze(0).detach().cpu().numpy()
+
+            # Drop the final speech token's audio: it is emitted just before
+            # EOS with degraded attention and decodes to ~40 ms of noise.
+            n_tokens = int(speech_tokens.shape[-1])
+            st_len = max(1, n_tokens - 1)
+            wav = wav[: st_len * (S3GEN_SR // S3_TOKEN_RATE)]
+
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
         return torch.from_numpy(watermarked_wav).unsqueeze(0)
