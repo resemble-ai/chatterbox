@@ -84,6 +84,8 @@ ta.save("test-english.wav", wav, model.sr)
 
 # Multilingual examples
 multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+# v2 remains the default. To use the v3 multilingual checkpoint:
+# multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device, t3_model="v3")
 
 french_text = "Bonjour, comment ça va? Ceci est le modèle de synthèse vocale multilingue Chatterbox, il prend en charge 23 langues."
 wav_french = multilingual_model.generate(french_text, language_id="fr")

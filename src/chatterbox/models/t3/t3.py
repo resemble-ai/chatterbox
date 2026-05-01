@@ -24,7 +24,6 @@ from .modules.cond_enc import T3CondEnc, T3Cond
 from .modules.t3_config import T3Config
 from .llama_configs import LLAMA_CONFIGS
 from .inference.t3_hf_backend import T3HuggingfaceBackend
-from .inference.alignment_stream_analyzer import AlignmentStreamAnalyzer
 from ..utils import AttrDict
 
 
@@ -275,24 +274,11 @@ class T3(nn.Module):
         # TODO? synchronize the expensive compile function
         # with self.compile_lock:
         if not self.compiled:
-            # Default to None for English models, only create for multilingual
-            alignment_stream_analyzer = None
-            if self.hp.is_multilingual:
-                alignment_stream_analyzer = AlignmentStreamAnalyzer(
-                    self.tfmr,
-                    None,
-                    text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1)),
-                    alignment_layer_idx=9, # TODO: hparam or something?
-                    eos_idx=self.hp.stop_speech_token,
-                )
-                assert alignment_stream_analyzer.eos_idx == self.hp.stop_speech_token
-
             patched_model = T3HuggingfaceBackend(
                 config=self.cfg,
                 llama=self.tfmr,
                 speech_enc=self.speech_emb,
                 speech_head=self.speech_head,
-                alignment_stream_analyzer=alignment_stream_analyzer,
             )
             self.patched_model = patched_model
             self.compiled = True
@@ -341,7 +327,7 @@ class T3(nn.Module):
             inputs_embeds=inputs_embeds,
             past_key_values=None,
             use_cache=True,
-            output_attentions=True,
+            output_attentions=False,
             output_hidden_states=True,
             return_dict=True,
         )
@@ -357,14 +343,6 @@ class T3(nn.Module):
             cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
             logits = cond + cfg * (cond - uncond)
             
-            # Apply alignment stream analyzer integrity checks
-            if self.patched_model.alignment_stream_analyzer is not None:
-                if logits.dim() == 1:            # guard in case something upstream squeezed
-                    logits = logits.unsqueeze(0) # (1, V)
-                # Pass the last generated token for repetition tracking
-                last_token = generated_ids[0, -1].item() if len(generated_ids[0]) > 0 else None
-                logits = self.patched_model.alignment_stream_analyzer.step(logits, next_token=last_token)  # (1, V)
-
             # Apply repetition penalty
             ids_for_proc = generated_ids[:1, ...]   # batch = 1
             logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
@@ -400,7 +378,7 @@ class T3(nn.Module):
             output = self.patched_model(
                 inputs_embeds=next_token_embed,
                 past_key_values=past,
-                output_attentions=True,
+                output_attentions=False,
                 output_hidden_states=True,
                 return_dict=True,
             )

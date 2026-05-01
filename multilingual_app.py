@@ -1,11 +1,14 @@
 import random
+import os
 import numpy as np
 import torch
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
 import gradio as gr
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+T3_MODEL = os.getenv("CHATTERBOX_MULTILINGUAL_T3_MODEL", "v2")
 print(f"🚀 Running on device: {DEVICE}")
+print(f"Using multilingual T3 model: {T3_MODEL}")
 
 # --- Global Model Initialization ---
 MODEL = None
@@ -140,7 +143,7 @@ def get_or_load_model():
     if MODEL is None:
         print("Model not loaded, initializing...")
         try:
-            MODEL = ChatterboxMultilingualTTS.from_pretrained(DEVICE)
+            MODEL = ChatterboxMultilingualTTS.from_pretrained(DEVICE, t3_model=T3_MODEL)
             if hasattr(MODEL, 'to') and str(MODEL.device) != DEVICE:
                 MODEL.to(DEVICE)
             print(f"Model loaded successfully. Internal device: {getattr(MODEL, 'device', 'N/A')}")
