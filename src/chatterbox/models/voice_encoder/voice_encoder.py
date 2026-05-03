@@ -239,7 +239,7 @@ class VoiceEncoder(nn.Module):
 
         # Embed them
         with torch.inference_mode():
-            utt_embeds = self.inference(mels.to(self.device), mel_lens, batch_size=batch_size, **kwargs).numpy()
+            utt_embeds = self.inference(mels.float().to(self.device), mel_lens, batch_size=batch_size, **kwargs).numpy()
 
         return self.utt_to_spk_embed(utt_embeds) if as_spk else utt_embeds
 
