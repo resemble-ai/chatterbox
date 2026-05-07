@@ -12,8 +12,8 @@ from huggingface_hub import snapshot_download
 from .models.t3 import T3
 from .models.t3.modules.t3_config import T3Config
 from .models.s3tokenizer import S3_SR, S3_TOKEN_RATE, drop_invalid_tokens
+from .models.s3tokenizer import SPEECH_VOCAB_SIZE 
 from .models.s3gen import S3GEN_SR, S3Gen
-from .models.s3tokenizer import SPEECH_VOCAB_SIZE
 from .models.tokenizers import MTLTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
