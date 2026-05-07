@@ -11,7 +11,7 @@ from huggingface_hub import snapshot_download
 
 from .models.t3 import T3
 from .models.t3.modules.t3_config import T3Config
-from .models.s3tokenizer import S3_SR, drop_invalid_tokens
+from .models.s3tokenizer import S3_SR, S3_TOKEN_RATE, drop_invalid_tokens
 from .models.s3gen import S3GEN_SR, S3Gen
 from .models.s3tokenizer import SPEECH_VOCAB_SIZE
 from .models.tokenizers import MTLTokenizer
@@ -19,6 +19,13 @@ from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 
 REPO_ID = "ResembleAI/chatterbox"
+DEFAULT_MULTILINGUAL_T3_MODEL = "t3_mtl23ls_v2.safetensors"
+MULTILINGUAL_T3_MODELS = {
+    "v2": "t3_mtl23ls_v2.safetensors",
+    "t3_mtl23ls_v2": "t3_mtl23ls_v2.safetensors",
+    "v3": "t3_mtl23ls_v3.safetensors",
+    "t3_mtl23ls_v3": "t3_mtl23ls_v3.safetensors",
+}
 
 # Supported languages for the multilingual model
 SUPPORTED_LANGUAGES = {
@@ -46,6 +53,19 @@ SUPPORTED_LANGUAGES = {
   "tr": "Turkish",
   "zh": "Chinese",
 }
+
+
+def _resolve_multilingual_t3_model(t3_model: str | None) -> str:
+    if t3_model is None:
+        return DEFAULT_MULTILINGUAL_T3_MODEL
+    if t3_model in MULTILINGUAL_T3_MODELS:
+        return MULTILINGUAL_T3_MODELS[t3_model]
+    if t3_model.endswith(".safetensors"):
+        return t3_model
+    raise ValueError(
+        f"Unknown multilingual T3 model '{t3_model}'. "
+        f"Expected one of {sorted(MULTILINGUAL_T3_MODELS)} or a .safetensors filename."
+    )
 
 
 def punc_norm(text: str) -> str:
@@ -126,6 +146,8 @@ class Conditionals:
 
     @classmethod
     def load(cls, fpath, map_location="cpu"):
+        if isinstance(map_location, str):
+            map_location = torch.device(map_location)
         kwargs = torch.load(fpath, map_location=map_location, weights_only=True)
         return cls(T3Cond(**kwargs['t3']), kwargs['gen'])
 
@@ -158,17 +180,29 @@ class ChatterboxMultilingualTTS:
         return SUPPORTED_LANGUAGES.copy()
 
     @classmethod
-    def from_local(cls, ckpt_dir, device) -> 'ChatterboxMultilingualTTS':
+    def from_local(
+        cls,
+        ckpt_dir,
+        device,
+        t3_model: str | None = None,
+    ) -> 'ChatterboxMultilingualTTS':
         ckpt_dir = Path(ckpt_dir)
+        t3_model = _resolve_multilingual_t3_model(t3_model)
+
+        # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
+        if device in ["cpu", "mps"]:
+            map_location = torch.device('cpu')
+        else:
+            map_location = None
 
         ve = VoiceEncoder()
         ve.load_state_dict(
-            torch.load(ckpt_dir / "ve.pt", weights_only=True)
+            torch.load(ckpt_dir / "ve.pt", map_location=map_location, weights_only=True)
         )
         ve.to(device).eval()
 
         t3 = T3(T3Config.multilingual())
-        t3_state = load_safetensors(ckpt_dir / "t3_mtl23ls_v2.safetensors")
+        t3_state = load_safetensors(ckpt_dir / t3_model)
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
@@ -176,7 +210,7 @@ class ChatterboxMultilingualTTS:
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", weights_only=True)
+            torch.load(ckpt_dir / "s3gen.pt", map_location=map_location, weights_only=True)
         )
         s3gen.to(device).eval()
 
@@ -186,22 +220,35 @@ class ChatterboxMultilingualTTS:
 
         conds = None
         if (builtin_voice := ckpt_dir / "conds.pt").exists():
-            conds = Conditionals.load(builtin_voice).to(device)
+            conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device: torch.device) -> 'ChatterboxMultilingualTTS':
+    def from_pretrained(
+        cls,
+        device: torch.device,
+        t3_model: str | None = None,
+    ) -> 'ChatterboxMultilingualTTS':
+        # Check if MPS is available on macOS
+        if device == "mps" and not torch.backends.mps.is_available():
+            if not torch.backends.mps.is_built():
+                print("MPS not available because the current PyTorch install was not built with MPS enabled.")
+            else:
+                print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
+            device = "cpu"
+
+        t3_model = _resolve_multilingual_t3_model(t3_model)
         ckpt_dir = Path(
             snapshot_download(
                 repo_id=REPO_ID,
                 repo_type="model",
-                revision="main", 
-                allow_patterns=["ve.pt", "t3_mtl23ls_v2.safetensors", "s3gen.pt", "grapheme_mtl_merged_expanded_v1.json", "conds.pt", "Cangjie5_TC.json"],
+                revision="main",
+                allow_patterns=["ve.pt", t3_model, "s3gen.pt", "grapheme_mtl_merged_expanded_v1.json", "conds.pt", "Cangjie5_TC.json"],
                 token=os.getenv("HF_TOKEN"),
             )
         )
-        return cls.from_local(ckpt_dir, device)
+        return cls.from_local(ckpt_dir, device, t3_model=t3_model)
     
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
@@ -238,7 +285,7 @@ class ChatterboxMultilingualTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
-        repetition_penalty=2.0,
+        repetition_penalty=1.2,
         min_p=0.05,
         top_p=1.0,
     ):
@@ -299,5 +346,12 @@ class ChatterboxMultilingualTTS:
                 ref_dict=self.conds.gen,
             )
             wav = wav.squeeze(0).detach().cpu().numpy()
+
+            # Drop the final speech token's audio: it is emitted just before
+            # EOS with degraded attention and decodes to ~40 ms of noise.
+            n_tokens = int(speech_tokens.shape[-1])
+            st_len = max(1, n_tokens - 1)
+            wav = wav[: st_len * (S3GEN_SR // S3_TOKEN_RATE)]
+
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
         return torch.from_numpy(watermarked_wav).unsqueeze(0)
