@@ -234,6 +234,20 @@ class ChineseCangjieConverter:
         return "".join(output)
 
 
+def telugu_to_latin(text: str) -> str:
+    """Telugu text normalization: transliterate Telugu script to IAST Latin phonetic representation."""
+    try:
+        from indic_transliteration import sanscript
+        from indic_transliteration.sanscript import transliterate
+        return transliterate(text, sanscript.TELUGU, sanscript.IAST)
+    except ImportError:
+        logger.warning("indic_transliteration not available - Telugu text processing skipped")
+        return text
+    except Exception as e:
+        logger.warning(f"Telugu transliteration failed: {e}")
+        return text
+
+
 def add_russian_stress(text: str) -> str:
     """Russian text normalization: adds stress marks to Russian text."""
     global _russian_stresser
@@ -296,6 +310,8 @@ class MTLTokenizer:
             txt = korean_normalize(txt)
         elif language_id == 'ru':
             txt = add_russian_stress(txt)
+        elif language_id == 'te':
+            txt = telugu_to_latin(txt)
         
         # Prepend language token
         if language_id:

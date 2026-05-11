@@ -98,6 +98,9 @@ LANGUAGE_CONFIG = {
         "audio": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/sw_m.flac",
         "text": "Mwezi uliopita, tulifika hatua mpya ya maoni ya bilioni mbili kweny kituo chetu cha YouTube."
     },
+    "te": {
+        "text": "గత నెలలో మన యూట్యూబ్ చానల్‌‌లో రెండు బిలియన్ వీక్షణలతో కొత్త మైలురాయి సాధించాం.",
+    },
     "tr": {
         "audio": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/tr_m.flac",
         "text": "Geçen ay YouTube kanalımızda iki milyar görüntüleme ile yeni bir dönüm noktasına ulaştık."

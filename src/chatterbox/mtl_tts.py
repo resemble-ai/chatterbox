@@ -50,6 +50,7 @@ SUPPORTED_LANGUAGES = {
   "ru": "Russian",
   "sv": "Swedish",
   "sw": "Swahili",
+  "te": "Telugu",
   "tr": "Turkish",
   "zh": "Chinese",
 }
