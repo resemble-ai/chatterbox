@@ -28,7 +28,9 @@ dependencies = [
     "pykakasi==2.3.0",
     "gradio==6.8.0",
     "pyloudnorm",
-    "omegaconf"
+    "omegaconf",
+    "setuptools",
+    "onnx<1.18.0"
 ]
 
 [project.urls]
