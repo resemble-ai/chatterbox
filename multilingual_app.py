@@ -98,6 +98,9 @@ LANGUAGE_CONFIG = {
         "audio": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/sw_m.flac",
         "text": "Mwezi uliopita, tulifika hatua mpya ya maoni ya bilioni mbili kweny kituo chetu cha YouTube."
     },
+    "te": {
+        "text": "గత నెలలో మన యూట్యూబ్ చానల్‌లో రెండు బిలియన్ వీక్షణలతో కొత్త మైలురాయి సాధించాం.",
+    },
     "tr": {
         "audio": "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/tr_m.flac",
         "text": "Geçen ay YouTube kanalımızda iki milyar görüntüleme ile yeni bir dönüm noktasına ulaştık."
@@ -122,12 +125,12 @@ def get_supported_languages_display() -> str:
     language_items = []
     for code, name in sorted(SUPPORTED_LANGUAGES.items()):
         language_items.append(f"**{name}** (`{code}`)")
-    
+
     # Split into 2 lines
     mid = len(language_items) // 2
     line1 = " • ".join(language_items[:mid])
     line2 = " • ".join(language_items[mid:])
-    
+
     return f"""
 ### 🌍 Supported Languages ({len(SUPPORTED_LANGUAGES)} total)
 {line1}
@@ -166,7 +169,7 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
     random.seed(seed)
     np.random.seed(seed)
-    
+
 def resolve_audio_prompt(language_id: str, provided_path: str | None) -> str | None:
     """
     Decide which audio prompt to use:
@@ -190,9 +193,9 @@ def generate_tts_audio(
     """
     Generate high-quality speech audio from text using Chatterbox Multilingual model with optional reference audio styling.
     Supported languages: English, French, German, Spanish, Italian, Portuguese, and Hindi.
-    
-    This tool synthesizes natural-sounding speech from input text. When a reference audio file 
-    is provided, it captures the speaker's voice characteristics and speaking style. The generated audio 
+
+    This tool synthesizes natural-sounding speech from input text. When a reference audio file
+    is provided, it captures the speaker's voice characteristics and speaking style. The generated audio
     maintains the prosody, tone, and vocal qualities of the reference speaker, or uses default voice if no reference is provided.
 
     Args:
@@ -202,7 +205,7 @@ def generate_tts_audio(
         exaggeration_input (float, optional): Controls speech expressiveness (0.25-2.0, neutral=0.5, extreme values may be unstable). Defaults to 0.5.
         temperature_input (float, optional): Controls randomness in generation (0.05-5.0, higher=more varied). Defaults to 0.8.
         seed_num_input (int, optional): Random seed for reproducible results (0 for random generation). Defaults to 0.
-        cfgw_input (float, optional): CFG/Pace weight controlling generation guidance (0.2-1.0). Defaults to 0.5, 0 for language transfer. 
+        cfgw_input (float, optional): CFG/Pace weight controlling generation guidance (0.2-1.0). Defaults to 0.5, 0 for language transfer.
 
     Returns:
         tuple[int, np.ndarray]: A tuple containing the sample rate (int) and the generated audio waveform (numpy.ndarray)
@@ -216,7 +219,7 @@ def generate_tts_audio(
         set_seed(int(seed_num_input))
 
     print(f"Generating audio for text: '{text_input[:50]}...'")
-    
+
     # Handle optional audio prompt
     chosen_prompt = audio_prompt_path_input or default_audio_for_ui(language_id)
 
@@ -230,7 +233,7 @@ def generate_tts_audio(
         print(f"Using audio prompt: {chosen_prompt}")
     else:
         print("No audio prompt provided; using default voice.")
-        
+
     wav = current_model.generate(
         text_input[:300],  # Truncate text to max chars
         language_id=language_id,
@@ -246,7 +249,7 @@ with gr.Blocks() as demo:
         Generate high-quality multilingual speech from text with reference audio styling, supporting 23 languages.
         """
     )
-    
+
     # Display supported languages
     gr.Markdown(get_supported_languages_display())
     with gr.Row():
@@ -257,26 +260,26 @@ with gr.Blocks() as demo:
                 label="Text to synthesize (max chars 300)",
                 max_lines=5
             )
-            
+
             language_id = gr.Dropdown(
                 choices=list(ChatterboxMultilingualTTS.get_supported_languages().keys()),
                 value=initial_lang,
                 label="Language",
                 info="Select the language for text-to-speech synthesis"
             )
-            
+
             ref_wav = gr.Audio(
                 sources=["upload", "microphone"],
                 type="filepath",
                 label="Reference Audio File (Optional)",
                 value=default_audio_for_ui(initial_lang)
             )
-            
+
             gr.Markdown(
                 "💡 **Note**: Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip's language. To mitigate this, set the CFG weight to 0.",
                 elem_classes=["audio-note"]
             )
-            
+
             exaggeration = gr.Slider(
                 0.25, 2, step=.05, label="Exaggeration (Neutral = 0.5, extreme values can be unstable)", value=.5
             )
