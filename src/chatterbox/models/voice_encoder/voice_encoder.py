@@ -89,8 +89,29 @@ def stride_as_partials(
     min_coverage=0.8,
 ):
     """
-    Takes unscaled mels in (T, M) format
-    TODO: doc
+    Splits a mel spectrogram into overlapping partial utterances using strided array views.
+
+    This function is used in speaker verification to process audio in overlapping windows,
+    allowing the voice encoder to handle utterances of arbitrary length by breaking them
+    into fixed-size partials that can be batched together.
+
+    :param mel: Unscaled mel spectrogram as a numpy array of shape (T, M), where T is the
+        number of time frames and M is the number of mel frequency channels.
+    :param hp: VoiceEncConfig containing model hyperparameters, specifically:
+        - ve_partial_frames: number of frames per partial utterance
+        - num_mels: number of mel channels (must match M)
+        - sample_rate: audio sample rate (used when rate is specified)
+    :param overlap: Fraction of overlap between consecutive partials, in range [0, 1).
+        Default is 0.5 (50% overlap). Higher values create more partials with smoother
+        coverage but increase computation.
+    :param rate: If specified, overrides overlap to set the partial rate directly.
+        Represents the number of partials per second of audio. When None, overlap is used.
+    :param min_coverage: Minimum fraction of the last partial that must contain actual
+        data (vs padding) for it to be included, in range (0, 1]. Default is 0.8.
+        Lower values allow more padding in the final partial.
+    :return: A strided view of the mel spectrogram as a numpy array of shape (N, P, M),
+        where N is the number of partials and P is hp.ve_partial_frames. The returned
+        array shares memory with the input mel (after any necessary padding).
     """
     assert 0 < min_coverage <= 1
     frame_step = get_frame_step(overlap, rate, hp)
