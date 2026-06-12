@@ -195,6 +195,12 @@ class ChatterboxMultilingualTTS:
         else:
             map_location = None
 
+        # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
+        if device in ["cpu", "mps"]:
+            map_location = torch.device('cpu')
+        else:
+            map_location = None
+
         ve = VoiceEncoder()
         ve.load_state_dict(
             torch.load(ckpt_dir / "ve.pt", map_location=map_location, weights_only=True)
