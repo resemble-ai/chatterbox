@@ -5,13 +5,30 @@ import gradio as gr
 from chatterbox.tts import ChatterboxTTS
 
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# Device selection (Mac + CUDA + CPU)
+DEVICE = (
+    "cuda" if torch.cuda.is_available()
+    else "mps" if torch.backends.mps.is_available()
+    else "cpu"
+)
+map_location = torch.device(DEVICE)
+
+# Patch torch.load for mac
+_torch_load = torch.load
+
+def patched_torch_load(*args, **kwargs):
+    if "map_location" not in kwargs:
+        kwargs["map_location"] = map_location
+    return _torch_load(*args, **kwargs)
+
+torch.load = patched_torch_load
 
 
 def set_seed(seed: int):
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
     random.seed(seed)
     np.random.seed(seed)
 
@@ -38,7 +55,7 @@ def generate(model, text, audio_prompt_path, exaggeration, temperature, seed_num
         top_p=top_p,
         repetition_penalty=repetition_penalty,
     )
-    return (model.sr, wav.squeeze(0).numpy())
+    return (model.sr, wav.squeeze(0).cpu().numpy())
 
 
 with gr.Blocks() as demo:
