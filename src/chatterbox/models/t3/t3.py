@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Resemble AI
 # MIT License
 import logging
-from typing import Union, Optional, List
+from typing import Iterator, Union, Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -390,8 +390,18 @@ class T3(nn.Module):
         return predicted_tokens
 
     @torch.inference_mode()
-    def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
-                        max_gen_len=1000):
+    def iter_inference_turbo(
+        self,
+        t3_cond,
+        text_tokens,
+        temperature=0.8,
+        top_k=1000,
+        top_p=0.95,
+        repetition_penalty=1.2,
+        max_gen_len=1000,
+        show_progress=False,
+    ) -> Iterator[torch.Tensor]:
+        """Yield Turbo speech tokens incrementally using the KV-cache path."""
 
         logits_processors = LogitsProcessorList()
         if temperature > 0 and temperature != 1.0:
@@ -431,8 +441,15 @@ class T3(nn.Module):
 
         generated_speech_tokens.append(next_speech_token)
         current_speech_token = next_speech_token
+        if torch.all(current_speech_token == self.hp.stop_speech_token):
+            return
+        yield current_speech_token
 
-        for _ in tqdm(range(max_gen_len)):
+        steps = range(max_gen_len)
+        if show_progress:
+            steps = tqdm(steps)
+
+        for _ in steps:
             current_speech_embed = self.speech_emb(current_speech_token)
 
             llm_outputs = self.tfmr(
@@ -458,6 +475,26 @@ class T3(nn.Module):
             current_speech_token = next_speech_token
             if torch.all(next_speech_token == self.hp.stop_speech_token):
                 break
+            yield current_speech_token
+
+    @torch.inference_mode()
+    def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
+                        max_gen_len=1000):
+        generated_speech_tokens = list(
+            self.iter_inference_turbo(
+                t3_cond=t3_cond,
+                text_tokens=text_tokens,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                max_gen_len=max_gen_len,
+                show_progress=True,
+            )
+        )
+
+        if not generated_speech_tokens:
+            return torch.empty(text_tokens.size(0), 0, dtype=torch.long, device=self.device)
 
         all_tokens = torch.cat(generated_speech_tokens, dim=1)
 
