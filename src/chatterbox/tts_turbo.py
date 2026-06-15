@@ -2,6 +2,7 @@ import os
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator
 
 import librosa
 import torch
@@ -13,13 +14,14 @@ from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
 from .models.t3 import T3
-from .models.s3tokenizer import S3_SR
-from .models.s3gen import S3GEN_SR, S3Gen
+from .models.s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE
+from .models.s3gen import S3GEN_SR, S3Gen, S3GenStreamer
 from .models.tokenizers import EnTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 from .models.t3.modules.t3_config import T3Config
 from .models.s3gen.const import S3GEN_SIL
+from .streaming import StreamingAudioChunk
 import logging
 logger = logging.getLogger(__name__)
 
@@ -281,7 +283,7 @@ class ChatterboxTurboTTS:
         )
 
         # Remove OOV tokens and add silence to end
-        speech_tokens = speech_tokens[speech_tokens < 6561]
+        speech_tokens = speech_tokens[speech_tokens < SPEECH_VOCAB_SIZE]
         speech_tokens = speech_tokens.to(self.device)
         silence = torch.tensor([S3GEN_SIL, S3GEN_SIL, S3GEN_SIL]).long().to(self.device)
         speech_tokens = torch.cat([speech_tokens, silence])
@@ -294,3 +296,94 @@ class ChatterboxTurboTTS:
         wav = wav.squeeze(0).detach().cpu().numpy()
         watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
         return torch.from_numpy(watermarked_wav).unsqueeze(0)
+
+    def stream(
+        self,
+        text,
+        repetition_penalty=1.2,
+        min_p=0.00,
+        top_p=0.95,
+        audio_prompt_path=None,
+        exaggeration=0.0,
+        cfg_weight=0.0,
+        temperature=0.8,
+        top_k=1000,
+        norm_loudness=True,
+        chunk_tokens=24,
+        max_gen_len=1000,
+        crossfade_ms=12.0,
+    ) -> Iterator[StreamingAudioChunk]:
+        """Stream Turbo speech as unwatermarked audio chunks.
+
+        Streaming prioritizes low latency and yields CPU float32 mono chunks.
+        Perth watermarking is only applied by ``generate()``, because the Perth
+        watermarker operates on complete waveforms.
+        """
+        if chunk_tokens <= 0:
+            raise ValueError("chunk_tokens must be positive")
+
+        if audio_prompt_path:
+            self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, norm_loudness=norm_loudness)
+        else:
+            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+
+        if cfg_weight > 0.0 or exaggeration > 0.0 or min_p > 0.0:
+            logger.warning("CFG, min_p and exaggeration are not supported by Turbo version and will be ignored.")
+
+        text = punc_norm(text)
+        text_tokens = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+        text_tokens = text_tokens.input_ids.to(self.device)
+
+        streamer = S3GenStreamer(
+            self.s3gen,
+            self.conds.gen,
+            n_cfm_timesteps=2,
+            crossfade_ms=crossfade_ms,
+        )
+
+        chunk_index = 0
+        next_sample = 0
+
+        def make_chunk(wav: torch.Tensor, *, is_final: bool) -> StreamingAudioChunk:
+            nonlocal chunk_index, next_sample
+            audio = wav.detach().to(device="cpu", dtype=torch.float32)
+            if audio.ndim == 1:
+                audio = audio.unsqueeze(0)
+            start_sample = next_sample
+            end_sample = start_sample + audio.shape[-1]
+            chunk = StreamingAudioChunk(
+                audio=audio,
+                sample_rate=self.sr,
+                index=chunk_index,
+                is_final=is_final,
+                start_sample=start_sample,
+                end_sample=end_sample,
+                generated_tokens=streamer.generated_tokens,
+                watermarked=False,
+            )
+            chunk_index += 1
+            next_sample = end_sample
+            return chunk
+
+        with torch.inference_mode():
+            for token in self.t3.iter_inference_turbo(
+                t3_cond=self.conds.t3,
+                text_tokens=text_tokens,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                max_gen_len=max_gen_len,
+            ):
+                if int(token.item()) >= SPEECH_VOCAB_SIZE:
+                    continue
+
+                streamer.append(token)
+                if streamer.generated_tokens % chunk_tokens == 0:
+                    wav = streamer.flush(finalize=False)
+                    if wav is not None:
+                        yield make_chunk(wav, is_final=False)
+
+            wav = streamer.finish()
+            if wav is not None:
+                yield make_chunk(wav, is_final=True)
