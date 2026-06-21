@@ -141,18 +141,18 @@ class T3MLX(nn.Module):
     def embed_speech(self, speech_tokens):
         return self.speech_emb(speech_tokens)
 
-    def embed_speech_with_pos(self, speech_tokens):
+    def embed_speech_with_pos(self, speech_tokens, offset=0):
         emb = self.speech_emb(speech_tokens)
         n = speech_tokens.shape[1]
-        pos = self.speech_pos_emb(mx.arange(n, dtype=mx.int64))
+        pos = self.speech_pos_emb(mx.arange(offset, offset + n, dtype=mx.int64))
         return emb + pos
 
-    def forward(self, inputs_embeds, past_kvs=None):
+    def forward(self, inputs_embeds, past_kvs=None, mask=None):
         h = inputs_embeds
         new_kvs = []
         for i, layer in enumerate(self.layers):
             pkv = past_kvs[i] if past_kvs is not None else None
-            h, kv = layer(h, mask=None, past_kv=pkv)
+            h, kv = layer(h, mask=mask, past_kv=pkv)
             new_kvs.append(kv)
         h = self.norm(h)
         logits = self.speech_head(h)
@@ -177,13 +177,15 @@ class T3MLX(nn.Module):
 
         inputs_embeds = mx.concatenate([cond_emb, text_emb, speech_emb], axis=1)
 
-        logits, past_kvs = self.forward(inputs_embeds, past_kvs=None)
+        L = inputs_embeds.shape[1]
+        causal_mask = mx.tril(mx.ones((L, L), dtype=mx.bool_))
+        logits, past_kvs = self.forward(inputs_embeds, past_kvs=None, mask=causal_mask)
         logits = logits[:, -1, :].squeeze(0)
 
         generated_ids = []
 
         for step in range(max_new_tokens):
-            logits = self._sample_logits(logits, temperature, top_p, repetition_penalty, generated_ids)
+            logits = self._sample_logits(logits, temperature, repetition_penalty, generated_ids)
             probs = mx.softmax(logits, axis=-1)
             next_token = self._top_p_sample(probs, top_p)
             token_id = next_token.item()
@@ -192,14 +194,16 @@ class T3MLX(nn.Module):
             generated_ids.append(token_id)
             token = next_token.reshape(1, 1)
 
-            token_emb = self.embed_speech(token)
-            logits, past_kvs = self.forward(token_emb, past_kvs=past_kvs)
+            token_emb = self.embed_speech_with_pos(token, offset=step + 1)
+            logits, past_kvs = self.forward(token_emb, past_kvs=past_kvs, mask=None)
             logits = logits[:, -1, :].squeeze(0)
 
         return mx.array(generated_ids, dtype=mx.int64)
 
     @staticmethod
-    def _sample_logits(logits, temperature, top_p, repetition_penalty, generated_ids):
+    def _sample_logits(logits, temperature, repetition_penalty, generated_ids):
+        if temperature <= 1e-6:
+            temperature = 1e-6
         logits = logits / temperature
         if repetition_penalty != 1.0 and generated_ids:
             for tid in set(generated_ids):
@@ -217,6 +221,7 @@ class T3MLX(nn.Module):
         cutoff = mx.argmax(cumsum >= top_p).item()
         cutoff = max(0, cutoff)
         cutoff_indices = sorted_indices[:cutoff + 1]
-        cutoff_probs = sorted_probs[:cutoff + 1] / mx.sum(sorted_probs[:cutoff + 1])
+        cutoff_sum = mx.sum(sorted_probs[:cutoff + 1])
+        cutoff_probs = sorted_probs[:cutoff + 1] / (cutoff_sum + 1e-10)
         sample = mx.random.categorical(mx.log(cutoff_probs + 1e-10), shape=(1,))
         return mx.array([cutoff_indices[sample.item()]], dtype=mx.int32)
