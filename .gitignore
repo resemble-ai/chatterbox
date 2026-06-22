@@ -53,3 +53,4 @@ assets/*.npz
 # Virtual environments
 venv*/
 .venv*/
+.DS_Store
