@@ -117,6 +117,42 @@ ta.save("test-2.wav", wav, model.sr)
 ```
 See `example_tts.py` and `example_vc.py` for more examples.
 
+## CLI Usage
+
+Chatterbox also provides a command-line interface for quick generation without writing Python scripts.
+
+##### English TTS
+```bash
+chatterbox tts --text "Hello, this is a test." --ref-audio speaker.wav --output hello.wav
+```
+
+##### Turbo TTS (low-latency, supports paralinguistic tags)
+```bash
+chatterbox turbo --text "That's hilarious [laugh]" --ref-audio speaker.wav --output turbo.wav
+```
+
+##### Multilingual TTS
+```bash
+# List supported languages
+chatterbox multilingual --list-languages
+
+# Generate French speech
+chatterbox multilingual --text "Bonjour, comment allez-vous?" --lang fr --ref-audio speaker.wav
+```
+
+##### Voice Conversion
+```bash
+chatterbox vc --source-audio input.wav --target-voice speaker.wav --output converted.wav
+```
+
+##### Common Options
+All TTS commands support `--device` (cuda/cpu/mps, auto-detected by default), `--seed` (for reproducibility), `--temperature`, `--exaggeration`, `--cfg-weight`, and other sampling parameters. Run `chatterbox <command> --help` for full details.
+
+You can also run the CLI as a Python module:
+```bash
+python -m chatterbox tts --text "Hello" --ref-audio speaker.wav
+```
+
 ## Supported Languages
 The general-purpose Chatterbox Multilingual model supports the following languages:
 
