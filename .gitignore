@@ -46,3 +46,11 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+
+# Ignore pre-converted MLX weights (generated from source safetensors)
+assets/*.npz
+
+# Virtual environments
+venv*/
+.venv*/
+.DS_Store
