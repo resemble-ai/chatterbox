@@ -12,6 +12,7 @@ dependencies = [
     # numpy 1.x for Python < 3.13 (no 1.x wheels on 3.13+), numpy 2.x for 3.13+
     "numpy>=1.24.0,<2.0.0; python_version < '3.13'",
     "numpy>=2.0.0; python_version >= '3.13'",
+    "resampy==0.4.3",
     "librosa==0.11.0",
     "s3tokenizer",
     # torch 2.6.0 supports Python 3.10-3.13; Python 3.14 needs 2.9.0+
@@ -26,7 +27,8 @@ dependencies = [
     "safetensors==0.5.3",
     "spacy-pkuseg",
     "pykakasi==2.3.0",
-    "gradio==6.8.0",
+    "russian-text-stresser @ git+https://github.com/Vuizur/add-stress-to-epub",
+    "auto-editor>=27.0.0",
     "pyloudnorm",
     "omegaconf"
 ]
@@ -41,3 +43,15 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.optional-dependencies]
+demo = [
+    "gradio==6.8.0",
+]
+
+[dependency-groups]
+dev = [
+    "gradio>=4.44.1",
+    "resemble-perth>=1.0.1",
+    "setuptools>=80.9.0",
+]

@@ -9,3 +9,4 @@ __version__ = version("chatterbox-tts")
 from .tts import ChatterboxTTS
 from .vc import ChatterboxVC
 from .mtl_tts import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
+from .text_utils import split_text_into_segments, split_by_word_boundary, merge_short_sentences
