@@ -412,13 +412,13 @@ class T3(nn.Module):
             cfg_weight=0.0,
         )
 
-        fixed_kv_cache = StaticCache(self.cfg, 1, embeds.shape[1] + max_gen_len, self.device, embeds.dtype) if use_graph else None
+        fixed_kv_cache = StaticCache(self.cfg, 1, embeds.shape[1] + max_gen_len + 1, self.device, embeds.dtype) if use_graph else None
         static_cache_position = torch.tensor([embeds.shape[1]], device=self.device)
         static_embed = torch.zeros(1, 1, self.cfg.hidden_size, dtype=embeds.dtype, device=self.device)
 
         # Need warmup before capture
         if use_graph:
-            warmup_cache = StaticCache(self.cfg, 1, embeds.shape[1] + max_gen_len, self.device, embeds.dtype)
+            warmup_cache = StaticCache(self.cfg, 1, embeds.shape[1] + max_gen_len + 1, self.device, embeds.dtype)
             warmup_position = torch.tensor([embeds.shape[1]], device=self.device)
             dummy_token = self.hp.start_speech_token * torch.ones((1, 1), dtype=torch.long, device=self.device)
 
@@ -464,7 +464,8 @@ class T3(nn.Module):
 
         graph = None
         if use_graph:
-            static_embed.copy_(self.speech_emb(current_speech_token))
+            dummy_token = self.hp.start_speech_token * torch.ones((1, 1), dtype=torch.long, device=self.device)
+            static_embed.copy_(self.speech_emb(dummy_token))
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
                 captured_out = self.tfmr(
@@ -473,16 +474,7 @@ class T3(nn.Module):
                     cache_position=static_cache_position,
                     use_cache=True
                 )
-            static_hidden_states= captured_out[0]
-            static_cache_position.add_(1)
-
-            speech_logits = self.speech_head(static_hidden_states)
-            input_ids = torch.cat(generated_speech_tokens, dim=1)
-            processed_logits = logits_processors(input_ids, speech_logits[:, -1, :])
-            probs = F.softmax(processed_logits, dim=-1)
-            next_speech_token = torch.multinomial(probs, num_samples=1)
-            generated_speech_tokens.append(next_speech_token)
-            current_speech_token = next_speech_token
+            static_hidden_states = captured_out[0]
 
         for _ in tqdm(range(max_gen_len)):
             if use_graph:
