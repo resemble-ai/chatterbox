@@ -9,7 +9,7 @@ from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
-from transformers import LlamaModel, LlamaConfig, GPT2Config, GPT2Model
+from transformers import LlamaModel, LlamaConfig, GPT2Config, GPT2Model, StaticCache
 from transformers.generation.logits_process import (
     LogitsProcessorList,
     RepetitionPenaltyLogitsProcessor,
@@ -391,7 +391,7 @@ class T3(nn.Module):
 
     @torch.inference_mode()
     def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
-                        max_gen_len=1000):
+                        max_gen_len=1000, use_graph=False):
 
         logits_processors = LogitsProcessorList()
         if temperature > 0 and temperature != 1.0:
@@ -412,15 +412,45 @@ class T3(nn.Module):
             cfg_weight=0.0,
         )
 
+        fixed_kv_cache = StaticCache(self.cfg, 1, embeds.shape[1] + max_gen_len + 1, self.device, embeds.dtype) if use_graph else None
+        static_cache_position = torch.tensor([embeds.shape[1]], device=self.device)
+        static_embed = torch.zeros(1, 1, self.cfg.hidden_size, dtype=embeds.dtype, device=self.device)
+
+        # Need warmup before capture
+        if use_graph:
+            warmup_cache = StaticCache(self.cfg, 1, embeds.shape[1] + max_gen_len + 1, self.device, embeds.dtype)
+            warmup_position = torch.tensor([embeds.shape[1]], device=self.device)
+            dummy_token = self.hp.start_speech_token * torch.ones((1, 1), dtype=torch.long, device=self.device)
+
+            warmup_stream = torch.cuda.Stream()
+            warmup_stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(warmup_stream):
+                for _ in range(3):
+                    static_embed.copy_(self.speech_emb(dummy_token))
+                    self.tfmr(
+                        inputs_embeds=static_embed,
+                        past_key_values=warmup_cache,
+                        cache_position=warmup_position,
+                        use_cache=True,
+                    )
+                    warmup_position.add_(1)
+            torch.cuda.current_stream().wait_stream(warmup_stream)
+            del warmup_cache, warmup_position
+            llm_outputs = self.tfmr(
+                    inputs_embeds=embeds,
+                    use_cache=True,
+                    past_key_values=fixed_kv_cache
+                )
+        else:
+            llm_outputs= self.tfmr(
+                inputs_embeds=embeds,
+                use_cache=True
+            )
+
         generated_speech_tokens = []
 
-        llm_outputs = self.tfmr(
-            inputs_embeds=embeds,
-            use_cache=True
-        )
-
         hidden_states = llm_outputs[0]
-        past_key_values = llm_outputs.past_key_values
+        past_kv= llm_outputs.past_key_values
 
         speech_hidden = hidden_states[:, -1:]
         speech_logits = self.speech_head(speech_hidden)
@@ -432,17 +462,36 @@ class T3(nn.Module):
         generated_speech_tokens.append(next_speech_token)
         current_speech_token = next_speech_token
 
+        graph = None
+        if use_graph:
+            dummy_token = self.hp.start_speech_token * torch.ones((1, 1), dtype=torch.long, device=self.device)
+            static_embed.copy_(self.speech_emb(dummy_token))
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured_out = self.tfmr(
+                    inputs_embeds=static_embed,
+                    past_key_values= fixed_kv_cache,
+                    cache_position=static_cache_position,
+                    use_cache=True
+                )
+            static_hidden_states = captured_out[0]
+
         for _ in tqdm(range(max_gen_len)):
-            current_speech_embed = self.speech_emb(current_speech_token)
+            if use_graph:
+                static_embed.copy_(self.speech_emb(current_speech_token))
+                graph.replay()
+                hidden_states = static_hidden_states
+                static_cache_position.add_(1)
+            else:
+                current_speech_embed = self.speech_emb(current_speech_token)
+                llm_outputs = self.tfmr(
+                    inputs_embeds=current_speech_embed,
+                    past_key_values=past_kv,
+                    use_cache=True
+                )
+                past_kv = llm_outputs.past_key_values
+                hidden_states = llm_outputs[0]
 
-            llm_outputs = self.tfmr(
-                inputs_embeds=current_speech_embed,
-                past_key_values=past_key_values,
-                use_cache=True
-            )
-
-            hidden_states = llm_outputs[0]
-            past_key_values = llm_outputs.past_key_values
             speech_logits = self.speech_head(hidden_states)
 
             input_ids = torch.cat(generated_speech_tokens, dim=1)
