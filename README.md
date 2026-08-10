@@ -52,6 +52,11 @@ Choose the right model for your application.
 pip install chatterbox-tts
 ```
 
+For Chinese, add the `zh` extra to pull in the word segmenter:
+```shell
+pip install chatterbox-tts[zh]
+```
+
 Alternatively, you can install from source:
 ```shell
 # conda create -yn chatterbox python=3.11
