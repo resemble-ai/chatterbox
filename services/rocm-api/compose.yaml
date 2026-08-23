@@ -1,0 +1,21 @@
+services:
+  chatterbox-tts:
+    build:
+      context: ../..
+      dockerfile: services/rocm-api/Dockerfile
+    container_name: chatterbox-tts-rocm
+    restart: unless-stopped
+    ports:
+      - "${TAILSCALE_IP:?set TAILSCALE_IP}:8880:8880"
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    environment:
+      TTS_API_KEY: ${TTS_API_KEY:?set TTS_API_KEY}
+      CHATTERBOX_MODEL: ${CHATTERBOX_MODEL:-turbo}
+      HF_HOME: /models/huggingface
+    volumes:
+      - ./models:/models
+      - ./voices:/voices:ro
