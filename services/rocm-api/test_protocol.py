@@ -49,6 +49,26 @@ class StreamImplementationTests(unittest.TestCase):
         chunks = narration_chunks("The bell rings. The ravens scatter.")
         self.assertEqual([chunk.text for chunk in chunks], ["The bell rings.", "The ravens scatter."])
 
+    def test_lone_word_joins_the_following_sentence(self) -> None:
+        chunks = narration_chunks("You're not the tanner. Good. The tanner had the wrong key.")
+        texts = [chunk.text for chunk in chunks]
+        self.assertNotIn("Good.", texts)
+        self.assertEqual(texts[-1], "Good. The tanner had the wrong key.")
+
+    def test_trailing_lone_word_joins_the_previous_sentence(self) -> None:
+        text = (
+            "The key was not on the table, and it had clearly been taken in haste, "
+            "so the search moved to the next chamber, where the door hung open and "
+            "a single word echoed from the dark. Key."
+        )
+        chunks = narration_chunks(text)
+        self.assertNotIn("Key.", [chunk.text for chunk in chunks])
+        self.assertTrue(chunks[-1].text.endswith("Key."))
+
+    def test_leading_lone_word_joins_the_next_sentence(self) -> None:
+        chunks = narration_chunks("Yes. The king has arrived.")
+        self.assertEqual([chunk.text for chunk in chunks], ["Yes. The king has arrived."])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -41,6 +41,42 @@ def _split_long_sentence(
     return pieces
 
 
+def _word_count(text: str) -> int:
+    """Count words, treating contractions such as ``you're`` as one word."""
+    return len(re.findall(r"[A-Za-z0-9]+(?:['\u2019][A-Za-z0-9]+)?", text))
+
+
+def _is_lone_word(sentence: str) -> bool:
+    """A sentence that is a single word, e.g. 'Good.' or 'Key.'."""
+    return _word_count(sentence) == 1
+
+
+def _fold_lone_words(sentences: list[str]) -> list[str]:
+    """Join single-word sentences to a neighbour so they are never an isolated clip.
+
+    A lone word such as ``Good.`` or ``Key.`` is an interjection that should stay
+    with its surrounding sentence: on its own it reads as a detached, unnaturally
+    emphasized beat. Lone words before a longer sentence are folded into it;
+    a trailing lone word is folded into the previous sentence instead.
+    """
+    folded: list[str] = []
+    pending: list[str] = []
+    for sentence in sentences:
+        if _is_lone_word(sentence):
+            pending.append(sentence)
+            continue
+        if pending:
+            sentence = " ".join(pending) + " " + sentence
+            pending = []
+        folded.append(sentence)
+    if pending:
+        if folded:
+            folded[-1] = folded[-1] + " " + " ".join(pending)
+        else:
+            folded.append(" ".join(pending))
+    return folded
+
+
 def narration_chunks(
     text: str,
     maximum_characters: int = 140,
@@ -51,6 +87,7 @@ def narration_chunks(
     chunks: list[NarrationChunk] = []
     for paragraph_index, paragraph in enumerate(paragraphs):
         sentences = re.findall(r"\S.*?(?:[.!?]+(?:[\"')\]]*)|$)", paragraph, re.DOTALL)
+        sentences = _fold_lone_words(sentences)
         paragraph_chunks: list[NarrationChunk] = []
         for raw_sentence in sentences:
             sentence = raw_sentence.strip()
