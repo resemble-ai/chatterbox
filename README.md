@@ -63,7 +63,7 @@ pip install -e .
 ```
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
-> **Note:** The current PyPI release (`0.1.7`) predates Chatterbox-Nano and Multilingual V3. Until a newer release is published, `nano=True` and `t3_model="v3"` are available only from a source install — on a `pip install chatterbox-tts` install they raise `TypeError: from_pretrained() got an unexpected keyword argument`.
+> **Note:** Chatterbox-Nano (`nano=True`) and Multilingual V3 (`t3_model="v3"`) require `chatterbox-tts >= 0.2.0`. On earlier releases — including `0.1.7`, the last version published before these models landed — both raise `TypeError: from_pretrained() got an unexpected keyword argument`. Install from source if `0.2.0` is not yet on PyPI.
 
 ## Usage
 
