@@ -63,6 +63,8 @@ pip install -e .
 ```
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
+> **Note:** The current PyPI release (`0.1.7`) predates Chatterbox-Nano and Multilingual V3. Until a newer release is published, `nano=True` and `t3_model="v3"` are available only from a source install — on a `pip install chatterbox-tts` install they raise `TypeError: from_pretrained() got an unexpected keyword argument`.
+
 ## Usage
 
 ##### Chatterbox-Turbo
@@ -105,6 +107,12 @@ wav = model.generate(text, audio_prompt_path="your_10s_ref_clip.wav")
 ta.save("test-nano.wav", wav, model.sr)
 ```
 
+##### Paralinguistic Tags
+
+Paralinguistic tags are native to Turbo and Nano. Place them inline in the input text:
+
+`[clear throat]` • `[sigh]` • `[shush]` • `[cough]` • `[groan]` • `[sniff]` • `[gasp]` • `[chuckle]` • `[laugh]`
+
 ##### Chatterbox and Chatterbox-Multilingual
 
 ```python
@@ -139,7 +147,49 @@ AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
 ta.save("test-2.wav", wav, model.sr)
 ```
+
+##### Voice Conversion
+
+Convert an existing recording to a target voice with `ChatterboxVC`:
+
+```python
+import torchaudio as ta
+from chatterbox.vc import ChatterboxVC
+
+device = "cuda"  # or "cpu" / "mps"
+
+model = ChatterboxVC.from_pretrained(device)
+wav = model.generate(
+    audio="INPUT_FILE.wav",
+    target_voice_path="TARGET_VOICE.wav",
+)
+ta.save("test-vc.wav", wav, model.sr)
+```
+
+Omit `target_voice_path` to convert to the model's built-in voice.
+
 See `example_tts.py`, `example_tts_turbo.py`, `example_tts_nano.py`, and `example_vc.py` for more examples.
+
+## Gradio Apps
+
+The repo ships a browser UI for each model. Run them from the repo root after a source install:
+
+```shell
+python gradio_tts_turbo_app.py   # Chatterbox-Turbo
+python gradio_tts_app.py         # Chatterbox (English)
+python multilingual_app.py       # Chatterbox-Multilingual
+python gradio_vc_app.py          # Voice conversion
+```
+
+A few things worth knowing:
+
+- `multilingual_app.py` loads the legacy V2 checkpoint by default. Set `CHATTERBOX_MULTILINGUAL_T3_MODEL=v3` to run the recommended V3 model:
+  ```shell
+  CHATTERBOX_MULTILINGUAL_T3_MODEL=v3 python multilingual_app.py
+  ```
+- `multilingual_app.py` also launches with `mcp_server=True`, so the same process exposes multilingual TTS as an MCP server for MCP-capable clients.
+- `gradio_tts_app.py` and `gradio_tts_turbo_app.py` launch with `share=True`, which creates a temporary **public** Gradio link. Drop that argument to keep the app local.
+- There is no Nano-specific app; `gradio_tts_turbo_app.py` loads Turbo.
 
 ## Supported Languages
 The general-purpose Chatterbox Multilingual model supports the following languages:
