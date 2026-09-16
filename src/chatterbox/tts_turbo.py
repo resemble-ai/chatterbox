@@ -1,5 +1,6 @@
 import os
 import math
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -281,6 +282,7 @@ class ChatterboxTurboTTS:
         temperature=0.8,
         top_k=1000,
         norm_loudness=True,
+        return_alignment=False,
     ):
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, norm_loudness=norm_loudness)
@@ -292,17 +294,24 @@ class ChatterboxTurboTTS:
 
         # Norm and tokenize text
         text = punc_norm(text)
-        text_tokens = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)
-        text_tokens = text_tokens.input_ids.to(self.device)
-
-        speech_tokens = self.t3.inference_turbo(
-            t3_cond=self.conds.t3,
-            text_tokens=text_tokens,
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            repetition_penalty=repetition_penalty,
-        )
+        encoded = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True,
+                                 return_offsets_mapping=return_alignment)
+        text_tokens = encoded.input_ids.to(self.device)
+        if return_alignment:
+            from .models.t3.inference.turbo_alignment import TurboAlignmentCapture
+            capture = TurboAlignmentCapture(self.t3.tfmr, text_tokens.shape[1], [(4, 6)])
+        else:
+            capture = nullcontext()
+        with capture:
+            speech_tokens = self.t3.inference_turbo(
+                t3_cond=self.conds.t3,
+                text_tokens=text_tokens,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+            )
+        valid_tokens = (speech_tokens.flatten() < 6561)
 
         # Remove OOV tokens and add silence to end
         speech_tokens = speech_tokens[speech_tokens < 6561]
@@ -317,4 +326,11 @@ class ChatterboxTurboTTS:
         )
         wav = wav.squeeze(0).detach().cpu().numpy()
         watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-        return torch.from_numpy(watermarked_wav).unsqueeze(0)
+        result = torch.from_numpy(watermarked_wav).unsqueeze(0)
+        if return_alignment:
+            from .models.t3.inference.turbo_alignment import word_end_samples
+            words = word_end_samples(capture.text_attention()[0], text,
+                                     encoded.offset_mapping[0].tolist(), valid_tokens,
+                                     self.sr, result.numel())
+            return result, {"version": 1, "text": text, "sample_rate": self.sr, "words": words}
+        return result

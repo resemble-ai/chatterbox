@@ -84,6 +84,13 @@ wav = model.generate(text, audio_prompt_path="your_10s_ref_clip.wav")
 ta.save("test-turbo.wav", wav, model.sr)
 ```
 
+For opt-in alignment diagnostics from Turbo's existing generation pass, see
+[`example_turbo_alignment.py`](example_turbo_alignment.py). It records selected
+GPT-2 heads without changing sampling or the attention implementation and needs
+no transcription model. The output is **text-normalized attention, not calibrated
+word timestamps**; different heads can lead or lag the audible words. See the
+[scope and validation notes](docs/turbo-alignment.md).
+
 ##### Chatterbox-Nano
 
 Nano shares Turbo's architecture and is loaded through the same `ChatterboxTurboTTS` class by passing `nano=True`:
