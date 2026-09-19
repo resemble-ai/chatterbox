@@ -63,6 +63,37 @@ pip install -e .
 ```
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
 
+### RTX 50-series (Blackwell) GPUs
+
+The pinned `torch==2.6.0` contains no `sm_120` kernels, so RTX 50-series cards (5060 Ti / 5070 / 5070 Ti / 5080 / 5090) install fine and then fail at generation with `CUDA error: no kernel image is available for execution on the device`.
+
+Install a cu128 build of torch first, then install Chatterbox without letting pip downgrade it:
+
+```shell
+# Python 3.11 or 3.12
+python -m venv .venv
+# activate: .venv\Scripts\activate  (Windows)  |  source .venv/bin/activate  (Linux/macOS)
+
+pip install torch==2.9.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128
+pip install --no-deps chatterbox-tts
+pip install "numpy>=1.24.0,<2.0.0" "librosa==0.11.0" "transformers==5.2.0" "diffusers==0.29.0" \
+            "conformer==0.3.2" "safetensors==0.5.3" "pykakasi==2.3.0" s3tokenizer \
+            spacy-pkuseg pyloudnorm omegaconf "git+https://github.com/resemble-ai/Perth.git"
+```
+
+pip will warn that the installed `torch 2.9.1+cu128` is "incompatible" and that `gradio` is missing. Both warnings are expected — `--no-deps` is what keeps torch from being downgraded, and `gradio` is only needed for the Gradio apps. Downgrading torch to silence the warning undoes the fix.
+
+Two further notes for this configuration:
+
+- **Use `soundfile`, not `torchaudio.save()`.** On torchaudio 2.9, `save()` delegates to TorchCodec and raises `RuntimeError: TorchCodec is required for save_with_torchcodec`. `librosa` already depends on `soundfile`, so:
+  ```python
+  import soundfile as sf
+  sf.write("out.wav", wav.squeeze(0).cpu().numpy(), int(model.sr))
+  ```
+- **`get_device_capability()` is not a reliable check.** It reports `(12, 0)` correctly even on a torch build that has no `sm_120` kernels, so the failure only surfaces at the first kernel launch. Use `"sm_120" in torch.cuda.get_arch_list()` instead.
+
+*Verified on an RTX 5080, Windows 11, Python 3.12, `chatterbox-tts` 0.1.7.*
+
 ## Usage
 
 ##### Chatterbox-Turbo
