@@ -3,7 +3,7 @@ import re
 
 
 def split_text(text: str, max_chars: int = 250) -> list[str]:
-    if max_chars < 1:
+    if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 1:
         raise ValueError('max_chars must be positive')
     text = ' '.join(text.split())
     if not text:

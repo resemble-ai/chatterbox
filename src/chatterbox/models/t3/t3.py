@@ -391,7 +391,7 @@ class T3(nn.Module):
 
     @torch.inference_mode()
     def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
-                        max_gen_len=2000):
+                        max_gen_len=1000):
 
         logits_processors = LogitsProcessorList()
         if temperature > 0 and temperature != 1.0:
