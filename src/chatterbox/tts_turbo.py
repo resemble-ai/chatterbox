@@ -20,6 +20,7 @@ from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 from .models.t3.modules.t3_config import T3Config
 from .models.s3gen.const import S3GEN_SIL
+from .text_chunks import split_text
 import logging
 logger = logging.getLogger(__name__)
 
@@ -281,7 +282,10 @@ class ChatterboxTurboTTS:
         temperature=0.8,
         top_k=1000,
         norm_loudness=True,
+        max_gen_len=1000,
     ):
+        if isinstance(max_gen_len, bool) or not isinstance(max_gen_len, int) or max_gen_len < 1:
+            raise ValueError('max_gen_len must be a positive integer')
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, norm_loudness=norm_loudness)
         else:
@@ -302,6 +306,7 @@ class ChatterboxTurboTTS:
             top_k=top_k,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            max_gen_len=max_gen_len,
         )
 
         # Remove OOV tokens and add silence to end
@@ -318,3 +323,41 @@ class ChatterboxTurboTTS:
         wav = wav.squeeze(0).detach().cpu().numpy()
         watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
         return torch.from_numpy(watermarked_wav).unsqueeze(0)
+
+    def generate_long(
+        self,
+        text: str,
+        audio_prompt_path=None,
+        max_chunk_chars: int = 250,
+        chunk_pause_ms: float = 150,
+        max_gen_len: int = 2000,
+        **generation_kwargs,
+    ):
+        """Generate a single waveform from sentence-aware text chunks.
+
+        Reference conditioning is prepared once and reused. Generation options
+        such as temperature and repetition_penalty are forwarded to generate().
+        max_gen_len applies to each chunk. All output audio is held in memory.
+        """
+        if isinstance(max_gen_len, bool) or not isinstance(max_gen_len, int) or max_gen_len < 1:
+            raise ValueError('max_gen_len must be a positive integer')
+        if not math.isfinite(chunk_pause_ms) or chunk_pause_ms < 0:
+            raise ValueError('chunk_pause_ms must be finite and nonnegative')
+        chunks = split_text(text, max_chunk_chars)
+        if audio_prompt_path:
+            self.prepare_conditionals(
+                audio_prompt_path,
+                exaggeration=generation_kwargs.get('exaggeration', 0.0),
+                norm_loudness=generation_kwargs.get('norm_loudness', True),
+            )
+        else:
+            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+
+        pieces = []
+        for index, chunk in enumerate(chunks):
+            logger.info('%s: generating chunk %d/%d', self.model_label, index + 1, len(chunks))
+            piece = self.generate(chunk, max_gen_len=max_gen_len, **generation_kwargs)
+            if pieces and chunk_pause_ms:
+                pieces.append(piece.new_zeros((piece.shape[0], round(self.sr * chunk_pause_ms / 1000))))
+            pieces.append(piece)
+        return torch.cat(pieces, dim=-1)

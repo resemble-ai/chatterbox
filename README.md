@@ -141,6 +141,44 @@ ta.save("test-2.wav", wav, model.sr)
 ```
 See `example_tts.py`, `example_tts_turbo.py`, `example_tts_nano.py`, and `example_vc.py` for more examples.
 
+### Long-form Turbo narration
+
+Use `ChatterboxTurboTTS.generate_long()` to synthesize a long script into one
+waveform. It packs sentences into chunks of at most 250 characters, splits
+oversized sentences at word boundaries, and reuses the same reference
+conditioning for every chunk. The existing `generate()` method still generates
+one segment with its original 1000-token default budget.
+
+```python
+from pathlib import Path
+
+text = Path("script.txt").read_text(encoding="utf-8")
+wav = model.generate_long(
+    text,
+    audio_prompt_path="reference.wav",
+    max_chunk_chars=250,
+    max_gen_len=2000,
+    chunk_pause_ms=150,
+)
+ta.save("narration.wav", wav, model.sr)
+```
+
+Or run the file-based example:
+
+```bash
+python example_tts_turbo_long.py script.txt --reference reference.wav --output narration.wav
+```
+
+Generation remains local after model download. The token budget applies per
+chunk, with no fixed total-duration limit imposed by this method. Output is
+collected in memory; runtime and memory usage grow with the script length.
+Chunk boundaries can introduce changes in prosody, and increasing the token
+budget does not guarantee better quality. Use smaller chunks if speech drifts.
+Splitting is heuristic rather than linguistic, so abbreviations can create
+extra boundaries. No speech-recognition alignment or automatic retry is performed.
+Reference clips must be longer than five seconds. To use the built-in voice or
+previously prepared conditioning, omit `audio_prompt_path`.
+
 ## Supported Languages
 The general-purpose Chatterbox Multilingual model supports the following languages:
 
