@@ -391,7 +391,7 @@ class T3(nn.Module):
 
     @torch.inference_mode()
     def inference_turbo(self, t3_cond, text_tokens, temperature=0.8, top_k=1000, top_p=0.95, repetition_penalty=1.2,
-                        max_gen_len=1000):
+                        max_gen_len=2000):
 
         logits_processors = LogitsProcessorList()
         if temperature > 0 and temperature != 1.0:
@@ -460,6 +460,11 @@ class T3(nn.Module):
                 break
 
         all_tokens = torch.cat(generated_speech_tokens, dim=1)
+
+        if all_tokens[0, -1] != self.hp.stop_speech_token:
+            import warnings
+            warnings.warn('Speech generation reached max_gen_len before finishing. '
+                          'Use smaller text chunks or increase max_gen_len.', RuntimeWarning)
 
         # Remove EOS token if present
         if all_tokens.size(1) > 0 and all_tokens[0, -1] == self.hp.stop_speech_token:

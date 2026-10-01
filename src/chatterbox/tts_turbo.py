@@ -20,6 +20,7 @@ from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 from .models.t3.modules.t3_config import T3Config
 from .models.s3gen.const import S3GEN_SIL
+from .text_chunks import split_text
 import logging
 logger = logging.getLogger(__name__)
 
@@ -281,7 +282,38 @@ class ChatterboxTurboTTS:
         temperature=0.8,
         top_k=1000,
         norm_loudness=True,
+        max_gen_len=2000,
+        max_chunk_chars=250,
+        chunk_pause_ms=150,
     ):
+        """Generate local audio, automatically splitting long narration.
+
+        max_gen_len limits each chunk, not the complete recording.
+        Set max_chunk_chars=None to explicitly disable splitting.
+        """
+        if not isinstance(max_gen_len, int) or max_gen_len < 1:
+            raise ValueError('max_gen_len must be a positive integer')
+        if not math.isfinite(chunk_pause_ms) or chunk_pause_ms < 0:
+            raise ValueError('chunk_pause_ms must be finite and nonnegative')
+        chunks = split_text(text, max_chunk_chars) if max_chunk_chars is not None else [text]
+        if len(chunks) > 1:
+            if audio_prompt_path:
+                self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, norm_loudness=norm_loudness)
+            pieces = []
+            for index, chunk in enumerate(chunks):
+                print(f'{self.model_label}: generating chunk {index + 1}/{len(chunks)}', flush=True)
+                piece = self.generate(
+                    chunk, repetition_penalty=repetition_penalty, min_p=min_p,
+                    top_p=top_p, exaggeration=exaggeration, cfg_weight=cfg_weight,
+                    temperature=temperature, top_k=top_k, norm_loudness=norm_loudness,
+                    max_gen_len=max_gen_len, max_chunk_chars=None,
+                    chunk_pause_ms=chunk_pause_ms,
+                )
+                if pieces and chunk_pause_ms:
+                    pieces.append(piece.new_zeros((1, round(self.sr * chunk_pause_ms / 1000))))
+                pieces.append(piece)
+            return torch.cat(pieces, dim=-1)
+
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration, norm_loudness=norm_loudness)
         else:
@@ -302,6 +334,7 @@ class ChatterboxTurboTTS:
             top_k=top_k,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            max_gen_len=max_gen_len,
         )
 
         # Remove OOV tokens and add silence to end
