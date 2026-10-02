@@ -2,6 +2,7 @@ import random
 import os
 import numpy as np
 import torch
+from chatterbox.audio_prompt import resolve_audio_prompt_path
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
 import gradio as gr
 
@@ -226,6 +227,8 @@ def generate_tts_audio(
         "cfg_weight": cfgw_input,
     }
     if chosen_prompt:
+        # librosa can only open local files, so fetch URL prompts (the per-language defaults) first.
+        chosen_prompt = resolve_audio_prompt_path(chosen_prompt)
         generate_kwargs["audio_prompt_path"] = chosen_prompt
         print(f"Using audio prompt: {chosen_prompt}")
     else:
