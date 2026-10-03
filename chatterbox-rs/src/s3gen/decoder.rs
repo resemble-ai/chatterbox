@@ -231,7 +231,7 @@ impl FinalBlockWrapper {
     pub fn forward(&self, x: &Tensor, mask: &Tensor) -> Result<Tensor> {
         match self {
             Self::Causal(b) => b.forward(x, mask),
-            Self::NonCausal(b) => b.forward(x),
+            Self::NonCausal(b) => b.forward(x, mask),
         }
     }
 }
@@ -393,7 +393,7 @@ impl ConditionalDecoder {
         let final_block = if causal {
             FinalBlockWrapper::Causal(CausalBlock1D::new(final_ch, final_ch, vb.pp("final_block"))?)
         } else {
-            FinalBlockWrapper::NonCausal(Block1D::new(final_ch, final_ch, vb.pp("final_block"))?)
+            FinalBlockWrapper::NonCausal(Block1D::new(final_ch, final_ch, 8, vb.pp("final_block"))?)
         };
         
         let config = Conv1dConfig { padding: 0, stride: 1, dilation: 1, groups: 1 };
