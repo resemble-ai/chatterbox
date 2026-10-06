@@ -19,6 +19,16 @@ from .models.t3.modules.cond_enc import T3Cond
 REPO_ID = "ResembleAI/chatterbox"
 
 
+def _auto_max_new_tokens(text: str) -> int:
+    """Upper bound for generated speech tokens, scaled to the input text.
+
+    Normal speech needs roughly 1.3 speech tokens (25 per second) per character. Allowing ~2 per character
+    plus a small margin leaves room for slow, expressive delivery, while a generation that loses track of the
+    text stops after about twice the expected duration instead of always running to 1000 tokens (40 s).
+    """
+    return min(1000, 50 + int(len(text) * 2.0))
+
+
 def punc_norm(text: str) -> str:
     """
         Quick cleanup func for punctuation from LLMs or
@@ -215,6 +225,7 @@ class ChatterboxTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
+        max_new_tokens=None,
     ):
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
@@ -246,7 +257,7 @@ class ChatterboxTTS:
             speech_tokens = self.t3.inference(
                 t3_cond=self.conds.t3,
                 text_tokens=text_tokens,
-                max_new_tokens=1000,  # TODO: use the value in config
+                max_new_tokens=max_new_tokens or _auto_max_new_tokens(text),
                 temperature=temperature,
                 cfg_weight=cfg_weight,
                 repetition_penalty=repetition_penalty,
