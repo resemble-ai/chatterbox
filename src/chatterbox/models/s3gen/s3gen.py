@@ -164,7 +164,8 @@ class S3Token2Mel(torch.nn.Module):
                 if isinstance(ref_dict[rk], np.ndarray):
                     ref_dict[rk] = torch.from_numpy(ref_dict[rk])
                 if torch.is_tensor(ref_dict[rk]):
-                    ref_dict[rk] = ref_dict[rk].to(device=self.device, dtype=self.dtype)
+                    floating = ref_dict[rk].is_floating_point()
+                    ref_dict[rk] = ref_dict[rk].to(device=self.device, dtype=self.dtype if floating else None)
 
         speech_tokens = torch.atleast_2d(speech_tokens)
 
