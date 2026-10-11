@@ -1,6 +1,6 @@
 [project]
 name = "chatterbox-light"
-version = "2.0.0"
+version = "1.0.1"
 description = "Lightweight fork of Resemble AI's Chatterbox text-to-speech and voice conversion, with fewer dependencies and no watermarking"
 readme = "README.md"
 requires-python = ">=3.10"
