@@ -1,5 +1,5 @@
 import torch
-import torchaudio as ta
+import soundfile as sf
 from chatterbox.tts import ChatterboxTTS
 
 # Detect device (Mac with M1/M2/M3/M4)
@@ -25,4 +25,4 @@ wav = model.generate(
     exaggeration=2.0,
     cfg_weight=0.5
     )
-ta.save("test-2.wav", wav, model.sr)
+sf.write("test-2.wav", wav.squeeze(0).numpy(), model.sr, subtype="FLOAT")

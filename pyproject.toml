@@ -13,6 +13,7 @@ dependencies = [
     "numpy>=1.24.0,<2.0.0; python_version < '3.13'",
     "numpy>=2.0.0; python_version >= '3.13'",
     "librosa==0.11.0",
+    "soundfile>=0.12.1",
     "s3tokenizer",
     # torch 2.6.0 supports Python 3.10-3.13; Python 3.14 needs 2.9.0+
     "torch==2.6.0; python_version < '3.14'",
