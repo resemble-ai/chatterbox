@@ -1,4 +1,4 @@
-import torchaudio as ta
+import soundfile as sf
 import torch
 from chatterbox.tts_turbo import ChatterboxTurboTTS
 
@@ -12,4 +12,4 @@ text = "Oh, that's hilarious! [chuckle] Um anyway, we do have a new model in sto
 # Generate audio (requires a reference clip for voice cloning)
 # wav = model.generate(text, audio_prompt_path="your_10s_ref_clip.wav")
 wav = model.generate(text)
-ta.save("test-nano.wav", wav, model.sr)
+sf.write("test-nano.wav", wav.squeeze(0).numpy(), model.sr, subtype="FLOAT")
