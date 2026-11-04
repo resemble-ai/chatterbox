@@ -1,5 +1,5 @@
 import torch
-import torchaudio as ta
+import soundfile as sf
 
 from chatterbox.vc import ChatterboxVC
 
@@ -21,4 +21,4 @@ wav = model.generate(
     audio=AUDIO_PATH,
     target_voice_path=TARGET_VOICE_PATH,
 )
-ta.save("testvc.wav", wav, model.sr)
+sf.write("testvc.wav", wav.squeeze(0).numpy(), model.sr, subtype="FLOAT")
