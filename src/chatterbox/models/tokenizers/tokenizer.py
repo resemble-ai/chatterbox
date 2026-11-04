@@ -256,8 +256,9 @@ def add_russian_stress(text: str) -> str:
 class MTLTokenizer:
     def __init__(self, vocab_file_path):
         self.tokenizer: Tokenizer = Tokenizer.from_file(vocab_file_path)
-        model_dir = Path(vocab_file_path).parent
-        self.cangjie_converter = ChineseCangjieConverter(model_dir)
+        self.model_dir = Path(vocab_file_path).parent
+        # Built on first Chinese input: pkuseg downloads its model when it loads
+        self.cangjie_converter = None
         self.check_vocabset_sot_eot()
 
     def check_vocabset_sot_eot(self):
@@ -287,6 +288,8 @@ class MTLTokenizer:
         
         # Language-specific text processing
         if language_id == 'zh':
+            if self.cangjie_converter is None:
+                self.cangjie_converter = ChineseCangjieConverter(self.model_dir)
             txt = self.cangjie_converter(txt)
         elif language_id == 'ja':
             txt = hiragana_normalize(txt)
