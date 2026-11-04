@@ -1,0 +1,86 @@
+{
+  "scope": "Six real Turbo generations and browser playback probe; not deployed application integration",
+  "listener_acceptance": "The operator listened to the playback and explicitly confirmed it worked exactly as wanted.",
+  "extra_models": 0,
+  "heads": [
+    [
+      4,
+      6
+    ],
+    [
+      5,
+      14
+    ],
+    [
+      8,
+      4
+    ]
+  ],
+  "playback_head": [
+    4,
+    6
+  ],
+  "baseline_waveform_and_vocoder_token_parity": true,
+  "cases": [
+    {
+      "text": "First came a boom, then another boom, and finally silence.",
+      "seed": 968,
+      "audio_seconds": 4.28,
+      "candidate_seconds": 2.4,
+      "loopback_effect_seconds": 2.4,
+      "effect_correlation": 0.999998223439158,
+      "audio_equal": true,
+      "hooks_remaining": 0
+    },
+    {
+      "text": "First came a boom, then another boom, and finally silence.",
+      "seed": 969,
+      "audio_seconds": 3.64,
+      "candidate_seconds": 2.08,
+      "loopback_effect_seconds": 2.08,
+      "effect_correlation": 0.9999992341079513,
+      "audio_equal": true,
+      "hooks_remaining": 0
+    },
+    {
+      "text": "After the tension built, the crowd went boom boom-and the night erupted in laughter.",
+      "seed": 968,
+      "audio_seconds": 4.96,
+      "candidate_seconds": 2.88,
+      "loopback_effect_seconds": 2.88,
+      "effect_correlation": 0.9999998349034214,
+      "audio_equal": true,
+      "hooks_remaining": 0
+    },
+    {
+      "text": "After the tension built, the crowd went boom boom-and the night erupted in laughter.",
+      "seed": 969,
+      "audio_seconds": 5.04,
+      "candidate_seconds": 3.16,
+      "loopback_effect_seconds": 3.16,
+      "effect_correlation": 0.9999996756496793,
+      "audio_equal": true,
+      "hooks_remaining": 0
+    },
+    {
+      "text": "The red boat passed the blue boat before sunset.",
+      "seed": 968,
+      "audio_seconds": 2.96,
+      "candidate_seconds": 1.84,
+      "loopback_effect_seconds": 1.84,
+      "effect_correlation": 0.9999958676590471,
+      "audio_equal": true,
+      "hooks_remaining": 0
+    },
+    {
+      "text": "The red boat passed the blue boat before sunset.",
+      "seed": 969,
+      "audio_seconds": 2.88,
+      "candidate_seconds": 1.72,
+      "loopback_effect_seconds": 1.72,
+      "effect_correlation": 0.9999940580925865,
+      "audio_equal": true,
+      "hooks_remaining": 0
+    }
+  ]
+}
