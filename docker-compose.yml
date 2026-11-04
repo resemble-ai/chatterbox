@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  tts-api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./voices:/app/voices
+      - hf-cache:/root/.cache/huggingface
+    environment:
+      - CHATTERBOX_MULTILINGUAL_T3_MODEL=v3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  tts-ui:
+    build: .
+    command: python multilingual_app.py
+    ports:
+      - "7860:7860"
+    depends_on:
+      - tts-api
+    volumes:
+      - ./voices:/app/voices
+      - hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  hf-cache:
