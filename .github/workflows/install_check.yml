@@ -21,3 +21,8 @@ jobs:
     - name: Test Standard Install
       run: |
         pip install -e .
+
+    - name: Build Packages
+      run: |
+        pip install build
+        python -m build --sdist --wheel
