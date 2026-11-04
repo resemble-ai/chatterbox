@@ -31,6 +31,9 @@ dependencies = [
     "omegaconf"
 ]
 
+[project.scripts]
+chatterbox = "chatterbox.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/resemble-ai/chatterbox"
 Repository = "https://github.com/resemble-ai/chatterbox"
