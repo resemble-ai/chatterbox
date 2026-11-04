@@ -123,7 +123,10 @@ class ChatterboxTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
-        self.watermarker = perth.PerthImplicitWatermarker()
+        watermarker_cls = perth.PerthImplicitWatermarker
+        if watermarker_cls is None or not callable(watermarker_cls):
+            watermarker_cls = perth.DummyWatermarker
+        self.watermarker = watermarker_cls()
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
