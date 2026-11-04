@@ -83,6 +83,7 @@ class S3Tokenizer(S3TokenizerV2):
                 wav = torch.from_numpy(wav)
             if wav.dim() == 1:
                 wav = wav.unsqueeze(0)
+            wav = wav.float()  # ensure float32; MPS doesn't support float64
 
             processed_wavs.append(wav)
         return processed_wavs
