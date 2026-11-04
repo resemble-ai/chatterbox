@@ -9,6 +9,7 @@
 > Resemble AI does not sell text-to-speech, voice cloning, or any other voice AI product, and this repository is not a Resemble AI product. The code stays public as an archive under the MIT license, with no support, updates, or paid tier.
 >
 > Resemble AI now builds AI detection models for deepfakes, synthetic media, and AI agents. [Read why we went all in on deepfake detection.](https://www.resemble.ai/resources/why-a-former-voice-ai-company-went-all-in-on-deepfake-detection)
+
 [![Alt Text](https://img.shields.io/badge/listen-demo_samples-blue)](https://resemble-ai.github.io/chatterbox_demopage/)
 [![Alt Text](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/ResembleAI/Chatterbox-Multilingual-TTS)
 [![Alt Text](https://static-public.podonos.com/badges/insight-on-pdns-sm-dark.svg)](https://podonos.com/resembleai/chatterbox)
