@@ -24,12 +24,18 @@ dependencies = [
     "resemble-perth @ git+https://github.com/resemble-ai/Perth.git@master",
     "conformer==0.3.2",
     "safetensors==0.5.3",
-    "spacy-pkuseg",
     "pykakasi==2.3.0",
     "gradio==6.8.0",
     "pyloudnorm",
     "omegaconf"
 ]
+
+[project.optional-dependencies]
+# Chinese word segmentation. Optional because the code already treats it as
+# such — MTLTokenizer._init_segmenter catches ImportError and falls back to
+# skipping segmentation — and because spacy-pkuseg publishes no cp314 wheel,
+# so as a hard dependency it blocks installation on Python 3.14 entirely.
+zh = ["spacy-pkuseg"]
 
 [project.urls]
 Homepage = "https://github.com/resemble-ai/chatterbox"
