@@ -230,7 +230,7 @@ class ChatterboxTurboTTS:
             meter = ln.Meter(sr)
             loudness = meter.integrated_loudness(wav)
             gain_db = target_lufs - loudness
-            gain_linear = 10.0 ** (gain_db / 20.0)
+            gain_linear = float(10.0 ** (gain_db / 20.0))
             if math.isfinite(gain_linear) and gain_linear > 0.0:
                 wav = wav * gain_linear
         except Exception as e:
