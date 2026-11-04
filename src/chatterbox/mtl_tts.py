@@ -16,6 +16,7 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import MTLTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from .models.utils import load_map_location
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -190,10 +191,7 @@ class ChatterboxMultilingualTTS:
         t3_model = _resolve_multilingual_t3_model(t3_model)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
-        if device in ["cpu", "mps"]:
-            map_location = torch.device('cpu')
-        else:
-            map_location = None
+        map_location = load_map_location(device)
 
         ve = VoiceEncoder()
         ve.load_state_dict(
@@ -231,12 +229,13 @@ class ChatterboxMultilingualTTS:
         t3_model: str | None = None,
     ) -> 'ChatterboxMultilingualTTS':
         # Check if MPS is available on macOS
-        if device == "mps" and not torch.backends.mps.is_available():
+        device = torch.device(device)
+        if device.type == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
                 print("MPS not available because the current PyTorch install was not built with MPS enabled.")
             else:
                 print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
-            device = "cpu"
+            device = torch.device("cpu")
 
         t3_model = _resolve_multilingual_t3_model(t3_model)
         ckpt_dir = Path(
