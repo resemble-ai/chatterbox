@@ -461,6 +461,11 @@ class T3(nn.Module):
 
         all_tokens = torch.cat(generated_speech_tokens, dim=1)
 
+        if all_tokens[0, -1] != self.hp.stop_speech_token:
+            import warnings
+            warnings.warn('Speech generation reached max_gen_len before finishing. '
+                          'Use smaller text chunks or increase max_gen_len.', RuntimeWarning)
+
         # Remove EOS token if present
         if all_tokens.size(1) > 0 and all_tokens[0, -1] == self.hp.stop_speech_token:
             all_tokens = all_tokens[:, :-1]
