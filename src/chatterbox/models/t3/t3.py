@@ -26,6 +26,8 @@ from .llama_configs import LLAMA_CONFIGS
 from .inference.t3_hf_backend import T3HuggingfaceBackend
 from ..utils import AttrDict
 
+# Decoding steps between torch.mps.empty_cache() calls in T3.inference (see the loop).
+MPS_EMPTY_CACHE_EVERY = 25
 
 logger = logging.getLogger(__name__)
 
@@ -384,6 +386,12 @@ class T3(nn.Module):
             )
             # Update the kv_cache.
             past = output.past_key_values
+
+            # The kv_cache grows by one token per step, so on MPS each step allocates a slightly
+            # larger buffer and the caching allocator cannot reuse the freed ones. Without this a
+            # ~10 s line holds ~25 GB of Metal memory for ~3 GB of live tensors.
+            if device.type == "mps" and (i + 1) % MPS_EMPTY_CACHE_EVERY == 0:
+                torch.mps.empty_cache()
 
         # Concatenate all predicted tokens along the sequence dimension.
         predicted_tokens = torch.cat(predicted, dim=1)  # shape: (B, num_tokens)
