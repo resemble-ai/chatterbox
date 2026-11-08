@@ -145,9 +145,9 @@ Their immutable commits are recorded in `mirrors.lock.json`:
 | `pbsladek/chatterbox-nano` | `7408d84af552de9456ec80bf94482c293b1cf181` |
 
 These initial backups reference upstream source commit
-`ab55923c27757c90cfcc407baa57dc25a7d25217`. The maintenance changes in this
-checkout still need their own commit and release; the built source
-distribution preserves the current fork files separately.
+`ab55923c27757c90cfcc407baa57dc25a7d25217`. Fork source versions are preserved
+separately by Git commits and source distributions. Each release's
+`release.json` records the exact fork commit used for that build.
 
 Authenticate locally with `hf auth login` or a configured `HF_TOKEN`. Do not
 put a token in source files or shell command arguments. Then:

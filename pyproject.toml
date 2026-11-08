@@ -60,6 +60,7 @@ dev = [
     {include-group = "build"},
     "pytest>=8,<9",
     "ruff>=0.14,<0.15",
+    "pyyaml>=6,<7",
 ]
 
 [build-system]
