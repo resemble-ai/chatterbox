@@ -3,8 +3,27 @@
 
 # Chatterbox TTS
 
+This is [pbsladek/chatterbox](https://github.com/pbsladek/chatterbox), an
+independently maintained fork of Resemble AI's Chatterbox. The Python import
+name remains `chatterbox` and the distribution name remains `chatterbox-tts`.
+
+For this fork, start with the [maintenance guide](docs/maintenance.md). It
+covers locked environments, wheel and source builds, private Hugging Face
+mirrors, offline inference, and release checks. To install and build locally:
+
+```sh
+uv sync --locked --python 3.11
+make check
+```
+
+Install the optional demo UI with `uv sync --locked --extra demo`. CI tests
+the built wheel on Linux and Apple Silicon macOS. Version tags create draft
+GitHub releases; the Release workflow also offers a manual publish option.
+See [release instructions](docs/maintenance.md#release-a-version).
+
 > [!IMPORTANT]
-> **As of August 2026, Chatterbox is retired research and is no longer maintained.**
+> **The upstream Chatterbox project retired in August 2026.** This fork is
+> maintained independently and is not supported by Resemble AI.
 >
 > Resemble AI does not sell text-to-speech, voice cloning, or any other voice AI product, and this repository is not a Resemble AI product. The code stays public as an archive under the MIT license, with no support, updates, or paid tier.
 >
@@ -38,8 +57,6 @@ For low-latency English voice agents, **Chatterbox-Turbo** is our most efficient
 
 For the most resource-constrained deployments, **Chatterbox-Nano** shares Turbo's architecture in an even smaller 110M parameter package. It targets on-device and CPU inference — running **3x faster than realtime on 8 CPU cores** — while keeping the same single-step decoder and native paralinguistic tag support. Nano is the recommended model when memory and latency budgets are tightest.
 
-If you like the model but need to scale or tune it for higher accuracy, check out our competitively priced TTS service (<a href="https://resemble.ai">link</a>). It delivers reliable performance with ultra-low latency of sub 200ms—ideal for production use in agents, applications, or interactive media.
-
 <img width="1200" height="600" alt="Podonos Turbo Eval" src="https://storage.googleapis.com/chatterbox-demo-samples/turbo/podonos_turbo.png" />
 
 ### ⚡ Model Zoo
@@ -56,7 +73,7 @@ Choose the right model for your application.
 
 ## Installation
 ```shell
-pip install chatterbox-tts
+pip install /path/to/chatterbox_tts-0.1.7.post1-py3-none-any.whl
 ```
 
 Alternatively, you can install from source:
@@ -64,18 +81,21 @@ Alternatively, you can install from source:
 # conda create -yn chatterbox python=3.11
 # conda activate chatterbox
 
-git clone https://github.com/resemble-ai/chatterbox.git
+git clone https://github.com/pbsladek/chatterbox.git
 cd chatterbox
 pip install -e .
 ```
-We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
+Upstream developed Chatterbox on Python 3.11 on Debian 11. For a repeatable
+development environment in this fork, use `uv sync --locked` with the committed
+`uv.lock`. Plain `pip install -e .` follows the dependency ranges in
+`pyproject.toml` and does not use that lock.
 
 ## Usage
 
 ##### Chatterbox-Turbo
 
 ```python
-import torchaudio as ta
+import soundfile as sf
 import torch
 from chatterbox.tts_turbo import ChatterboxTurboTTS
 
@@ -88,7 +108,7 @@ text = "Hi there, Sarah here from MochaFone calling you back [chuckle], have you
 # Generate audio (requires a reference clip for voice cloning)
 wav = model.generate(text, audio_prompt_path="your_10s_ref_clip.wav")
 
-ta.save("test-turbo.wav", wav, model.sr)
+sf.write("test-turbo.wav", wav.squeeze(0).detach().cpu().numpy(), model.sr)
 ```
 
 ##### Chatterbox-Nano
@@ -96,7 +116,7 @@ ta.save("test-turbo.wav", wav, model.sr)
 Nano shares Turbo's architecture and is loaded through the same `ChatterboxTurboTTS` class by passing `nano=True`:
 
 ```python
-import torchaudio as ta
+import soundfile as sf
 import torch
 from chatterbox.tts_turbo import ChatterboxTurboTTS
 
@@ -109,14 +129,14 @@ text = "Hi there, Sarah here from MochaFone calling you back [chuckle], have you
 # Generate audio (requires a reference clip for voice cloning)
 wav = model.generate(text, audio_prompt_path="your_10s_ref_clip.wav")
 
-ta.save("test-nano.wav", wav, model.sr)
+sf.write("test-nano.wav", wav.squeeze(0).detach().cpu().numpy(), model.sr)
 ```
 
 ##### Chatterbox and Chatterbox-Multilingual
 
 ```python
 
-import torchaudio as ta
+import soundfile as sf
 from chatterbox.tts import ChatterboxTTS
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
@@ -127,7 +147,7 @@ model = ChatterboxTTS.from_pretrained(device=device)
 
 text = "Ezreal and Jinx teamed up with Ahri, Yasuo, and Teemo to take down the enemy's Nexus in an epic late-game pentakill."
 wav = model.generate(text)
-ta.save("test-english.wav", wav, model.sr)
+sf.write("test-english.wav", wav.squeeze(0).detach().cpu().numpy(), model.sr)
 
 # Multilingual V3 examples
 multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device, t3_model="v3")
@@ -135,16 +155,16 @@ multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device, t3
 
 french_text = "Bonjour, comment ça va? Ceci est le modèle de synthèse vocale multilingue Chatterbox, il prend en charge 23 langues."
 wav_french = multilingual_model.generate(french_text, language_id="fr")
-ta.save("test-french.wav", wav_french, multilingual_model.sr)
+sf.write("test-french.wav", wav_french.squeeze(0).detach().cpu().numpy(), multilingual_model.sr)
 
 chinese_text = "你好，今天天气真不错，希望你有一个愉快的周末。"
 wav_chinese = multilingual_model.generate(chinese_text, language_id="zh")
-ta.save("test-chinese.wav", wav_chinese, multilingual_model.sr)
+sf.write("test-chinese.wav", wav_chinese.squeeze(0).detach().cpu().numpy(), multilingual_model.sr)
 
 # If you want to synthesize with a different voice, specify the audio prompt
 AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
-ta.save("test-2.wav", wav, model.sr)
+sf.write("test-2.wav", wav.squeeze(0).detach().cpu().numpy(), model.sr)
 ```
 See `example_tts.py`, `example_tts_turbo.py`, `example_tts_nano.py`, and `example_vc.py` for more examples.
 

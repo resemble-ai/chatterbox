@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "models": {
+    "chatterbox": {
+      "repo_id": "ResembleAI/chatterbox",
+      "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18",
+      "license": "mit",
+      "files": [
+        {
+          "path": ".gitattributes",
+          "size": 1519,
+          "sha256": null
+        },
+        {
+          "path": "Cangjie5_TC.json",
+          "size": 1920163,
+          "sha256": null
+        },
+        {
+          "path": "README.md",
+          "size": 10081,
+          "sha256": null
+        },
+        {
+          "path": "conds.pt",
+          "size": 107374,
+          "sha256": "6552d70568833628ba019c6b03459e77fe71ca197d5c560cef9411bee9d87f4e"
+        },
+        {
+          "path": "grapheme_mtl_merged_expanded_v1.json",
+          "size": 69989,
+          "sha256": null
+        },
+        {
+          "path": "mtl_tokenizer.json",
+          "size": 68125,
+          "sha256": null
+        },
+        {
+          "path": "s3gen.pt",
+          "size": 1057165844,
+          "sha256": "9b9ff07e60b20c136e2b1b3d7563a24604e8d2c4c267888d1ee929dd0151d2a3"
+        },
+        {
+          "path": "s3gen.safetensors",
+          "size": 1056484620,
+          "sha256": "2b78103c654207393955e4900aac14a12de8ef25f4b09424f1ef91941f161d4e"
+        },
+        {
+          "path": "s3gen_v3.pt",
+          "size": 1056903694,
+          "sha256": "f7abce4b196dae2d08d9296cbebc6521b046079577643b42a19a03499d08721e"
+        },
+        {
+          "path": "s3gen_v3.safetensors",
+          "size": 1056381804,
+          "sha256": "4a46190f3dccc2230fbb3488a930bccc925862ee68f2662433dfcfe93ce6c2cb"
+        },
+        {
+          "path": "t3_23lang.safetensors",
+          "size": 2143154168,
+          "sha256": "5b2194350053f9fc01544e614d923f1e5c8cd785ba596acc142d3d1d8614908c"
+        },
+        {
+          "path": "t3_cfg.pt",
+          "size": 1064892246,
+          "sha256": "0b2dd5439fe7e94f379561419847a45bf2c79d0e8ea751c6bbe947ce337789cc"
+        },
+        {
+          "path": "t3_cfg.safetensors",
+          "size": 2129653744,
+          "sha256": "914cb1696f47527fe8852ca8f1fe1fa63cb34f76f9c715e84e067b744dd0da81"
+        },
+        {
+          "path": "t3_mtl23ls_v2.safetensors",
+          "size": 2143989752,
+          "sha256": "b1237586127ce98e7800a68e49938eb5092846862aabcb6e17b2fda7889a6c75"
+        },
+        {
+          "path": "t3_mtl23ls_v3.safetensors",
+          "size": 2143989928,
+          "sha256": "5abca8321ede76f8e61f1cc0d19aea6c946b28871017ce8726f8a69203f05953"
+        },
+        {
+          "path": "tokenizer.json",
+          "size": 25470,
+          "sha256": null
+        },
+        {
+          "path": "ve.pt",
+          "size": 5698626,
+          "sha256": "4b16d836bc598509860f6fa068165a8bb5e9ac84f05582dfcf278a5a372879f1"
+        },
+        {
+          "path": "ve.safetensors",
+          "size": 5695784,
+          "sha256": "f0921cab452fa278bc25cd23ffd59d36f816d7dc5181dd1bef9751a7fb61f63c"
+        }
+      ]
+    },
+    "chatterbox-turbo": {
+      "repo_id": "ResembleAI/chatterbox-turbo",
+      "revision": "749d1c1a46eb10492095d68fbcf55691ccf137cd",
+      "license": "mit",
+      "files": [
+        {
+          "path": ".gitattributes",
+          "size": 1519,
+          "sha256": null
+        },
+        {
+          "path": "README.md",
+          "size": 9544,
+          "sha256": null
+        },
+        {
+          "path": "added_tokens.json",
+          "size": 418,
+          "sha256": null
+        },
+        {
+          "path": "conds.pt",
+          "size": 169454,
+          "sha256": "b1852099306fd6a7814eb9d0bd10186caba7249596cc23868f78a0eefbfa5033"
+        },
+        {
+          "path": "merges.txt",
+          "size": 456318,
+          "sha256": null
+        },
+        {
+          "path": "s3gen.safetensors",
+          "size": 1056484620,
+          "sha256": "2b78103c654207393955e4900aac14a12de8ef25f4b09424f1ef91941f161d4e"
+        },
+        {
+          "path": "s3gen_meanflow.safetensors",
+          "size": 1064875036,
+          "sha256": "d65cb687a2ed581ee6cc297e919ffefa63386944f42364ae13b78a594945514f"
+        },
+        {
+          "path": "special_tokens_map.json",
+          "size": 470,
+          "sha256": null
+        },
+        {
+          "path": "t3_turbo_v1.safetensors",
+          "size": 1915480052,
+          "sha256": "fcf1f8c1d651bb7e3acd69ee5be269b4ac10c02980b7708213d598bc9f7cdf87"
+        },
+        {
+          "path": "t3_turbo_v1.yaml",
+          "size": 8457,
+          "sha256": null
+        },
+        {
+          "path": "tokenizer_config.json",
+          "size": 3878,
+          "sha256": null
+        },
+        {
+          "path": "ve.safetensors",
+          "size": 5695784,
+          "sha256": "f0921cab452fa278bc25cd23ffd59d36f816d7dc5181dd1bef9751a7fb61f63c"
+        },
+        {
+          "path": "vocab.json",
+          "size": 999186,
+          "sha256": null
+        }
+      ]
+    },
+    "chatterbox-nano": {
+      "repo_id": "ResembleAI/chatterbox-nano",
+      "revision": "71ccd1d0081b430592cea481f4307e764e07bc64",
+      "license": "mit",
+      "files": [
+        {
+          "path": ".gitattributes",
+          "size": 1519,
+          "sha256": null
+        },
+        {
+          "path": "README.md",
+          "size": 10773,
+          "sha256": null
+        },
+        {
+          "path": "added_tokens.json",
+          "size": 418,
+          "sha256": null
+        },
+        {
+          "path": "conds.pt",
+          "size": 169454,
+          "sha256": "b1852099306fd6a7814eb9d0bd10186caba7249596cc23868f78a0eefbfa5033"
+        },
+        {
+          "path": "merges.txt",
+          "size": 456318,
+          "sha256": null
+        },
+        {
+          "path": "s3gen.safetensors",
+          "size": 1056484620,
+          "sha256": "2b78103c654207393955e4900aac14a12de8ef25f4b09424f1ef91941f161d4e"
+        },
+        {
+          "path": "s3gen_meanflow.safetensors",
+          "size": 1064875036,
+          "sha256": "d65cb687a2ed581ee6cc297e919ffefa63386944f42364ae13b78a594945514f"
+        },
+        {
+          "path": "special_tokens_map.json",
+          "size": 470,
+          "sha256": null
+        },
+        {
+          "path": "t3_nano_v1.safetensors",
+          "size": 869899204,
+          "sha256": "72b110185087d945dbdf54dee4e333848e1811bdd5fd6cb16ceb8da50006f0c9"
+        },
+        {
+          "path": "t3_nano_v1.yaml",
+          "size": 8488,
+          "sha256": null
+        },
+        {
+          "path": "tokenizer_config.json",
+          "size": 3878,
+          "sha256": null
+        },
+        {
+          "path": "ve.safetensors",
+          "size": 5695784,
+          "sha256": "f0921cab452fa278bc25cd23ffd59d36f816d7dc5181dd1bef9751a7fb61f63c"
+        },
+        {
+          "path": "vocab.json",
+          "size": 999186,
+          "sha256": null
+        }
+      ]
+    }
+  }
+}

@@ -46,3 +46,11 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+
+.venv*/
+.pytest_cache/
+.ruff_cache/
+.env
+.env.*
+model-archives/
+artifacts/

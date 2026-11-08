@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from pathlib import Path
-import os
 
 import librosa
 import torch
 import perth
 import torch.nn.functional as F
 from safetensors.torch import load_file as load_safetensors
-from huggingface_hub import snapshot_download
+
+from .hub import download_snapshot
 
 from .models.t3 import T3
 from .models.t3.modules.t3_config import T3Config
@@ -229,7 +229,14 @@ class ChatterboxMultilingualTTS:
         cls,
         device: torch.device,
         t3_model: str | None = None,
+        *,
+        repo_id=None,
+        revision=None,
+        cache_dir=None,
+        local_files_only=False,
+        token=None,
     ) -> 'ChatterboxMultilingualTTS':
+        """Load a checkpoint from upstream, a private mirror, or the offline cache."""
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -240,12 +247,13 @@ class ChatterboxMultilingualTTS:
 
         t3_model = _resolve_multilingual_t3_model(t3_model)
         ckpt_dir = Path(
-            snapshot_download(
-                repo_id=REPO_ID,
-                repo_type="model",
-                revision="main",
+            download_snapshot(
+                repo_id=repo_id or REPO_ID,
+                revision=revision,
                 allow_patterns=["ve.pt", t3_model, "s3gen.pt", "grapheme_mtl_merged_expanded_v1.json", "conds.pt", "Cangjie5_TC.json"],
-                token=os.getenv("HF_TOKEN"),
+                cache_dir=cache_dir,
+                local_files_only=local_files_only,
+                token=token,
             )
         )
         return cls.from_local(ckpt_dir, device, t3_model=t3_model)

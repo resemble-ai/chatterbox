@@ -1,4 +1,7 @@
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Tuple
+
+if TYPE_CHECKING:
+    from accelerate import Accelerator
 
 import numpy as np
 import librosa

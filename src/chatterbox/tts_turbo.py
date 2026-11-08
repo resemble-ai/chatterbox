@@ -1,4 +1,3 @@
-import os
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,8 +8,9 @@ import perth
 import pyloudnorm as ln
 
 from safetensors.torch import load_file
-from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
+
+from .hub import download_snapshot
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR
@@ -189,7 +189,9 @@ class ChatterboxTurboTTS:
                    model_label="Nano" if nano else "Turbo")
 
     @classmethod
-    def from_pretrained(cls, device, nano=False) -> 'ChatterboxTurboTTS':
+    def from_pretrained(cls, device, nano=False, *, repo_id=None, revision=None,
+                        cache_dir=None, local_files_only=False, token=None) -> 'ChatterboxTurboTTS':
+        """Load Turbo/Nano weights from upstream, a mirror, or the offline cache."""
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -198,30 +200,14 @@ class ChatterboxTurboTTS:
                 print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
             device = "cpu"
 
-        download_kwargs = dict(
-            repo_id=NANO_REPO_ID if nano else REPO_ID,
-            token=os.getenv("HF_TOKEN") or None,
-            # Optional: Filter to download only what you need
+        local_path = download_snapshot(
+            repo_id=repo_id or (NANO_REPO_ID if nano else REPO_ID),
+            revision=revision,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+            token=token,
             allow_patterns=["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"],
         )
-        try:
-            local_path = snapshot_download(**download_kwargs)
-        except Exception as e:
-            # Some hf_xet versions crash on the Xet storage backend (e.g.
-            # "Unable to parse string as hex hash value"). Fall back to the
-            # standard HTTP/LFS download path so end users don't have to set
-            # HF_HUB_DISABLE_XET themselves.
-            if "xet" in str(e).lower() or "hex hash" in str(e).lower():
-                logger.warning(f"Xet download failed ({e}); retrying with Xet disabled.")
-                # NOTE: HF_HUB_DISABLE_XET is only read into this constant at
-                # import time, so setting the env var now would be a no-op.
-                # is_xet_available() reads the constant dynamically, so flip it
-                # directly to force the standard HTTP/LFS download path.
-                import huggingface_hub.constants as hf_constants
-                hf_constants.HF_HUB_DISABLE_XET = True
-                local_path = snapshot_download(**download_kwargs)
-            else:
-                raise
 
         return cls.from_local(local_path, device, nano=nano)
 

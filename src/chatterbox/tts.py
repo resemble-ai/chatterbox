@@ -5,8 +5,9 @@ import librosa
 import torch
 import perth
 import torch.nn.functional as F
-from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
+
+from .hub import download_snapshot
 
 from .models.t3 import T3
 from .models.s3tokenizer import S3_SR, drop_invalid_tokens
@@ -165,7 +166,9 @@ class ChatterboxTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTTS':
+    def from_pretrained(cls, device, *, repo_id=None, revision=None, cache_dir=None,
+                        local_files_only=False, token=None) -> 'ChatterboxTTS':
+        """Load upstream or mirrored weights; pin ``revision`` for reproducibility."""
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -174,10 +177,12 @@ class ChatterboxTTS:
                 print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
             device = "cpu"
 
-        for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"]:
-            local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
-
-        return cls.from_local(Path(local_path).parent, device)
+        local_path = download_snapshot(
+            repo_id or REPO_ID,
+            ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt"],
+            revision=revision, cache_dir=cache_dir, local_files_only=local_files_only, token=token,
+        )
+        return cls.from_local(Path(local_path), device)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav

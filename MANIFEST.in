@@ -1,0 +1,9 @@
+include LICENSE README.md pyproject.toml uv.lock models.lock.json mirrors.lock.json .python-version
+include THIRD_PARTY_NOTICES.md
+include example*.py gradio*.py multilingual_app.py Makefile
+include Chatterbox-Multilingual.png Chatterbox-Turbo.jpg
+recursive-include .github *.yml
+recursive-include licenses *.txt
+recursive-include docs *.md
+recursive-include scripts *.py
+recursive-include tests *.py

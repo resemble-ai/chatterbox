@@ -1,0 +1,132 @@
+name: Release
+run-name: Release ${{ inputs.tag || github.ref_name }}${{ inputs.publish && ' (publish)' || ' (draft)' }}
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build, such as v0.1.7.post1
+        required: true
+        type: string
+      publish:
+        description: Publish the release after every check passes
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sha: ${{ steps.metadata.outputs.sha }}
+      version: ${{ steps.metadata.outputs.version }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      UV_PYTHON: '3.11'
+    steps:
+      - name: Validate the tag input
+        id: tag
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9][A-Za-z0-9.!+_-]*$ ]]; then
+            echo 'Expected a version tag such as v0.1.7.post1' >&2
+            exit 1
+          fi
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.7'
+          enable-cache: true
+          cache-suffix: release-tools
+      - run: uv sync --locked --only-group build
+      - name: Match the tag to pyproject.toml and pin its source commit
+        id: metadata
+        run: .venv/bin/python scripts/release.py check --tag "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"
+
+  checks:
+    name: Build and test the tagged commit
+    needs: resolve
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      release_tag: ${{ needs.resolve.outputs.tag }}
+
+  release:
+    name: Create or publish GitHub release
+    needs: [resolve, checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      SOURCE_SHA: ${{ needs.resolve.outputs.sha }}
+      RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+      IS_PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+      PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+      - name: Verify release checksums and source provenance
+        working-directory: release-assets
+        run: |
+          sha256sum --check SHA256SUMS
+          python3 - <<'PY'
+          import json, os
+          with open('release.json') as f:
+              release = json.load(f)
+          assert release['tag'] == os.environ['RELEASE_TAG'], 'Artifact tag differs'
+          assert release['commit'] == os.environ['SOURCE_SHA'], 'Artifact commit differs'
+          assert release['version'] == os.environ['RELEASE_VERSION'], 'Artifact version differs'
+          assert not release['dirty'], 'Artifacts were built from uncommitted changes'
+          PY
+      - name: Create or update the draft, then publish when requested
+        working-directory: release-assets
+        shell: bash
+        run: |
+          remote_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq '.sha')
+          if [[ "$remote_sha" != "$SOURCE_SHA" ]]; then
+            echo 'The release tag moved after validation; refusing to publish.' >&2
+            exit 1
+          fi
+          if is_draft=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft'); then
+            if [[ "$is_draft" != true ]]; then
+              echo 'This release is already published. Its assets are unchanged.'
+              gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber ./*
+          else
+            release_flags=()
+            if [[ "$IS_PRERELEASE" == true ]]; then
+              release_flags+=(--prerelease)
+            fi
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --draft --verify-tag --target "$SOURCE_SHA" --generate-notes \
+              --title "$RELEASE_TAG" "${release_flags[@]}" ./*
+          fi
+          if [[ "$PUBLISH" == true ]]; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --draft=false --prerelease="$IS_PRERELEASE"
+          fi
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"

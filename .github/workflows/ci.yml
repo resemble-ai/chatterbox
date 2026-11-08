@@ -1,0 +1,110 @@
+name: Build and test
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to build and test
+        required: false
+        default: ''
+        type: string
+      release_tag:
+        description: Release tag to validate against the package version
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: '3.11'
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.7'
+          enable-cache: true
+          cache-suffix: build
+      - name: Install build and lint tools without model dependencies
+        run: uv sync --locked --only-group dev
+      - name: Validate the release version
+        if: inputs.release_tag != ''
+        run: .venv/bin/python scripts/release.py check --tag "$RELEASE_TAG"
+      - run: .venv/bin/ruff check src tests scripts example*.py
+      - name: Set the build timestamp from the source commit
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+      - run: uv build --no-sources
+      - run: .venv/bin/python -m twine check --strict dist/*.whl dist/*.tar.gz
+      - name: Assemble distributions, locks, provenance, and checksums
+        shell: bash
+        run: |
+          release_args=()
+          if [[ -n "$RELEASE_TAG" ]]; then
+            release_args+=(--tag "$RELEASE_TAG")
+          fi
+          .venv/bin/python scripts/release.py prepare "${release_args[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  test:
+    name: Test wheel (${{ matrix.os }}, Python ${{ matrix.python }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        include:
+          - os: macos-15
+            python: '3.11'
+          - os: macos-15
+            python: '3.14'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+      HF_HUB_OFFLINE: '1'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.7'
+          enable-cache: true
+          cache-suffix: ${{ matrix.os }}-${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: artifacts/release
+      - run: uv sync --locked --no-install-project
+      - name: Verify downloaded artifacts
+        run: .venv/bin/python scripts/release.py verify artifacts/release
+      - name: Install the wheel built by the build job
+        run: uv pip install --no-deps --reinstall artifacts/release/*.whl
+      - run: uv pip check
+      - run: .venv/bin/python -m pytest -q
+      - name: Import the installed wheel outside the checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          "${GITHUB_WORKSPACE}/.venv/bin/python" -c 'from chatterbox import ChatterboxTTS, ChatterboxVC, ChatterboxMultilingualTTS, ChatterboxTurboTTS; import perth; assert callable(perth.PerthImplicitWatermarker)'

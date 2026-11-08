@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "mirrors": {
+    "chatterbox": {
+      "repo_id": "pbsladek/chatterbox",
+      "revision": "94dd991b62f6a6cb513ee082db46714cf923d9bb",
+      "private": true,
+      "upstream": {
+        "repo_id": "ResembleAI/chatterbox",
+        "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"
+      },
+      "archive_manifest_sha256": "74de2ff973af03c2700f2b2221f4913e2e6875313d894010a1e82e2266c2ff18"
+    },
+    "chatterbox-turbo": {
+      "repo_id": "pbsladek/chatterbox-turbo",
+      "revision": "40b0bb1b9d7f428d58d65849e85cb253fb26c5bf",
+      "private": true,
+      "upstream": {
+        "repo_id": "ResembleAI/chatterbox-turbo",
+        "revision": "749d1c1a46eb10492095d68fbcf55691ccf137cd"
+      },
+      "archive_manifest_sha256": "0d482a5ccb5c956ac26b09610fd0f1944c399c3af6052e66e35275828148d7e2"
+    },
+    "chatterbox-nano": {
+      "repo_id": "pbsladek/chatterbox-nano",
+      "revision": "7408d84af552de9456ec80bf94482c293b1cf181",
+      "private": true,
+      "upstream": {
+        "repo_id": "ResembleAI/chatterbox-nano",
+        "revision": "71ccd1d0081b430592cea481f4307e764e07bc64"
+      },
+      "archive_manifest_sha256": "500c0317780aeef7f0c69e0fa42ac8453beb5143d73364e1ad3250f8680718e3"
+    }
+  }
+}

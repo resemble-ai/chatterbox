@@ -5,7 +5,6 @@ import torch
 from pathlib import Path
 from unicodedata import category, normalize
 from tokenizers import Tokenizer
-from huggingface_hub import hf_hub_download
 
 
 # Special tokens
@@ -162,16 +161,12 @@ class ChineseCangjieConverter:
         self.cj2word = {}
         self.segmenter = None
         self._load_cangjie_mapping(model_dir)
-        self._init_segmenter()
+        self._init_segmenter(model_dir)
     
     def _load_cangjie_mapping(self, model_dir=None):
-        """Load Cangjie mapping from HuggingFace model repository."""        
+        """Read the mapping from the same snapshot as the tokenizer."""
         try:
-            cangjie_file = hf_hub_download(
-                repo_id=REPO_ID,
-                filename="Cangjie5_TC.json",
-                cache_dir=model_dir
-            )
+            cangjie_file = Path(model_dir) / "Cangjie5_TC.json"
             
             with open(cangjie_file, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
@@ -187,14 +182,25 @@ class ChineseCangjieConverter:
         except Exception as e:
             logger.warning(f"Could not load Cangjie mapping: {e}")
     
-    def _init_segmenter(self):
-        """Initialize pkuseg segmenter."""
+    def _init_segmenter(self, model_dir=None):
+        """Use local segmentation weights without triggering a hidden download."""
         try:
-            from spacy_pkuseg import pkuseg
-            self.segmenter = pkuseg()
+            from spacy_pkuseg import config, pkuseg
+            candidates = []
+            if model_dir is not None:
+                candidates.append(Path(model_dir) / "pkuseg")
+            candidates.append(Path(config.pkuseg_home) / "spacy_ontonotes")
+            for path in candidates:
+                if (path / "features.msgpack").is_file() and (path / "weights.npz").is_file():
+                    self.segmenter = pkuseg(model_name=str(path))
+                    return
+            logger.warning(
+                "Local pkuseg weights unavailable; Chinese word segmentation is skipped. "
+                "Place the spacy_ontonotes model in the checkpoint's pkuseg/ directory."
+            )
         except ImportError:
             logger.warning("pkuseg not available - Chinese segmentation will be skipped")
-            self.segmenter = None
+        self.segmenter = None
     
     def _cangjie_encode(self, glyph: str):
         """Encode a single Chinese glyph to Cangjie code."""
