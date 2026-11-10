@@ -7,7 +7,7 @@ import torch
 import perth
 import torch.nn.functional as F
 from safetensors.torch import load_file as load_safetensors
-from huggingface_hub import snapshot_download
+from huggingface_hub import list_repo_files, snapshot_download
 
 from .models.t3 import T3
 from .models.t3.modules.t3_config import T3Config
@@ -16,6 +16,13 @@ from .models.s3gen import S3GEN_SR, S3Gen
 from .models.tokenizers import MTLTokenizer
 from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
+from .models.checkpoints import (
+    find_checkpoint_file,
+    load_state_dict_checked,
+    load_state_dict_file,
+    pick_t3_checkpoint,
+    resolve_checkpoint_name,
+)
 
 
 REPO_ID = "ResembleAI/chatterbox"
@@ -26,6 +33,18 @@ MULTILINGUAL_T3_MODELS = {
     "v3": "t3_mtl23ls_v3.safetensors",
     "t3_mtl23ls_v3": "t3_mtl23ls_v3.safetensors",
 }
+DEFAULT_MULTILINGUAL_S3GEN_MODEL = "s3gen.pt"
+MULTILINGUAL_S3GEN_MODELS = {
+    "v2": "s3gen.pt",
+    "s3gen": "s3gen.pt",
+    "v3": "s3gen_v3.pt",
+    "s3gen_v3": "s3gen_v3.pt",
+}
+# Single Language Pack repos (e.g. ResembleAI/Chatterbox-Multilingual-pt-br) ship
+# only their T3 finetune plus the v3 S3Gen; everything else comes from REPO_ID.
+LANGUAGE_PACK_S3GEN_MODEL = "s3gen_v3.pt"
+TOKENIZER_FILENAME = "grapheme_mtl_merged_expanded_v1.json"
+SHARED_MULTILINGUAL_FILES = ["ve.pt", TOKENIZER_FILENAME, "conds.pt", "Cangjie5_TC.json"]
 
 # Supported languages for the multilingual model
 SUPPORTED_LANGUAGES = {
@@ -56,15 +75,16 @@ SUPPORTED_LANGUAGES = {
 
 
 def _resolve_multilingual_t3_model(t3_model: str | None) -> str:
-    if t3_model is None:
-        return DEFAULT_MULTILINGUAL_T3_MODEL
-    if t3_model in MULTILINGUAL_T3_MODELS:
-        return MULTILINGUAL_T3_MODELS[t3_model]
-    if t3_model.endswith(".safetensors"):
-        return t3_model
-    raise ValueError(
-        f"Unknown multilingual T3 model '{t3_model}'. "
-        f"Expected one of {sorted(MULTILINGUAL_T3_MODELS)} or a .safetensors filename."
+    return resolve_checkpoint_name(
+        t3_model, MULTILINGUAL_T3_MODELS, DEFAULT_MULTILINGUAL_T3_MODEL,
+        what="multilingual T3 model",
+    )
+
+
+def _resolve_multilingual_s3gen_model(s3gen_model: str | None) -> str:
+    return resolve_checkpoint_name(
+        s3gen_model, MULTILINGUAL_S3GEN_MODELS, DEFAULT_MULTILINGUAL_S3GEN_MODEL,
+        what="multilingual S3Gen model",
     )
 
 
@@ -185,9 +205,22 @@ class ChatterboxMultilingualTTS:
         ckpt_dir,
         device,
         t3_model: str | None = None,
+        s3gen_model: str | None = None,
+        shared_ckpt_dir=None,
     ) -> 'ChatterboxMultilingualTTS':
+        """
+        Load the multilingual model from local checkpoint files.
+
+        `t3_model` / `s3gen_model` select the T3 and S3Gen checkpoints: an alias
+        ("v2", "v3") or a `.safetensors` / `.pt` filename inside `ckpt_dir`. A
+        Single Language Pack directory only holds those two files; point
+        `shared_ckpt_dir` at a download of the base repo for the voice encoder,
+        tokenizer and built-in voice (each file is looked up in `ckpt_dir` first).
+        """
         ckpt_dir = Path(ckpt_dir)
+        search_dirs = (ckpt_dir,) if shared_ckpt_dir is None else (ckpt_dir, Path(shared_ckpt_dir))
         t3_model = _resolve_multilingual_t3_model(t3_model)
+        s3gen_model = _resolve_multilingual_s3gen_model(s3gen_model)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
         if device in ["cpu", "mps"]:
@@ -197,29 +230,35 @@ class ChatterboxMultilingualTTS:
 
         ve = VoiceEncoder()
         ve.load_state_dict(
-            torch.load(ckpt_dir / "ve.pt", map_location=map_location, weights_only=True)
+            torch.load(find_checkpoint_file("ve.pt", *search_dirs), map_location=map_location, weights_only=True)
         )
         ve.to(device).eval()
 
         t3 = T3(T3Config.multilingual())
-        t3_state = load_safetensors(ckpt_dir / t3_model)
+        t3_state = load_safetensors(find_checkpoint_file(t3_model, *search_dirs))
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
         t3.to(device).eval()
 
+        # The S3Gen checkpoints omit the tokenizer's derived mel/window buffers
+        # (see S3Gen.ignore_state_dict_missing), so a strict load rejects them.
         s3gen = S3Gen()
-        s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", map_location=map_location, weights_only=True)
+        s3gen_path = find_checkpoint_file(s3gen_model, *search_dirs)
+        load_state_dict_checked(
+            s3gen,
+            load_state_dict_file(s3gen_path, map_location=map_location),
+            ignore_missing=getattr(s3gen, "ignore_state_dict_missing", ()),
+            what=f"S3Gen checkpoint {s3gen_path}",
         )
         s3gen.to(device).eval()
 
         tokenizer = MTLTokenizer(
-            str(ckpt_dir / "grapheme_mtl_merged_expanded_v1.json")
+            str(find_checkpoint_file(TOKENIZER_FILENAME, *search_dirs))
         )
 
         conds = None
-        if (builtin_voice := ckpt_dir / "conds.pt").exists():
+        if (builtin_voice := find_checkpoint_file("conds.pt", *search_dirs, required=False)) is not None:
             conds = Conditionals.load(builtin_voice, map_location=map_location).to(device)
 
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
@@ -229,7 +268,19 @@ class ChatterboxMultilingualTTS:
         cls,
         device: torch.device,
         t3_model: str | None = None,
+        s3gen_model: str | None = None,
+        repo_id: str = REPO_ID,
     ) -> 'ChatterboxMultilingualTTS':
+        """
+        Download and load the multilingual model from the Hugging Face Hub.
+
+        Pass a Single Language Pack repo as `repo_id` (for example
+        "ResembleAI/Chatterbox-Multilingual-pt-br") to load a dedicated
+        finetune: its T3 checkpoint is picked up automatically (or set
+        `t3_model`), it uses the v3 S3Gen unless `s3gen_model` says otherwise,
+        and the shared files (voice encoder, tokenizer, built-in voice) are
+        fetched from the base repo.
+        """
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -238,17 +289,53 @@ class ChatterboxMultilingualTTS:
                 print("MPS not available because the current MacOS version is not 12.3+ and/or you do not have an MPS-enabled device on this machine.")
             device = "cpu"
 
+        token = os.getenv("HF_TOKEN")
+        if repo_id == REPO_ID:
+            t3_model = _resolve_multilingual_t3_model(t3_model)
+            s3gen_model = _resolve_multilingual_s3gen_model(s3gen_model)
+            ckpt_dir = Path(
+                snapshot_download(
+                    repo_id=REPO_ID,
+                    repo_type="model",
+                    revision="main",
+                    allow_patterns=SHARED_MULTILINGUAL_FILES + [t3_model, s3gen_model],
+                    token=token,
+                )
+            )
+            return cls.from_local(ckpt_dir, device, t3_model=t3_model, s3gen_model=s3gen_model)
+
+        # Single Language Pack: the pack repo holds the finetuned T3 and the v3
+        # S3Gen; the voice encoder, tokenizer and built-in voice live in REPO_ID.
+        if t3_model is None:
+            t3_model = pick_t3_checkpoint(
+                list_repo_files(repo_id, repo_type="model", token=token), repo_id
+            )
         t3_model = _resolve_multilingual_t3_model(t3_model)
-        ckpt_dir = Path(
+        s3gen_model = resolve_checkpoint_name(
+            s3gen_model, MULTILINGUAL_S3GEN_MODELS, LANGUAGE_PACK_S3GEN_MODEL,
+            what="multilingual S3Gen model",
+        )
+        pack_dir = Path(
+            snapshot_download(
+                repo_id=repo_id,
+                repo_type="model",
+                revision="main",
+                allow_patterns=[t3_model, s3gen_model, TOKENIZER_FILENAME],
+                token=token,
+            )
+        )
+        shared_dir = Path(
             snapshot_download(
                 repo_id=REPO_ID,
                 repo_type="model",
                 revision="main",
-                allow_patterns=["ve.pt", t3_model, "s3gen.pt", "grapheme_mtl_merged_expanded_v1.json", "conds.pt", "Cangjie5_TC.json"],
-                token=os.getenv("HF_TOKEN"),
+                allow_patterns=SHARED_MULTILINGUAL_FILES,
+                token=token,
             )
         )
-        return cls.from_local(ckpt_dir, device, t3_model=t3_model)
+        return cls.from_local(
+            pack_dir, device, t3_model=t3_model, s3gen_model=s3gen_model, shared_ckpt_dir=shared_dir
+        )
     
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         ## Load reference wav
