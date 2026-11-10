@@ -166,6 +166,19 @@ The Single Language Pack provides dedicated finetunes for priority languages and
 | Portugal Portuguese | [ResembleAI/Chatterbox-Multilingual-pt-pt](https://huggingface.co/ResembleAI/Chatterbox-Multilingual-pt-pt) | [Demo](https://huggingface.co/spaces/ResembleAI/Chatterbox-Multilingual-TTS-pt-pt) |
 | Hindi | [ResembleAI/Chatterbox-Multilingual-hi](https://huggingface.co/ResembleAI/Chatterbox-Multilingual-hi) | [Demo](https://huggingface.co/spaces/ResembleAI/Chatterbox-Multilingual-TTS-hi) |
 
+Load a pack by passing its repo id; the pack's T3 finetune and the v3 S3Gen are used, and the shared voice encoder, tokenizer and built-in voice come from the base `ResembleAI/chatterbox` repo:
+
+```python
+from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+
+model = ChatterboxMultilingualTTS.from_pretrained(
+    device=device, repo_id="ResembleAI/Chatterbox-Multilingual-pt-br"
+)
+wav = model.generate("Olá, tudo bem com você?", language_id="pt")
+```
+
+From local files, `from_local(pack_dir, device, t3_model="t3_pt_br.safetensors", s3gen_model="v3", shared_ckpt_dir=base_dir)` does the same; `s3gen_model` also accepts `"v2"`, `"v3"` or a `.pt` / `.safetensors` filename for the general multilingual model.
+
 ## Original Chatterbox Tips
 - **General Use (TTS and Voice Agents):**
   - Ensure that the reference clip matches the specified language tag. Otherwise, language transfer outputs may inherit the accent of the reference clip’s language. To mitigate this, set `cfg_weight` to `0`.
