@@ -1,0 +1,7 @@
+[package]
+name = "candle-nn"
+version = "0.8.0"
+edition = "2021"
+
+[dependencies]
+candle-core = { path = "../candle-core" }

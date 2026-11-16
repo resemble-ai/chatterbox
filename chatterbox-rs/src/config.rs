@@ -1,6 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LlamaConfig {
     pub vocab_size: usize,
     pub max_position_embeddings: usize,
@@ -51,7 +49,7 @@ impl Default for LlamaConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct T3Config {
     pub start_text_token: u32,
     pub stop_text_token: u32,

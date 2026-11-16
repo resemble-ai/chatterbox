@@ -1,5 +1,5 @@
 use candle_core::{Result, Tensor};
-use candle_nn::{Dropout, Linear, Module, ModuleT, VarBuilder};
+use candle_nn::{Dropout, Linear, Module, VarBuilder};
 
 #[derive(Debug)]
 pub struct MultiHeadedAttention {

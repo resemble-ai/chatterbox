@@ -1,4 +1,4 @@
-use candle_core::{DType, Result, Tensor, ModuleT};
+use candle_core::{DType, Result, Tensor};
 use candle_nn::{conv1d, Conv1d, Conv1dConfig, Module, batch_norm, BatchNorm, layer_norm, LayerNorm, LayerNormConfig};
 
 pub enum NormType {

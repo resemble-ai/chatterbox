@@ -3,13 +3,13 @@ use candle_core::{Result as CandleResult, Tensor};
 use candle_nn::VarBuilder;
 
 pub struct T3 {
-    config: T3Config,
+    _config: T3Config,
     // Add real layers here later
 }
 
 impl T3 {
-    pub fn load(_vb: VarBuilder, config: T3Config) -> CandleResult<Self> {
-        Ok(Self { config })
+    pub fn load(_vb: VarBuilder, _config: T3Config) -> CandleResult<Self> {
+        Ok(Self { _config })
     }
 
     pub fn generate(

@@ -1,0 +1,12 @@
+/home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-nn/target/debug/deps/candle_core-c3ca7d604ae0bd55.d: /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/lib.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/device.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/dtype.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/error.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/module.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/ops.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/shape.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/tensor.rs
+
+/home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-nn/target/debug/deps/libcandle_core-c3ca7d604ae0bd55.rmeta: /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/lib.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/device.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/dtype.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/error.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/module.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/ops.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/shape.rs /home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/tensor.rs
+
+/home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/lib.rs:
+/home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/device.rs:
+/home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/dtype.rs:
+/home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/error.rs:
+/home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/module.rs:
+/home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/ops.rs:
+/home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/shape.rs:
+/home/dan/scratch/jules_work/chatterbox-sss/chatterbox-rs/crates/candle-core/src/tensor.rs:

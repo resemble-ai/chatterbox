@@ -1,7 +1,8 @@
 use candle_core::{Result, Tensor, Module};
-use candle_nn::{VarBuilder, LayerNorm};
+use candle_nn::VarBuilder;
 
 pub struct PreLookaheadLayer {
+    #[allow(dead_code)]
     channels: usize,
     pre_lookahead_len: usize,
 }

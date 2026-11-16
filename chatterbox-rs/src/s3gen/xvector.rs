@@ -1,4 +1,3 @@
-use candle_core::ModuleT;
 use candle_core::{Result, Tensor};
 use candle_nn::{
     batch_norm, conv1d, conv2d, BatchNorm, Conv1d, Conv1dConfig, Conv2d, Conv2dConfig, Module,

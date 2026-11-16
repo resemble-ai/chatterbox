@@ -3,11 +3,10 @@ name = "chatterbox-rs"
 version = "0.1.0"
 edition = "2021"
 
+# 100% Zero External Dependencies - Pure Sovereign Rust std
 [dependencies]
-candle-core = "0.8.0"
-candle-nn = "0.8.0"
-tokenizers = "0.19.1"
-hound = "3.5.1"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-anyhow = "1.0"
+candle-core = { path = "crates/candle-core" }
+candle-nn = { path = "crates/candle-nn" }
+tokenizers = { path = "crates/tokenizers" }
+hound = { path = "crates/hound" }
+anyhow = { path = "crates/anyhow" }

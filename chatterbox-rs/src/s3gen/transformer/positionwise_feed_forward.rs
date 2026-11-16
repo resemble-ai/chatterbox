@@ -1,4 +1,4 @@
-use candle_core::{Result, Tensor, Module, DType};
+use candle_core::{Result, Tensor, Module};
 use candle_nn::{linear, Linear, linear_no_bias, VarBuilder};
 
 use super::activation::Swish;
@@ -188,7 +188,7 @@ impl Module for MoEFFNLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use candle_core::Device;
+    use candle_core::{Device, DType};
     use candle_nn::VarMap;
 
     #[test]
