@@ -86,6 +86,10 @@ All 16 unit tests currently pass:
 
 Porting progress is actively tracked in [`todo.md`](todo.md). Confirmed ported Python source files are phased out as their native Rust counterparts reach verified mathematical parity.
 
+### Mission Management
+
+This PR demonstrates the workflow for managing missions (translation tasks) in chatterbox-sss using git and GitHub CLI, as the Jules CLI requires Google OAuth authentication that isn't available in this environment.
+
 ---
 
 ## License
