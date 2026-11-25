@@ -167,11 +167,14 @@ class ChineseCangjieConverter:
     def _load_cangjie_mapping(self, model_dir=None):
         """Load Cangjie mapping from HuggingFace model repository."""        
         try:
-            cangjie_file = hf_hub_download(
-                repo_id=REPO_ID,
-                filename="Cangjie5_TC.json",
-                cache_dir=model_dir
-            )
+            if model_dir is None:
+                cangjie_file = hf_hub_download(
+                    repo_id=REPO_ID,
+                    filename="Cangjie5_TC.json",
+                    cache_dir=model_dir
+                )
+            else:
+                cangjie_file = os.path.join(model_dir, "Cangjie5_TC.json")
             
             with open(cangjie_file, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
